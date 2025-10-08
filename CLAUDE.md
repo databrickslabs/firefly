@@ -1,0 +1,1 @@
+- when testint build always run pnpm run testBuild

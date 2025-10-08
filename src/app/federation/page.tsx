@@ -1,32 +1,4 @@
-"use client";
-
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { useSession } from "@/lib/auth-client";
-
 export default function FederationPage() {
-  const router = useRouter();
-  const { data: session, isPending } = useSession();
-
-  useEffect(() => {
-    // Redirect to dashboard if already logged in
-    if (!isPending && session) {
-      router.push("/federation/dashboard");
-    }
-  }, [session, isPending, router]);
-
-  // Show loading state while checking session
-  if (isPending) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-blue-50 to-white dark:from-blue-950/20 dark:to-background">
-        <div className="text-center space-y-4">
-          <div className="animate-spin w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full mx-auto"></div>
-          <p className="text-muted-foreground">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-8 bg-gradient-to-b from-blue-50 to-white dark:from-blue-950/20 dark:to-background">
       <div className="max-w-4xl mx-auto w-full space-y-8">
