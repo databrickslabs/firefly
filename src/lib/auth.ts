@@ -31,51 +31,14 @@ export const auth = betterAuth({
           tokenUrl: `${process.env.DATABRICKS_u2M_URL}/oidc/v1/token`,
           scopes: ["all-apis", "offline_access"],
           pkce: true, // Enable PKCE for Databricks OAuth
-          // Refresh token logic for Databricks
-          refreshAccessToken: async (refreshToken) => {
-            try {
-              const workspaceUrl = process.env.DATABRICKS_u2M_URL;
-              const response = await fetch(`${workspaceUrl}/oidc/v1/token`, {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/x-www-form-urlencoded",
-                },
-                body: new URLSearchParams({
-                  grant_type: "refresh_token",
-                  refresh_token: refreshToken,
-                  client_id: process.env.DATABRICKS_U2M_CLIENT_ID!,
-                  client_secret: process.env.DATABRICKS_U2M_CLIENT_SECRET!,
-                }),
-              });
-
-              if (!response.ok) {
-                console.error("Failed to refresh Databricks token:", await response.text());
-                throw new Error("Failed to refresh Databricks access token");
-              }
-
-              const data = await response.json();
-              console.log("Successfully refreshed Databricks token");
-
-              return {
-                accessToken: data.access_token,
-                refreshToken: data.refresh_token || refreshToken, // Use new refresh token if provided, otherwise keep the old one
-                accessTokenExpiresAt: data.expires_in
-                  ? new Date(Date.now() + data.expires_in * 1000)
-                  : undefined,
-              };
-            } catch (error) {
-              console.error("Error refreshing Databricks token:", error);
-              throw error;
-            }
-          },
           // Databricks doesn't have a userinfo endpoint, so we decode the JWT access token
           getUserInfo: async (tokens) => {
             try {
               // Log the tokens structure to understand what we're receiving
               console.log("Received tokens:", JSON.stringify(tokens, null, 2));
 
-              // Check if access_token exists and is a string
-              const accessToken = tokens.accessToken || tokens.access_token;
+              // Check if accessToken exists and is a string
+              const accessToken = tokens.accessToken;
 
               if (!accessToken || typeof accessToken !== 'string') {
                 console.error("Invalid access token type:", typeof accessToken);

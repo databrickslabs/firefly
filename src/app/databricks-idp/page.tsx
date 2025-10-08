@@ -1,12 +1,12 @@
 "use client";
 
 import { authClient } from "@/lib/auth-client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useSession } from "@/lib/auth-client";
 import Link from "next/link";
 
-export default function DatabricksIdpPage() {
+function DatabricksIdpContent() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const searchParams = useSearchParams();
@@ -180,5 +180,22 @@ export default function DatabricksIdpPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function DatabricksIdpPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-purple-50 to-white dark:from-purple-950/20 dark:to-background">
+          <div className="text-center space-y-4">
+            <div className="animate-spin w-12 h-12 border-4 border-purple-600 border-t-transparent rounded-full mx-auto"></div>
+            <p className="text-muted-foreground">Loading...</p>
+          </div>
+        </div>
+      }
+    >
+      <DatabricksIdpContent />
+    </Suspense>
   );
 }
