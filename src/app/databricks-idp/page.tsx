@@ -89,7 +89,7 @@ export default function DatabricksIdpPage() {
             <div className="text-center space-y-2">
               <h2 className="text-2xl font-semibold">Secure Workspace Access</h2>
               <p className="text-muted-foreground">
-                Authenticate with your Databricks workspace credentials. You'll be securely redirected to complete the login process.
+                Authenticate with your Databricks workspace credentials. You&apos;ll be securely redirected to complete the login process.
               </p>
             </div>
 
@@ -155,7 +155,7 @@ export default function DatabricksIdpPage() {
               </div>
               <h4 className="font-semibold">Click Sign In</h4>
               <p className="text-sm text-muted-foreground">
-                You'll be redirected to your Databricks workspace login page
+                You&apos;ll be redirected to your Databricks workspace login page
               </p>
             </div>
             <div className="text-center space-y-3">
@@ -173,7 +173,7 @@ export default function DatabricksIdpPage() {
               </div>
               <h4 className="font-semibold">Access Dashboard</h4>
               <p className="text-sm text-muted-foreground">
-                You'll be returned here and taken to your personalized dashboard
+                You&apos;ll be returned here and taken to your personalized dashboard
               </p>
             </div>
           </div>

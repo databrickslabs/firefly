@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, boolean, primaryKey } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, boolean } from 'drizzle-orm/pg-core';
 
 // User table - core authentication
 export const user = pgTable('user', {
