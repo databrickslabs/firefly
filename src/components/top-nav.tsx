@@ -33,13 +33,13 @@ export function TopNav({ user, title, basePath }: TopNavProps) {
   };
 
   return (
-    <header className="h-14 border-b bg-background flex items-center px-4 gap-4">
-      {/* Logo/Title */}
-      <Link href={`${basePath}/dashboard`} className="flex items-center">
+    <header className="h-14 border-b bg-background flex items-center justify-between px-4 gap-4">
+      {/* Left Section - Logo/Title */}
+      <Link href={`${basePath}/dashboard`} className="flex items-center flex-shrink-0">
         <h1 className="text-lg font-semibold">{title}</h1>
       </Link>
 
-      {/* Search Bar */}
+      {/* Center Section - Search Bar */}
       <div className="flex-1 max-w-2xl">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -51,8 +51,8 @@ export function TopNav({ user, title, basePath }: TopNavProps) {
         </div>
       </div>
 
-      {/* Right Section */}
-      <div className="flex items-center gap-2">
+      {/* Right Section - Org Switcher & Profile */}
+      <div className="flex items-center gap-2 flex-shrink-0">
         {/* Organization Switcher */}
         <OrgSwitcher />
 
