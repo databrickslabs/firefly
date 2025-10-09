@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { ChevronRight, Database, Folder, Table as TableIcon, Columns } from "lucide-react";
+import { ChevronRight, Database, Folder, Table as TableIcon, Columns, Loader2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Collapsible,
@@ -171,13 +171,15 @@ function CatalogNode({
         </button>
       </CollapsibleTrigger>
       <CollapsibleContent className="pl-6">
-        <SchemaList
-          catalogName={catalog.name}
-          showColumns={showColumns}
-          onSchemaClick={onSchemaClick}
-          onTableClick={onTableClick}
-          selectedItemKey={selectedItemKey}
-        />
+        {isOpen && (
+          <SchemaList
+            catalogName={catalog.name}
+            showColumns={showColumns}
+            onSchemaClick={onSchemaClick}
+            onTableClick={onTableClick}
+            selectedItemKey={selectedItemKey}
+          />
+        )}
       </CollapsibleContent>
     </Collapsible>
   );
@@ -216,8 +218,9 @@ function SchemaList({
 
   if (isLoading) {
     return (
-      <div className="py-2 px-2 text-xs text-muted-foreground">
-        Loading schemas...
+      <div className="py-2 px-2 flex items-center gap-2 text-xs text-muted-foreground">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        <span>Loading schemas...</span>
       </div>
     );
   }
@@ -289,13 +292,15 @@ function SchemaNode({
         </button>
       </CollapsibleTrigger>
       <CollapsibleContent className="pl-6">
-        <TableList
-          catalogName={schema.catalog_name}
-          schemaName={schema.name}
-          showColumns={showColumns}
-          onTableClick={onTableClick}
-          selectedItemKey={selectedItemKey}
-        />
+        {isOpen && (
+          <TableList
+            catalogName={schema.catalog_name}
+            schemaName={schema.name}
+            showColumns={showColumns}
+            onTableClick={onTableClick}
+            selectedItemKey={selectedItemKey}
+          />
+        )}
       </CollapsibleContent>
     </Collapsible>
   );
@@ -336,8 +341,9 @@ function TableList({
 
   if (isLoading) {
     return (
-      <div className="py-2 px-2 text-xs text-muted-foreground">
-        Loading tables...
+      <div className="py-2 px-2 flex items-center gap-2 text-xs text-muted-foreground">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        <span>Loading tables...</span>
       </div>
     );
   }
@@ -433,7 +439,9 @@ function TableNode({
         </button>
       </CollapsibleTrigger>
       <CollapsibleContent className="pl-6">
-        <ColumnList fullName={itemKey.replace("table:", "")} />
+        {isOpen && (
+          <ColumnList fullName={itemKey.replace("table:", "")} />
+        )}
       </CollapsibleContent>
     </Collapsible>
   );
@@ -461,8 +469,9 @@ function ColumnList({ fullName }: ColumnListProps) {
 
   if (isLoading) {
     return (
-      <div className="py-2 px-2 text-xs text-muted-foreground">
-        Loading columns...
+      <div className="py-2 px-2 flex items-center gap-2 text-xs text-muted-foreground">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        <span>Loading columns...</span>
       </div>
     );
   }

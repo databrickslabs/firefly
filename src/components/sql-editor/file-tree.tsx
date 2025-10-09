@@ -65,8 +65,17 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
   const [newItemName, setNewItemName] = React.useState("");
   const [targetParentPath, setTargetParentPath] = React.useState<string>(MONACO_ROOT_PATH);
 
+  // Track items being created that should show loading indicator in tree
+  const [pendingCreations, setPendingCreations] = React.useState<Map<string, { type: 'file' | 'folder'; name: string }>>(new Map());
+
   // Store files by parent path
   const [filesByPath, setFilesByPath] = React.useState<Map<string, WorkspaceFile[]>>(new Map());
+
+  // Ref to access latest filesByPath in async callbacks
+  const filesByPathRef = React.useRef(filesByPath);
+  React.useEffect(() => {
+    filesByPathRef.current = filesByPath;
+  }, [filesByPath]);
 
   // Fetch workspace files for root
   const { data, isLoading, error, refetch } = useQuery<ListResponse>({
@@ -95,9 +104,16 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
     }
   }, [data]);
 
+  // Track which folders are currently loading
+  const [loadingFolders, setLoadingFolders] = React.useState<Set<string>>(new Set());
+
+  // Track pending operations (create/delete) on specific paths
+  const [pendingOperations, setPendingOperations] = React.useState<Map<string, 'creating' | 'deleting'>>(new Map());
+
   // Fetch folder contents mutation
   const fetchFolderMutation = useMutation({
     mutationFn: async (folderPath: string) => {
+      setLoadingFolders((prev) => new Set(prev).add(folderPath));
       const response = await fetch(
         `/api/databricks/workspace/list?path=${encodeURIComponent(folderPath)}`
       );
@@ -110,6 +126,18 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
       setFilesByPath((prev) => {
         const next = new Map(prev);
         next.set(path, data.objects || []);
+        return next;
+      });
+      setLoadingFolders((prev) => {
+        const next = new Set(prev);
+        next.delete(path);
+        return next;
+      });
+    },
+    onError: (_, folderPath) => {
+      setLoadingFolders((prev) => {
+        const next = new Set(prev);
+        next.delete(folderPath);
         return next;
       });
     },
@@ -134,6 +162,9 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
   // Create file mutation
   const createFileMutation = useMutation({
     mutationFn: async ({ path, content }: { path: string; content: string }) => {
+      const parentPath = path.substring(0, path.lastIndexOf('/'));
+      setPendingOperations((prev) => new Map(prev).set(parentPath, 'creating'));
+
       const response = await fetch("/api/databricks/workspace/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -150,21 +181,74 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
       }
       return { path, result: await response.json() };
     },
-    onSuccess: ({ path }) => {
-      // Refresh the parent folder
+    onSuccess: async ({ path }) => {
       const parentPath = path.substring(0, path.lastIndexOf('/'));
-      if (filesByPath.has(parentPath)) {
-        fetchFolderMutation.mutate(parentPath);
-      }
-      queryClient.invalidateQueries({ queryKey: ["workspace-files"] });
-      setCreateFileDialogOpen(false);
-      setNewItemName("");
+
+      // Clear pending operations
+      setPendingOperations((prev) => {
+        const next = new Map(prev);
+        next.delete(parentPath);
+        return next;
+      });
+
+      // Start polling for the file to appear with 10s timeout
+      const startTime = Date.now();
+      const pollInterval = 500; // Poll every 500ms
+      const timeout = 10000; // 10 second timeout
+
+      const pollForFile = async (): Promise<void> => {
+        if (Date.now() - startTime > timeout) {
+          // Timeout - remove pending creation indicator
+          console.log('Timeout waiting for file to appear');
+          setPendingCreations((prev) => {
+            const next = new Map(prev);
+            next.delete(parentPath);
+            return next;
+          });
+          return;
+        }
+
+        // Refresh the parent folder
+        await fetchFolderMutation.mutateAsync(parentPath);
+        await queryClient.refetchQueries({ queryKey: ["workspace-files", MONACO_ROOT_PATH] });
+
+        // Check if file now exists in filesByPath using the ref to get latest state
+        const currentFiles = filesByPathRef.current.get(parentPath) || [];
+        const fileExists = currentFiles.some(f => f.path === path);
+
+        if (fileExists) {
+          // File found! Remove pending creation indicator
+          console.log('File found in tree, removing indicator');
+          setPendingCreations((prev) => {
+            const next = new Map(prev);
+            next.delete(parentPath);
+            return next;
+          });
+        } else {
+          // File not found yet, poll again
+          setTimeout(() => pollForFile(), pollInterval);
+        }
+      };
+
+      // Start polling
+      pollForFile();
+    },
+    onError: (_, { path }) => {
+      const parentPath = path.substring(0, path.lastIndexOf('/'));
+      setPendingOperations((prev) => {
+        const next = new Map(prev);
+        next.delete(parentPath);
+        return next;
+      });
     },
   });
 
   // Create folder mutation
   const createFolderMutation = useMutation({
     mutationFn: async (path: string) => {
+      const parentPath = path.substring(0, path.lastIndexOf('/'));
+      setPendingOperations((prev) => new Map(prev).set(parentPath, 'creating'));
+
       const response = await fetch("/api/databricks/workspace/mkdirs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -175,21 +259,73 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
       }
       return { path, result: await response.json() };
     },
-    onSuccess: ({ path }) => {
-      // Refresh the parent folder
+    onSuccess: async ({ path }) => {
       const parentPath = path.substring(0, path.lastIndexOf('/'));
-      if (filesByPath.has(parentPath)) {
-        fetchFolderMutation.mutate(parentPath);
-      }
-      queryClient.invalidateQueries({ queryKey: ["workspace-files"] });
-      setCreateFolderDialogOpen(false);
-      setNewItemName("");
+
+      // Clear pending operations
+      setPendingOperations((prev) => {
+        const next = new Map(prev);
+        next.delete(parentPath);
+        return next;
+      });
+
+      // Start polling for the folder to appear with 10s timeout
+      const startTime = Date.now();
+      const pollInterval = 500; // Poll every 500ms
+      const timeout = 10000; // 10 second timeout
+
+      const pollForFolder = async (): Promise<void> => {
+        if (Date.now() - startTime > timeout) {
+          // Timeout - remove pending creation indicator
+          console.log('Timeout waiting for folder to appear');
+          setPendingCreations((prev) => {
+            const next = new Map(prev);
+            next.delete(parentPath);
+            return next;
+          });
+          return;
+        }
+
+        // Refresh the parent folder
+        await fetchFolderMutation.mutateAsync(parentPath);
+        await queryClient.refetchQueries({ queryKey: ["workspace-files", MONACO_ROOT_PATH] });
+
+        // Check if folder now exists in filesByPath using the ref to get latest state
+        const currentFiles = filesByPathRef.current.get(parentPath) || [];
+        const folderExists = currentFiles.some(f => f.path === path);
+
+        if (folderExists) {
+          // Folder found! Remove pending creation indicator
+          console.log('Folder found in tree, removing indicator');
+          setPendingCreations((prev) => {
+            const next = new Map(prev);
+            next.delete(parentPath);
+            return next;
+          });
+        } else {
+          // Folder not found yet, poll again
+          setTimeout(() => pollForFolder(), pollInterval);
+        }
+      };
+
+      // Start polling
+      pollForFolder();
+    },
+    onError: (_, path) => {
+      const parentPath = path.substring(0, path.lastIndexOf('/'));
+      setPendingOperations((prev) => {
+        const next = new Map(prev);
+        next.delete(parentPath);
+        return next;
+      });
     },
   });
 
   // Delete mutation
   const deleteMutation = useMutation({
     mutationFn: async ({ path, isDirectory }: { path: string; isDirectory: boolean }) => {
+      setPendingOperations((prev) => new Map(prev).set(path, 'deleting'));
+
       const response = await fetch("/api/databricks/workspace/delete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -203,15 +339,31 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
       }
       return { path, result: await response.json() };
     },
-    onSuccess: ({ path }) => {
-      // Refresh the parent folder
+    onSuccess: async ({ path }) => {
       const parentPath = path.substring(0, path.lastIndexOf('/'));
-      if (filesByPath.has(parentPath)) {
-        fetchFolderMutation.mutate(parentPath);
-      }
-      queryClient.invalidateQueries({ queryKey: ["workspace-files"] });
+
+      // Always refresh the parent folder (or root if it's the parent)
+      // Use mutateAsync to ensure we wait for completion
+      await fetchFolderMutation.mutateAsync(parentPath);
+
+      // Also invalidate and refetch the root query to ensure everything is fresh
+      await queryClient.refetchQueries({ queryKey: ["workspace-files", MONACO_ROOT_PATH] });
+
+      // Now close the dialog and clear states
+      setPendingOperations((prev) => {
+        const next = new Map(prev);
+        next.delete(path);
+        return next;
+      });
       setDeleteDialogOpen(false);
       setContextMenuPath(null);
+    },
+    onError: (_, { path }) => {
+      setPendingOperations((prev) => {
+        const next = new Map(prev);
+        next.delete(path);
+        return next;
+      });
     },
   });
 
@@ -265,6 +417,22 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
 
     const allPaths = data?.objects?.map((obj) => obj.path) || [];
     const filePath = createUniqueFilePath(targetParentPath, newItemName, allPaths);
+    const fileName = filePath.substring(filePath.lastIndexOf('/') + 1);
+
+    // Make sure parent folder is expanded so user can see the indicator
+    setExpandedPaths((prev) => new Set(prev).add(targetParentPath));
+
+    // Add to pending creations BEFORE starting the mutation
+    setPendingCreations((prev) => {
+      const next = new Map(prev);
+      next.set(targetParentPath, { type: 'file', name: fileName });
+      console.log('Added pending creation for file:', fileName, 'in parent:', targetParentPath, 'Map size:', next.size);
+      return next;
+    });
+
+    // Close dialog immediately
+    setCreateFileDialogOpen(false);
+    setNewItemName("");
 
     createFileMutation.mutate({
       path: filePath,
@@ -280,6 +448,22 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
 
     const allPaths = data?.objects?.map((obj) => obj.path) || [];
     const folderPath = createUniqueFilePath(targetParentPath, newItemName, allPaths);
+    const folderName = folderPath.substring(folderPath.lastIndexOf('/') + 1);
+
+    // Make sure parent folder is expanded so user can see the indicator
+    setExpandedPaths((prev) => new Set(prev).add(targetParentPath));
+
+    // Add to pending creations BEFORE starting the mutation
+    setPendingCreations((prev) => {
+      const next = new Map(prev);
+      next.set(targetParentPath, { type: 'folder', name: folderName });
+      console.log('Added pending creation for folder:', folderName, 'in parent:', targetParentPath, 'Map size:', next.size);
+      return next;
+    });
+
+    // Close dialog immediately
+    setCreateFolderDialogOpen(false);
+    setNewItemName("");
 
     createFolderMutation.mutate(folderPath);
   };
@@ -352,24 +536,68 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
           </div>
         ) : (
           <div className="py-1">
+            {/* Show creation indicator for root-level pending items */}
+            {pendingCreations.has(MONACO_ROOT_PATH) && (
+              <div
+                className="flex items-center gap-2 px-2 py-1 text-xs text-green-600"
+                style={{ paddingLeft: 8 }}
+              >
+                <Loader2 className="h-3 w-3 animate-spin" />
+                <span className="font-medium">
+                  Creating {pendingCreations.get(MONACO_ROOT_PATH)?.name}...
+                </span>
+              </div>
+            )}
             {flatTree.map((node) => (
-              <FileTreeItem
-                key={node.path}
-                node={node}
-                isExpanded={expandedPaths.has(node.path)}
-                isSelected={selectedFilePath === node.path}
-                onClick={() => handleFileClick(node)}
-                onNewFile={() => handleNewFile(node.path)}
-                onNewFolder={() => handleNewFolder(node.path)}
-                onDelete={() => handleDelete(node.path)}
-              />
+              <React.Fragment key={node.path}>
+                <FileTreeItem
+                  node={node}
+                  isExpanded={expandedPaths.has(node.path)}
+                  isSelected={selectedFilePath === node.path}
+                  onClick={() => handleFileClick(node)}
+                  onNewFile={() => handleNewFile(node.path)}
+                  onNewFolder={() => handleNewFolder(node.path)}
+                  onDelete={() => handleDelete(node.path)}
+                  isDeleting={pendingOperations.get(node.path) === 'deleting'}
+                />
+                {/* Show loading indicator right after the expanded folder when loading children */}
+                {node.isDirectory && expandedPaths.has(node.path) && loadingFolders.has(node.path) && (
+                  <div
+                    className="flex items-center gap-2 px-2 py-1 text-xs text-muted-foreground"
+                    style={{ paddingLeft: (node.level + 1) * 12 + 8 }}
+                  >
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    <span>Loading...</span>
+                  </div>
+                )}
+                {/* Show green creation indicator for pending items */}
+                {node.isDirectory && expandedPaths.has(node.path) && pendingCreations.has(node.path) && (
+                  <div
+                    className="flex items-center gap-2 px-2 py-1 text-xs text-green-600"
+                    style={{ paddingLeft: (node.level + 1) * 12 + 8 }}
+                  >
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    <span className="font-medium">
+                      Creating {pendingCreations.get(node.path)?.name}...
+                    </span>
+                  </div>
+                )}
+              </React.Fragment>
             ))}
           </div>
         )}
       </div>
 
       {/* Create File Dialog */}
-      <AlertDialog open={createFileDialogOpen} onOpenChange={setCreateFileDialogOpen}>
+      <AlertDialog
+        open={createFileDialogOpen}
+        onOpenChange={(open) => {
+          // Prevent closing while mutation is pending
+          if (!createFileMutation.isPending) {
+            setCreateFileDialogOpen(open);
+          }
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Create New File</AlertDialogTitle>
@@ -381,12 +609,15 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
             value={newItemName}
             onChange={(e) => setNewItemName(e.target.value)}
             placeholder="filename.sql"
+            disabled={createFileMutation.isPending}
             onKeyDown={(e) => {
-              if (e.key === "Enter") confirmCreateFile();
+              if (e.key === "Enter" && !createFileMutation.isPending) {
+                confirmCreateFile();
+              }
             }}
           />
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={createFileMutation.isPending}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={confirmCreateFile} disabled={createFileMutation.isPending}>
               {createFileMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Create
@@ -396,7 +627,15 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
       </AlertDialog>
 
       {/* Create Folder Dialog */}
-      <AlertDialog open={createFolderDialogOpen} onOpenChange={setCreateFolderDialogOpen}>
+      <AlertDialog
+        open={createFolderDialogOpen}
+        onOpenChange={(open) => {
+          // Prevent closing while mutation is pending
+          if (!createFolderMutation.isPending) {
+            setCreateFolderDialogOpen(open);
+          }
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Create New Folder</AlertDialogTitle>
@@ -408,12 +647,15 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
             value={newItemName}
             onChange={(e) => setNewItemName(e.target.value)}
             placeholder="Folder Name"
+            disabled={createFolderMutation.isPending}
             onKeyDown={(e) => {
-              if (e.key === "Enter") confirmCreateFolder();
+              if (e.key === "Enter" && !createFolderMutation.isPending) {
+                confirmCreateFolder();
+              }
             }}
           />
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={createFolderMutation.isPending}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={confirmCreateFolder} disabled={createFolderMutation.isPending}>
               {createFolderMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Create
@@ -423,7 +665,15 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
       </AlertDialog>
 
       {/* Delete Dialog */}
-      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+      <AlertDialog
+        open={deleteDialogOpen}
+        onOpenChange={(open) => {
+          // Prevent closing while mutation is pending
+          if (!deleteMutation.isPending) {
+            setDeleteDialogOpen(open);
+          }
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Confirm Delete</AlertDialogTitle>
@@ -432,7 +682,7 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={confirmDelete} disabled={deleteMutation.isPending}>
               {deleteMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Delete
@@ -452,6 +702,7 @@ interface FileTreeItemProps {
   onNewFile: () => void;
   onNewFolder: () => void;
   onDelete: () => void;
+  isDeleting?: boolean;
 }
 
 function FileTreeItem({
@@ -462,6 +713,7 @@ function FileTreeItem({
   onNewFile,
   onNewFolder,
   onDelete,
+  isDeleting = false,
 }: FileTreeItemProps) {
   const paddingLeft = node.level * 12 + 8;
 
@@ -472,30 +724,46 @@ function FileTreeItem({
           className={`
             flex items-center gap-1 px-2 py-1 cursor-pointer hover:bg-accent text-sm
             ${isSelected ? "bg-accent" : ""}
+            ${isDeleting ? "opacity-50" : ""}
           `}
           style={{ paddingLeft }}
           onClick={onClick}
         >
-          {node.isDirectory ? (
+          {isDeleting ? (
             <>
-              {isExpanded ? (
-                <ChevronDown className="h-3 w-3 shrink-0" />
-              ) : (
-                <ChevronRight className="h-3 w-3 shrink-0" />
-              )}
-              {isExpanded ? (
-                <FolderOpen className="h-4 w-4 shrink-0 text-yellow-600" />
-              ) : (
+              <Loader2 className="h-3 w-3 shrink-0 animate-spin text-red-600" />
+              {node.isDirectory ? (
                 <Folder className="h-4 w-4 shrink-0 text-yellow-600" />
+              ) : (
+                <File className="h-4 w-4 shrink-0 text-blue-600" />
               )}
+              <span className="truncate">{node.name}</span>
+              <span className="ml-auto text-xs text-red-600">Deleting...</span>
             </>
           ) : (
             <>
-              <span className="w-3" />
-              <File className="h-4 w-4 shrink-0 text-blue-600" />
+              {node.isDirectory ? (
+                <>
+                  {isExpanded ? (
+                    <ChevronDown className="h-3 w-3 shrink-0" />
+                  ) : (
+                    <ChevronRight className="h-3 w-3 shrink-0" />
+                  )}
+                  {isExpanded ? (
+                    <FolderOpen className="h-4 w-4 shrink-0 text-yellow-600" />
+                  ) : (
+                    <Folder className="h-4 w-4 shrink-0 text-yellow-600" />
+                  )}
+                </>
+              ) : (
+                <>
+                  <span className="w-3" />
+                  <File className="h-4 w-4 shrink-0 text-blue-600" />
+                </>
+              )}
+              <span className="truncate">{node.name}</span>
             </>
           )}
-          <span className="truncate">{node.name}</span>
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
