@@ -46,7 +46,7 @@ export default function FederationAuthenticatedLayout({
 
       {/* Main Layout with Sidebar */}
       <div className="flex-1 flex overflow-hidden">
-        <Sidebar basePath="/federation" />
+        <Sidebar basePath="/federation" userEmail={session.user.email} />
 
         {/* Main Content */}
         <main className="flex-1 overflow-auto bg-background">

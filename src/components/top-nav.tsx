@@ -10,9 +10,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Search, Building2, ChevronDown, User } from "lucide-react";
+import { Search, ChevronDown, User } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
+import { OrgSwitcher } from "@/components/org-switcher";
 
 interface TopNavProps {
   user: {
@@ -52,23 +53,8 @@ export function TopNav({ user, title, basePath }: TopNavProps) {
 
       {/* Right Section */}
       <div className="flex items-center gap-2">
-        {/* Organization Selector */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="gap-2">
-              <Building2 className="h-4 w-4" />
-              <span className="text-sm">Organizations</span>
-              <ChevronDown className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
-            <DropdownMenuLabel>Organizations</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem disabled className="text-muted-foreground text-xs">
-              Not implemented yet
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {/* Organization Switcher */}
+        <OrgSwitcher />
 
         {/* Profile Dropdown */}
         <DropdownMenu>

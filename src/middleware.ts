@@ -5,8 +5,18 @@ import { auth } from "@/lib/auth";
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Only handle login pages
+  // Handle login pages - redirect to dashboard if already logged in
+  // IMPORTANT: Don't redirect if coming from OAuth callback to avoid loops
   if (pathname === "/databricks-idp" || pathname === "/federation") {
+    // Skip session check if there's an error parameter (coming from failed OAuth)
+    const searchParams = request.nextUrl.searchParams;
+    const hasError = searchParams.has("error");
+
+    if (hasError) {
+      // Let the login page show the error
+      return NextResponse.next();
+    }
+
     try {
       // Check if user has a session
       const session = await auth.api.getSession({
@@ -27,9 +37,46 @@ export async function middleware(request: NextRequest) {
     }
   }
 
+  // Allow /admin-login for everyone (public login page)
+  if (pathname === "/admin-login") {
+    return NextResponse.next();
+  }
+
+  // Protect /admin routes - require @databricks.com email
+  if (pathname.startsWith("/admin")) {
+
+    try {
+      const session = await auth.api.getSession({
+        headers: request.headers,
+      });
+
+      if (!session) {
+        // Not logged in - log but don't redirect
+        console.log("[Middleware] No session found for /admin route");
+        // return NextResponse.redirect(new URL("/admin/login", request.url));
+      } else {
+        // Check if user has @databricks.com email
+        const email = session.user?.email;
+        console.log("[Middleware] Session found:", JSON.stringify(session, null, 2));
+        console.log("[Middleware] Checking admin access for email:", email);
+
+        if (!email || !email.toLowerCase().endsWith("@databricks.com")) {
+          // Not an admin - log but don't redirect
+          console.log("[Middleware] Non-admin email detected:", email);
+          // return NextResponse.redirect(new URL("/?error=unauthorized", request.url));
+        } else {
+          console.log("[Middleware] Admin access granted for:", email);
+        }
+      }
+    } catch (error) {
+      console.error("[Middleware] Error checking admin access:", error);
+      // return NextResponse.redirect(new URL("/admin/login", request.url));
+    }
+  }
+
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/databricks-idp", "/federation"],
+  matcher: ["/databricks-idp", "/federation", "/admin/:path*", "/admin-login"],
 };

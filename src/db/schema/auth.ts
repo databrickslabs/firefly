@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, boolean } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, boolean, index } from 'drizzle-orm/pg-core';
 
 // User table - core authentication
 export const user = pgTable('user', {
@@ -21,6 +21,7 @@ export const session = pgTable('session', {
   ipAddress: text('ipAddress'),
   userAgent: text('userAgent'),
   userId: text('userId').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  activeOrganizationId: text('activeOrganizationId').references(() => organization.id, { onDelete: 'set null' }),
 });
 
 // Account table - for OAuth and password authentication
@@ -57,6 +58,8 @@ export const organization = pgTable('organization', {
   slug: text('slug').unique(),
   logo: text('logo'),
   metadata: text('metadata'),
+  workspaceUrl: text('workspaceUrl'),
+  ssoEnabled: boolean('ssoEnabled').notNull().default(true), // SSO enabled by default
   createdAt: timestamp('createdAt').notNull().defaultNow(),
   updatedAt: timestamp('updatedAt').notNull().defaultNow().$onUpdate(() => new Date()),
 });
@@ -84,6 +87,31 @@ export const invitation = pgTable('invitation', {
   updatedAt: timestamp('updatedAt').notNull().defaultNow().$onUpdate(() => new Date()),
 });
 
+// SSO Provider table - for storing SSO provider configurations
+export const ssoProvider = pgTable('ssoProvider', {
+  id: text('id').primaryKey(),
+  issuer: text('issuer').notNull(),
+  domain: text('domain').notNull(),
+  oidcConfig: text('oidcConfig'), // JSON string for OIDC configuration
+  samlConfig: text('samlConfig'), // JSON string for SAML configuration
+  userId: text('userId').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  providerId: text('providerId').notNull().unique(),
+  organizationId: text('organizationId').references(() => organization.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('createdAt').notNull().defaultNow(),
+  updatedAt: timestamp('updatedAt').notNull().defaultNow().$onUpdate(() => new Date()),
+});
+
+// OAuth flow mapping - stores session token OR authorization code to organization
+// Starts as sessionToken, then gets updated to code when callback happens
+export const oauthFlowMapping = pgTable('oauthFlowMapping', {
+  key: text('key').primaryKey(), // Session token initially, then authorization code
+  organizationId: text('organizationId').notNull().references(() => organization.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('createdAt').notNull().defaultNow(),
+}, (table) => ({
+  // Index for cleanup queries by timestamp
+  createdAtIdx: index('oauth_flow_created_at_idx').on(table.createdAt),
+}));
+
 // Type inference
 export type User = typeof user.$inferSelect;
 export type InsertUser = typeof user.$inferInsert;
@@ -102,3 +130,9 @@ export type InsertMember = typeof member.$inferInsert;
 
 export type Invitation = typeof invitation.$inferSelect;
 export type InsertInvitation = typeof invitation.$inferInsert;
+
+export type SsoProvider = typeof ssoProvider.$inferSelect;
+export type InsertSsoProvider = typeof ssoProvider.$inferInsert;
+
+export type OauthFlowMapping = typeof oauthFlowMapping.$inferSelect;
+export type InsertOauthFlowMapping = typeof oauthFlowMapping.$inferInsert;

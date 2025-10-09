@@ -46,7 +46,7 @@ export default function DatabricksAuthenticatedLayout({
 
       {/* Main Layout with Sidebar */}
       <div className="flex-1 flex overflow-hidden">
-        <Sidebar basePath="/databricks-idp" />
+        <Sidebar basePath="/databricks-idp" userEmail={session.user.email} />
 
         {/* Main Content */}
         <main className="flex-1 overflow-auto bg-background">

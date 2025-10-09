@@ -3,6 +3,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { organization, genericOAuth } from "better-auth/plugins";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
+import { eq } from "drizzle-orm";
 import { decodeJwt } from "jose";
 
 export const auth = betterAuth({
@@ -20,59 +21,131 @@ export const auth = betterAuth({
         // TODO: Implement email sending logic
         console.log("Invitation email:", data);
       },
+      schema: {
+        organization: {
+          additionalFields: {
+            workspaceUrl: {
+              type: "string",
+              required: false,
+              input: true,
+            },
+          },
+        },
+      },
     }),
     genericOAuth({
       config: [
+        // Admin account-level OAuth
         {
-          providerId: "databricks-u2m",
+          providerId: "databricks-account",
           clientId: process.env.DATABRICKS_U2M_CLIENT_ID!,
           clientSecret: process.env.DATABRICKS_U2M_CLIENT_SECRET!,
-          authorizationUrl: `${process.env.DATABRICKS_u2M_URL}/oidc/v1/authorize`,
-          tokenUrl: `${process.env.DATABRICKS_u2M_URL}/oidc/v1/token`,
+          authorizationUrl: `https://accounts.cloud.databricks.com/oidc/accounts/${process.env.DATABRICKS_ACCOUNT_ID}/v1/authorize`,
+          tokenUrl: `https://accounts.cloud.databricks.com/oidc/accounts/${process.env.DATABRICKS_ACCOUNT_ID}/v1/token`,
           scopes: ["all-apis", "offline_access"],
-          pkce: true, // Enable PKCE for Databricks OAuth
-          // Databricks doesn't have a userinfo endpoint, so we decode the JWT access token
+          pkce: true,
           getUserInfo: async (tokens) => {
-            try {
-              // Log the tokens structure to understand what we're receiving
-              console.log("Received tokens:", JSON.stringify(tokens, null, 2));
-
-              // Check if accessToken exists and is a string
-              const accessToken = tokens.accessToken;
-
-              if (!accessToken || typeof accessToken !== 'string') {
-                console.error("Invalid access token type:", typeof accessToken);
-                console.error("Token value:", accessToken);
-                throw new Error(`Invalid access token: expected string, got ${typeof accessToken}`);
-              }
-
-              // Decode the JWT access token to extract user information
-              const decoded = decodeJwt(accessToken);
-              console.log("Decoded JWT:", decoded);
-
-              return {
-                id: decoded.sub as string,
-                email: (decoded.email as string) || (decoded.sub as string),
-                name: (decoded.name as string) || (decoded.email as string) || (decoded.sub as string),
-                emailVerified: true, // Databricks users are pre-verified
-              };
-            } catch (error) {
-              console.error("Failed to decode Databricks JWT:", error);
-              throw new Error("Failed to extract user info from Databricks token");
+            const accessToken = tokens.accessToken;
+            if (!accessToken || typeof accessToken !== 'string') {
+              throw new Error(`Invalid access token`);
             }
-          },
-          mapProfileToUser: async (profile) => {
+            const decoded = decodeJwt(accessToken);
             return {
-              id: profile.id,
-              email: profile.email,
-              name: profile.name,
-              emailVerified: profile.emailVerified,
+              id: decoded.sub as string,
+              email: (decoded.email as string) || (decoded.sub as string),
+              name: (decoded.name as string) || (decoded.email as string) || (decoded.sub as string),
+              emailVerified: true,
+            };
+          },
+        },
+        // Workspace OAuth proxy - supports multiple workspaces via providerId encoding
+        // Client uses providerId format: "databricks-workspace-{orgId}"
+        // Proxy extracts orgId, looks up workspace URL, and routes appropriately
+        {
+          providerId: "databricks-workspace",
+          clientId: process.env.DATABRICKS_U2M_CLIENT_ID!,
+          clientSecret: process.env.DATABRICKS_U2M_CLIENT_SECRET!,
+          // Proxy endpoints that extract orgId from providerId
+          authorizationUrl: `${process.env.BETTER_AUTH_URL || "http://localhost:3000"}/api/oauth/databricks/authorize`,
+          tokenUrl: `${process.env.BETTER_AUTH_URL || "http://localhost:3000"}/api/oauth/databricks/token`,
+          redirectURI: `${process.env.BETTER_AUTH_URL || "http://localhost:3000"}/api/oauth/databricks/callback`,
+          scopes: ["all-apis", "offline_access"],
+          pkce: true,
+          getUserInfo: async (tokens) => {
+            const accessToken = tokens.accessToken;
+            if (!accessToken || typeof accessToken !== 'string') {
+              throw new Error(`Invalid access token`);
+            }
+            const decoded = decodeJwt(accessToken);
+            return {
+              id: decoded.sub as string,
+              email: (decoded.email as string) || (decoded.sub as string),
+              name: (decoded.name as string) || (decoded.email as string) || (decoded.sub as string),
+              emailVerified: true,
             };
           },
         },
       ],
     }),
   ],
+  databaseHooks: {
+    session: {
+      create: {
+        before: async (session) => {
+          console.log("=== SESSION CREATE HOOK ===");
+          console.log("User ID:", session.userId);
+
+          // Get user's memberships
+          const memberships = await db
+            .select()
+            .from(schema.member)
+            .where(eq(schema.member.userId, session.userId));
+
+          if (memberships.length === 0) {
+            console.log("User has no memberships, creating session without active org");
+            return { data: session };
+          }
+
+          const memberOrgIds = memberships.map(m => m.organizationId);
+          console.log("User belongs to orgs:", memberOrgIds);
+
+          // Try to find the most recent OAuth flow for this user's orgs
+          const recentFlows = await db
+            .select()
+            .from(schema.oauthFlowMapping)
+            .orderBy(schema.oauthFlowMapping.createdAt)
+            .limit(50);
+
+          console.log("Total recent OAuth flows:", recentFlows.length);
+
+          // Find the most recent flow matching one of user's orgs
+          let targetOrgId: string | null = null;
+          for (const flow of recentFlows.reverse()) { // Most recent first
+            if (memberOrgIds.includes(flow.organizationId)) {
+              targetOrgId = flow.organizationId;
+              console.log("Found matching OAuth flow for org:", targetOrgId, "created:", flow.createdAt);
+              break;
+            }
+          }
+
+          // Fallback to first membership if no OAuth flow found
+          if (!targetOrgId) {
+            targetOrgId = memberships[0].organizationId;
+            console.log("No matching OAuth flow, using first membership:", targetOrgId);
+          }
+
+          console.log("Setting active org to:", targetOrgId);
+
+          return {
+            data: {
+              ...session,
+              activeOrganizationId: targetOrgId,
+            },
+          };
+        },
+      },
+    },
+  },
   secret: process.env.BETTER_AUTH_SECRET!,
   baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3000",
 });

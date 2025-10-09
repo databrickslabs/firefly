@@ -20,7 +20,18 @@ const getBaseURL = () => {
 export const authClient = createAuthClient({
   baseURL: getBaseURL(),
   plugins: [
-    organizationClient(),
+    organizationClient({
+      schema: {
+        organization: {
+          additionalFields: {
+            workspaceUrl: {
+              type: "string",
+              required: false,
+            },
+          },
+        },
+      },
+    }),
     genericOAuthClient(),
   ],
 });
@@ -30,5 +41,8 @@ export const {
   signOut,
   signUp,
   useSession,
-  organization: orgClient,
+  organization,
 } = authClient;
+
+// Also export organization as orgClient for backwards compatibility
+export const orgClient = organization;

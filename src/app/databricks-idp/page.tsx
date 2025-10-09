@@ -1,36 +1,59 @@
 "use client";
 
-import { authClient } from "@/lib/auth-client";
-import { useState, useEffect, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { useState, Suspense } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-function DatabricksIdpContent() {
+function DatabricksHrdContent() {
+  const router = useRouter();
+  const [email, setEmail] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const searchParams = useSearchParams();
 
-  useEffect(() => {
-    // Check if there's an error from callback
-    const errorParam = searchParams.get("error");
-    if (errorParam === "auth_failed") {
-      setError("Authentication failed. Please try again.");
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!email) {
+      setError("Please enter your email address");
+      return;
     }
-  }, [searchParams]);
 
-  const handleSignIn = async () => {
     try {
       setIsLoading(true);
       setError(null);
 
-      await authClient.signIn.oauth2({
-        providerId: "databricks-u2m",
-        callbackURL: "/databricks-idp/dashboard",
-        errorCallbackURL: "/databricks-idp?error=auth_failed",
+      // Call API to lookup organizations for this email
+      const response = await fetch("/api/databricks/hrd/lookup", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email }),
       });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to lookup organizations");
+      }
+
+      const data = await response.json();
+
+      if (data.organizations.length === 0) {
+        setError("No organizations found for this email address");
+        return;
+      }
+
+      if (data.organizations.length === 1) {
+        // Single org - redirect directly to OIDC flow
+        router.push(`/databricks-idp/login?email=${encodeURIComponent(email)}&org=${data.organizations[0].id}`);
+      } else {
+        // Multiple orgs - show selection page
+        router.push(`/databricks-idp/select-org?email=${encodeURIComponent(email)}`);
+      }
     } catch (err) {
-      console.error("Failed to initiate Databricks OAuth:", err);
-      setError("Failed to start sign-in process. Please try again.");
+      console.error("Failed to lookup organizations:", err);
+      setError(err instanceof Error ? err.message : "Failed to lookup organizations. Please try again.");
+    } finally {
       setIsLoading(false);
     }
   };
@@ -47,7 +70,7 @@ function DatabricksIdpContent() {
             Databricks Workspace Login
           </h1>
           <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-            Connect to your Databricks workspace using OAuth 2.0 authentication
+            Enter your email to connect to your Databricks workspace
           </p>
         </div>
 
@@ -65,48 +88,67 @@ function DatabricksIdpContent() {
 
             {/* Description */}
             <div className="text-center space-y-2">
-              <h2 className="text-2xl font-semibold">Secure Workspace Access</h2>
+              <h2 className="text-2xl font-semibold">Home Realm Discovery</h2>
               <p className="text-muted-foreground">
-                Authenticate with your Databricks workspace credentials. You&apos;ll be securely redirected to complete the login process.
+                Enter your email address to find your organization&apos;s workspace
               </p>
             </div>
 
-            {/* Error Message */}
-            {error && (
-              <div className="p-4 bg-red-100 dark:bg-red-900/20 border-2 border-red-400 dark:border-red-800 rounded-xl text-red-800 dark:text-red-200 flex items-start gap-3">
-                <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                </svg>
-                <div>
-                  <p className="font-semibold">Authentication Error</p>
-                  <p className="text-sm">{error}</p>
-                </div>
+            {/* Email Form */}
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <div>
+                <label htmlFor="email" className="block text-sm font-medium mb-2">
+                  Email Address
+                </label>
+                <input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="your.email@company.com"
+                  required
+                  disabled={isLoading}
+                  className="w-full px-4 py-3 border-2 border-purple-200 dark:border-purple-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed bg-white dark:bg-slate-800 text-foreground"
+                />
               </div>
-            )}
 
-            {/* Login Button */}
-            <button
-              onClick={handleSignIn}
-              disabled={isLoading}
-              className="w-full px-8 py-5 text-lg font-semibold text-white bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 rounded-xl transition-all duration-200 shadow-xl hover:shadow-2xl disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-[1.02] active:scale-[0.98]"
-            >
-              {isLoading ? (
-                <span className="flex items-center justify-center gap-3">
-                  <svg className="animate-spin h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              {/* Error Message */}
+              {error && (
+                <div className="p-4 bg-red-100 dark:bg-red-900/20 border-2 border-red-400 dark:border-red-800 rounded-xl text-red-800 dark:text-red-200 flex items-start gap-3">
+                  <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
                   </svg>
-                  Connecting to Databricks...
-                </span>
-              ) : (
-                <span className="flex items-center justify-center gap-3">
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
-                  </svg>
-                  Sign in with Databricks
-                </span>
+                  <div>
+                    <p className="font-semibold">Error</p>
+                    <p className="text-sm">{error}</p>
+                  </div>
+                </div>
               )}
-            </button>
+
+              {/* Submit Button */}
+              <button
+                type="submit"
+                disabled={isLoading || !email}
+                className="w-full px-8 py-5 text-lg font-semibold text-white bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 rounded-xl transition-all duration-200 shadow-xl hover:shadow-2xl disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-[1.02] active:scale-[0.98]"
+              >
+                {isLoading ? (
+                  <span className="flex items-center justify-center gap-3">
+                    <svg className="animate-spin h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Looking up organizations...
+                  </span>
+                ) : (
+                  <span className="flex items-center justify-center gap-3">
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                    </svg>
+                    Continue
+                  </span>
+                )}
+              </button>
+            </form>
 
             {/* Info Text */}
             <div className="pt-4 border-t space-y-3">
@@ -131,27 +173,27 @@ function DatabricksIdpContent() {
               <div className="w-12 h-12 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center mx-auto">
                 <span className="text-xl font-bold text-purple-600 dark:text-purple-400">1</span>
               </div>
-              <h4 className="font-semibold">Click Sign In</h4>
+              <h4 className="font-semibold">Enter Email</h4>
               <p className="text-sm text-muted-foreground">
-                You&apos;ll be redirected to your Databricks workspace login page
+                We&apos;ll find all organizations associated with your email
               </p>
             </div>
             <div className="text-center space-y-3">
               <div className="w-12 h-12 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center mx-auto">
                 <span className="text-xl font-bold text-purple-600 dark:text-purple-400">2</span>
               </div>
-              <h4 className="font-semibold">Authenticate</h4>
+              <h4 className="font-semibold">Select Organization</h4>
               <p className="text-sm text-muted-foreground">
-                Log in with your Databricks workspace credentials
+                Choose which workspace you want to access
               </p>
             </div>
             <div className="text-center space-y-3">
               <div className="w-12 h-12 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center mx-auto">
                 <span className="text-xl font-bold text-purple-600 dark:text-purple-400">3</span>
               </div>
-              <h4 className="font-semibold">Access Dashboard</h4>
+              <h4 className="font-semibold">Authenticate</h4>
               <p className="text-sm text-muted-foreground">
-                You&apos;ll be returned here and taken to your personalized dashboard
+                Complete authentication with your workspace credentials
               </p>
             </div>
           </div>
@@ -173,7 +215,7 @@ export default function DatabricksIdpPage() {
         </div>
       }
     >
-      <DatabricksIdpContent />
+      <DatabricksHrdContent />
     </Suspense>
   );
 }
