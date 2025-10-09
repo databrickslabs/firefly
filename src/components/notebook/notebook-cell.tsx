@@ -127,14 +127,14 @@ export function NotebookCell({
   return (
     <div
       className={cn(
-        "group border-l-4 transition-colors rounded-lg border border-border bg-card shadow-sm hover:shadow-md",
+        "group border-l-4 transition-colors rounded-lg border border-border bg-card shadow-sm hover:shadow-md overflow-hidden",
         getExecutionStateColor(),
         isSelected ? "ring-1 ring-primary/30 bg-accent/5" : ""
       )}
       onClick={onSelect}
     >
       {/* Cell Toolbar */}
-      <div className="flex items-center gap-1 px-2 py-1 bg-muted/30 border-b opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="flex items-center gap-1 px-2 py-1 bg-muted/30 border-b opacity-0 group-hover:opacity-100 transition-opacity rounded-t-lg">
         <div className="flex items-center gap-1 text-xs text-muted-foreground mr-2">
           {cell.type === "code" ? (
             <>

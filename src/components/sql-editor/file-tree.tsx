@@ -35,7 +35,6 @@ import { Input } from "@/components/ui/input";
 import {
   type WorkspaceFile,
   type FileTreeNode,
-  MONACO_ROOT_PATH,
   buildFileTree,
   flattenFileTree,
   sortFileTreeNodes,
@@ -43,6 +42,7 @@ import {
   isValidFileName,
   createUniqueFilePath,
 } from "@/lib/workspace-file-manager";
+import { useMonacoRootPath } from "@/providers/user-store-provider";
 
 interface FileTreeProps {
   onFileSelect: (filePath: string) => void;
@@ -55,15 +55,19 @@ interface ListResponse {
 
 export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
   const queryClient = useQueryClient();
+
+  // Get Monaco root path from Zustand store (always available, no loading state)
+  const monacoRootPath = useMonacoRootPath();
+
   const [expandedPaths, setExpandedPaths] = React.useState<Set<string>>(
-    new Set([MONACO_ROOT_PATH])
+    new Set([monacoRootPath])
   );
   const [contextMenuPath, setContextMenuPath] = React.useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
   const [createFileDialogOpen, setCreateFileDialogOpen] = React.useState(false);
   const [createFolderDialogOpen, setCreateFolderDialogOpen] = React.useState(false);
   const [newItemName, setNewItemName] = React.useState("");
-  const [targetParentPath, setTargetParentPath] = React.useState<string>(MONACO_ROOT_PATH);
+  const [targetParentPath, setTargetParentPath] = React.useState<string>(monacoRootPath);
 
   // Track items being created that should show loading indicator in tree
   const [pendingCreations, setPendingCreations] = React.useState<Map<string, { type: 'file' | 'folder'; name: string }>>(new Map());
@@ -79,10 +83,10 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
 
   // Fetch workspace files for root
   const { data, isLoading, error, refetch } = useQuery<ListResponse>({
-    queryKey: ["workspace-files", MONACO_ROOT_PATH],
+    queryKey: ["workspace-files", monacoRootPath],
     queryFn: async () => {
       const response = await fetch(
-        `/api/databricks/workspace/list?path=${encodeURIComponent(MONACO_ROOT_PATH)}`
+        `/api/databricks/workspace/list?path=${encodeURIComponent(monacoRootPath)}`
       );
 
       // If 404, create the .monaco folder
@@ -90,7 +94,7 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
         const createResponse = await fetch("/api/databricks/workspace/mkdirs", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ path: MONACO_ROOT_PATH }),
+          body: JSON.stringify({ path: monacoRootPath }),
         });
 
         if (!createResponse.ok) {
@@ -112,14 +116,14 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
 
   // Update filesByPath when root data changes
   React.useEffect(() => {
-    if (data?.objects) {
+    if (data?.objects && monacoRootPath) {
       setFilesByPath((prev) => {
         const next = new Map(prev);
-        next.set(MONACO_ROOT_PATH, data.objects || []);
+        next.set(monacoRootPath, data.objects || []);
         return next;
       });
     }
-  }, [data]);
+  }, [data, monacoRootPath]);
 
   // Track which folders are currently loading
   const [loadingFolders, setLoadingFolders] = React.useState<Set<string>>(new Set());
@@ -167,9 +171,9 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
       allFiles.push(...files);
     });
     if (allFiles.length === 0) return [];
-    const tree = buildFileTree(allFiles, MONACO_ROOT_PATH);
+    const tree = buildFileTree(allFiles, monacoRootPath);
     return sortFileTreeNodes(tree);
-  }, [filesByPath]);
+  }, [filesByPath, monacoRootPath]);
 
   // Flatten tree for rendering
   const flatTree = React.useMemo(() => {
@@ -227,7 +231,7 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
 
         // Refresh the parent folder
         await fetchFolderMutation.mutateAsync(parentPath);
-        await queryClient.refetchQueries({ queryKey: ["workspace-files", MONACO_ROOT_PATH] });
+        await queryClient.refetchQueries({ queryKey: ["workspace-files", monacoRootPath] });
 
         // Check if file now exists in filesByPath using the ref to get latest state
         const currentFiles = filesByPathRef.current.get(parentPath) || [];
@@ -305,7 +309,7 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
 
         // Refresh the parent folder
         await fetchFolderMutation.mutateAsync(parentPath);
-        await queryClient.refetchQueries({ queryKey: ["workspace-files", MONACO_ROOT_PATH] });
+        await queryClient.refetchQueries({ queryKey: ["workspace-files", monacoRootPath] });
 
         // Check if folder now exists in filesByPath using the ref to get latest state
         const currentFiles = filesByPathRef.current.get(parentPath) || [];
@@ -364,7 +368,7 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
       await fetchFolderMutation.mutateAsync(parentPath);
 
       // Also invalidate and refetch the root query to ensure everything is fresh
-      await queryClient.refetchQueries({ queryKey: ["workspace-files", MONACO_ROOT_PATH] });
+      await queryClient.refetchQueries({ queryKey: ["workspace-files", monacoRootPath] });
 
       // Now close the dialog and clear states
       setPendingOperations((prev) => {
@@ -518,7 +522,7 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => handleNewFile(MONACO_ROOT_PATH)}
+            onClick={() => handleNewFile(monacoRootPath)}
             className="h-6 w-6 p-0"
             title="New File"
           >
@@ -527,7 +531,7 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => handleNewFolder(MONACO_ROOT_PATH)}
+            onClick={() => handleNewFolder(monacoRootPath)}
             className="h-6 w-6 p-0"
             title="New Folder"
           >
@@ -554,14 +558,14 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
         ) : (
           <div className="py-1">
             {/* Show creation indicator for root-level pending items */}
-            {pendingCreations.has(MONACO_ROOT_PATH) && (
+            {pendingCreations.has(monacoRootPath) && (
               <div
                 className="flex items-center gap-2 px-2 py-1 text-xs text-green-600"
                 style={{ paddingLeft: 4 }}
               >
                 <Loader2 className="h-3 w-3 animate-spin" />
                 <span className="font-medium">
-                  Creating {pendingCreations.get(MONACO_ROOT_PATH)?.name}...
+                  Creating {pendingCreations.get(monacoRootPath)?.name}...
                 </span>
               </div>
             )}
@@ -733,7 +737,7 @@ function FileTreeItem({
   isDeleting = false,
 }: FileTreeItemProps) {
   // Calculate padding: base 4px + 12px per level for proper indentation
-  // Subtract 1 from level since we start from MONACO_ROOT_PATH
+  // Subtract 1 from level since we start from monacoRootPath
   const adjustedLevel = Math.max(0, node.level - 1);
   const paddingLeft = 4 + (adjustedLevel * 12);
 

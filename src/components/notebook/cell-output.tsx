@@ -3,6 +3,7 @@
 import * as React from "react";
 import type { CellOutput as CellOutputType } from "@/lib/notebook-manager";
 import { AlertCircle } from "lucide-react";
+import { DataTable } from "./data-table";
 
 interface CellOutputProps {
   outputs: CellOutputType[];
@@ -70,6 +71,25 @@ function OutputRenderer({ output }: { output: CellOutputType }) {
   // Display data or execute result
   if (output.output_type === "display_data" || output.output_type === "execute_result") {
     const data = output.data || {};
+    const metadata = output.metadata || {};
+
+    // Table output (Databricks structured table) - check both data and metadata
+    const tableData =
+      data["application/vnd.databricks.v1+table"] ||
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (metadata["application/vnd.databricks.v1+output"] as any);
+
+    if (tableData && tableData.data && tableData.schema) {
+      return (
+        <div className="my-2">
+          <DataTable
+            data={tableData.data}
+            schema={tableData.schema}
+            truncated={tableData.overflow || tableData.truncated || false}
+          />
+        </div>
+      );
+    }
 
     // Image output (PNG/JPEG)
     if (data["image/png"]) {

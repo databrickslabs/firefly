@@ -370,9 +370,9 @@ export function MonacoMultiFileEditor({
   }, []);
 
   return (
-    <div className="h-full relative">
+    <div className="h-full relative bg-white">
       {!activeFile && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center text-muted-foreground bg-background">
+        <div className="absolute inset-0 z-10 flex items-center justify-center text-muted-foreground bg-slate-50/95 border border-slate-200">
           <div className="text-center">
             <p className="text-sm">No file selected</p>
             <p className="text-xs mt-1">Open a file from the file tree to start editing</p>

@@ -160,9 +160,9 @@ export function QueryResultsTable({
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full bg-white">
       {/* Header with stats and export buttons */}
-      <div className="flex items-center justify-between px-4 py-2 border-b">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 bg-slate-50/80">
         <div className="text-sm text-muted-foreground">
           {rowCount !== undefined && (
             <span className="mr-4">
@@ -206,7 +206,7 @@ export function QueryResultsTable({
       {/* Results table */}
       <div className="flex-1 overflow-auto">
         <Table>
-          <TableHeader className="sticky top-0 bg-background z-10">
+          <TableHeader className="sticky top-0 bg-white z-10">
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id}>
                 {headerGroup.headers.map((header) => (
@@ -226,7 +226,7 @@ export function QueryResultsTable({
             {table.getRowModel().rows.map((row) => {
               const isExpanded = expandedRows.has(row.index);
               return (
-                <TableRow key={row.id} className={cn(isExpanded && "bg-muted/30")}>
+                <TableRow key={row.id} className={cn(isExpanded && "bg-slate-100/70")}>
                   {row.getVisibleCells().map((cell) => (
                     <TableCell
                       key={cell.id}

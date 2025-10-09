@@ -20,7 +20,7 @@ interface NotebookTabsProps {
   onNewTab: () => void;
 }
 
-export function NotebookTabs({
+export const NotebookTabs = React.memo(function NotebookTabs({
   tabs,
   activeTabId,
   onTabClick,
@@ -29,11 +29,12 @@ export function NotebookTabs({
 }: NotebookTabsProps) {
   return (
     <div className="flex items-center gap-0 border-b bg-muted/30 overflow-x-auto">
-      {tabs.map((tab) => (
+      {tabs.map((tab, index) => (
         <div
           key={tab.id}
           className={cn(
-            "group relative flex items-center gap-2 px-4 py-2 border-r cursor-pointer transition-colors min-w-[120px] max-w-[200px]",
+            "group relative flex items-center gap-2 py-2 border-r cursor-pointer transition-colors min-w-[120px] max-w-[200px]",
+            index === 0 ? "pl-2 pr-4" : "px-4",
             activeTabId === tab.id
               ? "bg-background border-b-2 border-b-primary"
               : "hover:bg-accent/50"
@@ -68,4 +69,4 @@ export function NotebookTabs({
       </Button>
     </div>
   );
-}
+});

@@ -2,8 +2,9 @@
 
 import * as React from "react";
 import { flushSync } from "react-dom";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { NotebookCell } from "./notebook-cell";
+import { UnifiedClusterSelector } from "./unified-cluster-selector";
 import type {
   Notebook,
   CellType,
@@ -19,8 +20,21 @@ import {
 } from "@/lib/notebook-manager";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
-import { Plus, Play, Trash2, Save, Loader2, RotateCcw } from "lucide-react";
+import { Plus, Play, Trash2, Save, Loader2, RotateCcw, Square } from "lucide-react";
 import type { ContextStatusResponse } from "@/hooks/use-notebook-context";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,6 +45,37 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+
+interface InsertCellTriggerProps {
+  onInsert: () => void;
+  disabled?: boolean;
+}
+
+function InsertCellTrigger({ onInsert, disabled = false }: InsertCellTriggerProps) {
+  return (
+    <div className="relative flex items-center justify-center py-2 hover:py-5 transition-all duration-150 group">
+      <div className="h-px w-full border-t border-dashed border-muted-foreground/30" />
+      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-7 px-2 text-xs gap-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100 bg-background shadow-sm"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onInsert();
+          }}
+          disabled={disabled}
+          title="Insert cell"
+        >
+          <Plus className="h-3 w-3" />
+          Add Cell
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 interface NotebookEditorProps {
   notebook: Notebook;
@@ -43,6 +88,8 @@ interface NotebookEditorProps {
   onSave?: () => void;
   isSaving?: boolean;
   readOnly?: boolean;
+  onClusterChange?: (clusterId: string) => void;
+  onLanguageChange?: (language: string) => void;
 }
 
 export function NotebookEditor({
@@ -56,6 +103,8 @@ export function NotebookEditor({
   onSave,
   isSaving = false,
   readOnly = false,
+  onClusterChange,
+  onLanguageChange,
 }: NotebookEditorProps) {
   const [selectedCellIndex, setSelectedCellIndex] = React.useState<number>(0);
   const [runningCells, setRunningCells] = React.useState<Set<number>>(new Set());
@@ -64,6 +113,27 @@ export function NotebookEditor({
   const [isRestartingKernel, setIsRestartingKernel] = React.useState(false);
   // Version counter to force remounts during moves - prevents Monaco Editor stale render issues
   const [cellsVersion, setCellsVersion] = React.useState(0);
+  // Track run all state
+  const runAllAbortController = React.useRef<AbortController | null>(null);
+
+  // Fetch clusters to get full cluster details
+  const { data: clustersData } = useQuery({
+    queryKey: ["clusters"],
+    queryFn: async () => {
+      const response = await fetch("/api/databricks/clusters/list");
+      if (!response.ok) {
+        throw new Error("Failed to fetch clusters");
+      }
+      return response.json();
+    },
+    refetchInterval: 30000, // Refresh every 30 seconds
+    refetchOnWindowFocus: true,
+  });
+
+  const selectedCluster = React.useMemo(() => {
+    if (!clusterId || !clustersData?.clusters) return undefined;
+    return clustersData.clusters.find((c: { cluster_id: string }) => c.cluster_id === clusterId);
+  }, [clusterId, clustersData]);
 
   // Execute cell mutation
   const executeCellMutation = useMutation({
@@ -107,9 +177,12 @@ export function NotebookEditor({
     },
   });
 
-  const handleRunCell = (index: number) => {
+  const handleRunCell = (index: number, onComplete?: (success: boolean) => void) => {
     const cell = notebook.cells[index];
-    if (cell.type !== "code" || !cell.source.trim()) return;
+    if (cell.type !== "code" || !cell.source.trim()) {
+      onComplete?.(true);
+      return;
+    }
 
     // Check if context is healthy before executing
     if (!isContextHealthy) {
@@ -126,6 +199,7 @@ export function NotebookEditor({
           ],
         })
       );
+      onComplete?.(false);
       return;
     }
 
@@ -136,7 +210,7 @@ export function NotebookEditor({
       {
         onSuccess: async ({ cellIndex, commandId }) => {
           // Poll for results
-          const pollForResults = async () => {
+          const pollForResults = async (): Promise<void> => {
             const response = await fetch(
               `/api/databricks/contexts/status/${commandId}?cluster_id=${clusterId}&context_id=${contextId}`
             );
@@ -169,6 +243,11 @@ export function NotebookEditor({
                 next.delete(cellIndex);
                 return next;
               });
+
+              // Wait a bit for UI to render before notifying completion
+              setTimeout(() => {
+                onComplete?.(data.status === "Finished");
+              }, 300);
             } else if (data.status === "Running" || data.status === "Queued") {
               // Continue polling
               setTimeout(pollForResults, 1000);
@@ -197,28 +276,71 @@ export function NotebookEditor({
             next.delete(cellIndex);
             return next;
           });
+
+          // Notify completion with failure
+          onComplete?.(false);
         },
       }
     );
   };
 
   const handleRunAll = () => {
-    // Run cells sequentially
-    const runNext = (index: number) => {
-      if (index >= notebook.cells.length) return;
+    // Create abort controller for this run
+    runAllAbortController.current = new AbortController();
+    const signal = runAllAbortController.current.signal;
+
+    // Run cells sequentially, waiting for each to complete
+    const runNext = async (index: number) => {
+      // Check if aborted
+      if (signal.aborted) {
+        console.log("Run All aborted");
+        return;
+      }
+
+      if (index >= notebook.cells.length) {
+        runAllAbortController.current = null;
+        return;
+      }
 
       const cell = notebook.cells[index];
       if (cell.type === "code" && cell.source.trim()) {
-        handleRunCell(index);
-        // Wait for cell to finish before running next
-        // This is simplified - a real implementation would need better sequencing
-        setTimeout(() => runNext(index + 1), 2000);
+        // Wait for cell to complete before continuing
+        await new Promise<void>((resolve) => {
+          handleRunCell(index, (success) => {
+            // Stop if cell failed or aborted
+            if (!success || signal.aborted) {
+              console.log(`Cell ${index} failed or aborted, stopping Run All`);
+              runAllAbortController.current = null;
+              resolve();
+              return;
+            }
+            resolve();
+          });
+        });
+
+        // Check again after cell completes
+        if (signal.aborted) {
+          return;
+        }
+
+        // Continue to next cell
+        await runNext(index + 1);
       } else {
-        runNext(index + 1);
+        // Skip non-code cells
+        await runNext(index + 1);
       }
     };
 
     runNext(0);
+  };
+
+  const handleStopAll = () => {
+    if (runAllAbortController.current) {
+      runAllAbortController.current.abort();
+      runAllAbortController.current = null;
+    }
+    // Clear running cells
+    setRunningCells(new Set());
   };
 
   const handleInsertBelow = (index: number, type: CellType = "code") => {
@@ -327,29 +449,61 @@ export function NotebookEditor({
     }
   };
 
+  // Detach handler - destroys context and clears cluster selection
+  const handleDetach = async () => {
+    if (!clusterId || !contextId) return;
+
+    try {
+      // Destroy the context
+      await fetch("/api/databricks/contexts/destroy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cluster_id: clusterId,
+          context_id: contextId,
+        }),
+      });
+
+      // Clear cluster selection and context
+      if (onClusterChange) {
+        onClusterChange("");
+      }
+      if (onContextChange) {
+        onContextChange(null);
+      }
+
+      // Clear running cells
+      setRunningCells(new Set());
+    } catch (error) {
+      console.error("Failed to detach:", error);
+    }
+  };
+
   const hasRunningCells = runningCells.size > 0;
   const isContextHealthy = contextStatus?.healthy ?? false;
   const contextReadyToExecute = clusterId && contextId && isContextHealthy;
 
   return (
     <div className="h-full flex flex-col">
-      {/* Toolbar */}
-      <div className="px-4 py-2 border-b flex items-center gap-2 bg-background">
+      {/* Compact Toolbar */}
+      <div className="pl-2 pr-4 py-1.5 border-b flex items-center gap-2 bg-background text-sm">
+        {/* Action Buttons - Left Side */}
         <ButtonGroup>
           <Button
             variant="default"
             size="sm"
-            onClick={handleRunAll}
-            disabled={!contextReadyToExecute || hasRunningCells || readOnly}
+            className="h-7 text-xs px-2"
+            onClick={hasRunningCells ? handleStopAll : handleRunAll}
+            disabled={!contextReadyToExecute || readOnly}
           >
             {hasRunningCells ? (
               <>
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                Running...
+                <Square className="h-3 w-3 mr-1" />
+                Stop
               </>
             ) : (
               <>
-                <Play className="h-4 w-4 mr-2" />
+                <Play className="h-3 w-3 mr-1" />
                 Run All
               </>
             )}
@@ -358,83 +512,171 @@ export function NotebookEditor({
           <Button
             variant="outline"
             size="sm"
+            className="h-7 text-xs px-2"
             onClick={() => handleInsertBelow(selectedCellIndex)}
             disabled={readOnly}
+            title="Insert Cell"
           >
-            <Plus className="h-4 w-4 mr-2" />
+            <Plus className="h-3 w-3 mr-1" />
             Insert Cell
           </Button>
 
           <Button
             variant="outline"
             size="sm"
+            className="h-7 text-xs px-2"
             onClick={() => setClearAllDialog(true)}
             disabled={readOnly}
+            title="Clear All Outputs"
           >
-            <Trash2 className="h-4 w-4 mr-2" />
+            <Trash2 className="h-3 w-3 mr-1" />
             Clear All Outputs
           </Button>
 
           <Button
             variant="outline"
             size="sm"
+            className="h-7 text-xs px-2"
             onClick={() => setRestartKernelDialog(true)}
             disabled={!contextReadyToExecute || hasRunningCells || readOnly || isRestartingKernel}
+            title="Restart Kernel"
           >
             {isRestartingKernel ? (
               <>
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                Restarting...
+                <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                Restarting
               </>
             ) : (
               <>
-                <RotateCcw className="h-4 w-4 mr-2" />
+                <RotateCcw className="h-3 w-3 mr-1" />
                 Restart Kernel
               </>
             )}
           </Button>
+
+          {onSave && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs px-2"
+              onClick={onSave}
+              disabled={isSaving}
+            >
+              {isSaving ? (
+                <>
+                  <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                  Saving
+                </>
+              ) : (
+                <>
+                  <Save className="h-3 w-3 mr-1" />
+                  Save
+                </>
+              )}
+            </Button>
+          )}
         </ButtonGroup>
 
         <div className="flex-1" />
 
-        {onSave && (
-          <Button variant="outline" size="sm" onClick={onSave} disabled={isSaving}>
-            {isSaving ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                Saving...
-              </>
-            ) : (
-              <>
-                <Save className="h-4 w-4 mr-2" />
-                Save
-              </>
+        {/* Cluster and Language Selectors - Right Side */}
+        {(onClusterChange || onLanguageChange) && (
+          <>
+            <div className="h-4 w-px bg-border mx-1" />
+
+            {onClusterChange && (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div>
+                      <UnifiedClusterSelector
+                        value={clusterId || undefined}
+                        onValueChange={onClusterChange}
+                        contextHealthy={contextStatus?.healthy}
+                        onDetach={handleDetach}
+                        onClusterActionStart={() => {
+                          // Cluster action started
+                        }}
+                        onClusterActionComplete={() => {
+                          // Cluster action completed
+                        }}
+                      />
+                    </div>
+                  </TooltipTrigger>
+                  {contextId && clusterId && (
+                    <TooltipContent>
+                      {contextStatus?.healthy ? (
+                        <div className="text-xs">
+                          <div className="font-semibold">Context Ready</div>
+                          <div className="text-muted-foreground mt-1">
+                            Context ID: {contextId}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-xs">
+                          <div className="font-semibold">Context Unhealthy</div>
+                          {contextStatus?.reason && (
+                            <div className="text-muted-foreground mt-1">
+                              {contextStatus.reason}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </TooltipContent>
+                  )}
+                </Tooltip>
+              </TooltipProvider>
             )}
-          </Button>
+
+            {onLanguageChange && (
+              <Select value={language} onValueChange={onLanguageChange}>
+                <SelectTrigger className="h-7 w-[100px] text-xs">
+                  <SelectValue placeholder="Language" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="python">Python</SelectItem>
+                  <SelectItem value="sql">SQL</SelectItem>
+                  <SelectItem value="scala">Scala</SelectItem>
+                  <SelectItem value="r">R</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          </>
         )}
       </div>
 
       {/* Cells */}
       <div className="flex-1 overflow-auto pt-4 pb-32 px-4 space-y-4">
-        {notebook.cells.map((cell, index) => (
-          <NotebookCell
-            key={`${cell.id}-v${cellsVersion}`}
-            cell={cell}
-            index={index}
-            isSelected={selectedCellIndex === index}
-            isRunning={runningCells.has(index)}
-            onSelect={() => setSelectedCellIndex(index)}
-            onSourceChange={(source) => handleCellSourceChange(index, source)}
-            onRun={() => handleRunCell(index)}
-            onDelete={() => handleDeleteCell(index)}
-            onMoveUp={index > 0 ? () => handleMoveUp(index) : undefined}
-            onMoveDown={index < notebook.cells.length - 1 ? () => handleMoveDown(index) : undefined}
-            onInsertAbove={() => handleInsertAbove(index)}
-            onInsertBelow={() => handleInsertBelow(index)}
-            onChangeType={(type) => onNotebookChange(updateCellAt(notebook, index, { type }))}
-            readOnly={readOnly}
-          />
-        ))}
+        {notebook.cells.map((cell, index) => {
+          const cellKey = `${cell.id}-v${cellsVersion}`;
+
+          return (
+            <div key={cellKey} className="space-y-2">
+              {index === 0 && (
+                <InsertCellTrigger onInsert={() => handleInsertAbove(0)} disabled={readOnly} />
+              )}
+
+              <NotebookCell
+                cell={cell}
+                index={index}
+                isSelected={selectedCellIndex === index}
+                isRunning={runningCells.has(index)}
+                onSelect={() => setSelectedCellIndex(index)}
+                onSourceChange={(source) => handleCellSourceChange(index, source)}
+                onRun={() => handleRunCell(index)}
+                onDelete={() => handleDeleteCell(index)}
+                onMoveUp={index > 0 ? () => handleMoveUp(index) : undefined}
+                onMoveDown={index < notebook.cells.length - 1 ? () => handleMoveDown(index) : undefined}
+                onInsertAbove={() => handleInsertAbove(index)}
+                onInsertBelow={() => handleInsertBelow(index)}
+                onChangeType={(type) => onNotebookChange(updateCellAt(notebook, index, { type }))}
+                readOnly={readOnly}
+              />
+
+              <InsertCellTrigger onInsert={() => handleInsertBelow(index)} disabled={readOnly} />
+            </div>
+          );
+        })}
       </div>
 
       {/* Clear All Outputs Dialog */}

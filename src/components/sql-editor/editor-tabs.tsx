@@ -4,6 +4,7 @@ import * as React from "react";
 import { X, Circle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getFileName } from "@/lib/workspace-file-manager";
+import { cn } from "@/lib/utils";
 import type { OpenFile } from "@/lib/workspace-file-manager";
 
 interface EditorTabsProps {
@@ -38,7 +39,7 @@ export function EditorTabs({
   return (
     <div
       ref={tabsContainerRef}
-      className="flex items-center gap-0.5 overflow-x-auto bg-muted/30 border-b scrollbar-thin scrollbar-thumb-muted-foreground/20 scrollbar-track-transparent"
+      className="flex items-center gap-1 overflow-x-auto border-b border-slate-200 bg-slate-100/80 px-2 scrollbar-thin scrollbar-thumb-muted-foreground/20 scrollbar-track-transparent"
     >
       {openFiles.map((file) => (
         <EditorTab
@@ -67,12 +68,12 @@ function EditorTab({ file, isActive, onClick, onClose }: EditorTabProps) {
   return (
     <div
       data-path={file.path}
-      className={`
-        group flex items-center gap-2 px-3 py-2 cursor-pointer
-        border-r border-border hover:bg-accent/50 transition-colors
-        min-w-[120px] max-w-[200px]
-        ${isActive ? "bg-background border-b-2 border-b-primary" : "bg-muted/30"}
-      `}
+      className={cn(
+        "group flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors min-w-[120px] max-w-[220px] rounded-t-md border",
+        isActive
+          ? "bg-white text-foreground border-slate-200 border-b-white shadow-sm -mb-px"
+          : "bg-slate-100/80 text-muted-foreground border-transparent hover:bg-slate-100"
+      )}
       onClick={onClick}
       title={file.path}
     >
@@ -83,7 +84,7 @@ function EditorTab({ file, isActive, onClick, onClose }: EditorTabProps) {
       <Button
         variant="ghost"
         size="sm"
-        className="h-4 w-4 p-0 opacity-0 group-hover:opacity-100 hover:bg-destructive/20"
+        className="h-4 w-4 p-0 text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-destructive/10"
         onClick={onClose}
         title="Close"
       >

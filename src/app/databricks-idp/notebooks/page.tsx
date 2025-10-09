@@ -6,7 +6,6 @@ import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { FileTree } from "@/components/sql-editor/file-tree";
 import { CollapsibleSidebar } from "@/components/sql-editor/collapsible-sidebar";
 import { CatalogTreeView } from "@/components/unity-catalog/catalog-tree-view";
-import { ClusterSelector } from "@/components/notebook/cluster-selector";
 import { NotebookEditor } from "@/components/notebook/notebook-editor";
 import { NotebookTabs, type NotebookTab } from "@/components/notebook/notebook-tabs";
 import type { Notebook } from "@/lib/notebook-manager";
@@ -15,7 +14,7 @@ import {
   parseNotebookFile,
   notebookToJson,
 } from "@/lib/notebook-manager";
-import { MONACO_ROOT_PATH } from "@/lib/workspace-file-manager";
+import { useMonacoRootPath } from "@/providers/user-store-provider";
 import { Button } from "@/components/ui/button";
 import { Loader2, FileJson, AlertCircle } from "lucide-react";
 import {
@@ -23,13 +22,6 @@ import {
   saveClusterContext,
 } from "@/lib/cluster-storage";
 import { useCreateContext, useContextStatus } from "@/hooks/use-notebook-context";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -52,9 +44,13 @@ export default function NotebookPage() {
   const queryClient = useQueryClient();
   const sidebarPanelRef = React.useRef<React.ElementRef<typeof Panel>>(null);
 
+  // Get Monaco root path from Zustand store (always available, no loading state)
+  const monacoRootPath = useMonacoRootPath();
+
   const [clusterId, setClusterId] = React.useState<string>("");
   const [contextId, setContextId] = React.useState<string | null>(null);
   const [language, setLanguage] = React.useState<string>("python");
+  const [isSidebarExpanded, setIsSidebarExpanded] = React.useState(true);
 
   // Tab management - start with no notebooks
   const [notebookStates, setNotebookStates] = React.useState<NotebookState[]>([]);
@@ -280,8 +276,8 @@ export default function NotebookPage() {
       fileName += ".ipynb";
     }
 
-    // Prepend MONACO_ROOT_PATH
-    const fullPath = `${MONACO_ROOT_PATH}/${fileName}`;
+    // Prepend monacoRootPath
+    const fullPath = `${monacoRootPath}/${fileName}`;
 
     const notebookJson = notebookToJson(notebook);
     saveNotebookMutation.mutate({
@@ -290,7 +286,7 @@ export default function NotebookPage() {
     });
   };
 
-  const handleNewNotebook = () => {
+  const handleNewNotebook = React.useCallback(() => {
     const newTabId = `untitled-${Date.now()}`;
     setNotebookStates((prev) => [
       ...prev,
@@ -302,26 +298,34 @@ export default function NotebookPage() {
       },
     ]);
     setActiveTabId(newTabId);
-  };
+  }, []);
 
-  // Tab handlers
-  const handleTabClick = (tabId: string) => {
+  // Sidebar expanded change handler
+  const handleSidebarExpandedChange = React.useCallback((isExpanded: boolean) => {
+    setIsSidebarExpanded(isExpanded);
+  }, []);
+
+  // Tab handlers - wrapped in useCallback to prevent re-renders
+  const handleTabClick = React.useCallback((tabId: string) => {
     setActiveTabId(tabId);
-  };
+  }, []);
 
-  const handleTabClose = (tabId: string) => {
-    const filtered = notebookStates.filter((ns) => ns.id !== tabId);
-    setNotebookStates(filtered);
+  const handleTabClose = React.useCallback((tabId: string) => {
+    setNotebookStates((prev) => {
+      const filtered = prev.filter((ns) => ns.id !== tabId);
 
-    // Switch to another tab if closing active tab
-    if (tabId === activeTabId) {
-      if (filtered.length > 0) {
-        setActiveTabId(filtered[0].id);
-      } else {
-        setActiveTabId("");
+      // Switch to another tab if closing active tab
+      if (tabId === activeTabId) {
+        if (filtered.length > 0) {
+          setActiveTabId(filtered[0].id);
+        } else {
+          setActiveTabId("");
+        }
       }
-    }
-  };
+
+      return filtered;
+    });
+  }, [activeTabId]);
 
   // Update active notebook when it changes
   const handleNotebookChange = (updatedNotebook: Notebook) => {
@@ -337,8 +341,8 @@ export default function NotebookPage() {
   // Convert notebook states to tabs
   const tabs: NotebookTab[] = notebookStates.map((ns) => {
     const name = ns.filePath
-      ? ns.filePath.startsWith(MONACO_ROOT_PATH)
-        ? ns.filePath.slice(MONACO_ROOT_PATH.length + 1)
+      ? ns.filePath.startsWith(monacoRootPath)
+        ? ns.filePath.slice(monacoRootPath.length + 1)
         : ns.filePath.split("/").pop() || "Untitled"
       : "Untitled";
 
@@ -359,13 +363,14 @@ export default function NotebookPage() {
           <Panel
             ref={sidebarPanelRef}
             defaultSize={20}
-            minSize={15}
+            minSize={4}
             maxSize={40}
             collapsible={true}
-            collapsedSize={5}
+            collapsedSize={4}
           >
             <CollapsibleSidebar
               panelRef={sidebarPanelRef}
+              onExpandedChange={handleSidebarExpandedChange}
               filesContent={
                 <FileTree
                   onFileSelect={handleFileSelect}
@@ -375,7 +380,9 @@ export default function NotebookPage() {
               catalogContent={<CatalogTreeView showColumns={true} />}
             />
           </Panel>
-          <PanelResizeHandle className="w-1 bg-border hover:bg-accent transition-colors" />
+          {isSidebarExpanded && (
+            <PanelResizeHandle className="w-1 bg-border hover:bg-accent transition-colors" />
+          )}
 
           {/* Right Panel - Notebook Editor */}
           <Panel>
@@ -389,78 +396,10 @@ export default function NotebookPage() {
                 onNewTab={handleNewNotebook}
               />
 
-              {/* Top Toolbar - only show when notebooks are open */}
-              {notebookStates.length > 0 && (
-                <div className="px-4 py-2 border-b flex items-center gap-4 bg-background">
-                  <div className="flex items-center gap-2">
-                    <ClusterSelector
-                      value={clusterId}
-                      onValueChange={handleClusterChange}
-                    />
-
-                    {/* Context Status Indicator */}
-                    {clusterId && (
-                      <div className="relative group">
-                        {contextId && contextStatus ? (
-                          <div
-                            className={`w-3 h-3 rounded-full ${
-                              contextStatus.healthy
-                                ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]"
-                                : "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)]"
-                            } cursor-help`}
-                            title={contextId}
-                          />
-                        ) : (
-                          <div className="w-3 h-3 rounded-full bg-yellow-500 animate-pulse shadow-[0_0_8px_rgba(234,179,8,0.6)]"
-                            title="Creating context..."
-                          />
-                        )}
-
-                        {/* Tooltip */}
-                        <div className="absolute left-0 top-full mt-2 hidden group-hover:block z-50 whitespace-nowrap">
-                          <div className="bg-popover text-popover-foreground px-3 py-2 rounded-md shadow-md border text-sm">
-                            {contextId ? (
-                              <>
-                                <div className="font-semibold">
-                                  {contextStatus?.healthy ? "Context Ready" : "Context Unhealthy"}
-                                </div>
-                                <div className="text-xs text-muted-foreground mt-1">
-                                  Context ID: {contextId}
-                                </div>
-                                {contextStatus?.reason && (
-                                  <div className="text-xs text-muted-foreground mt-1">
-                                    {contextStatus.reason}
-                                  </div>
-                                )}
-                              </>
-                            ) : (
-                              <div>Creating execution context...</div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <Select value={language} onValueChange={setLanguage}>
-                    <SelectTrigger className="w-[150px]">
-                      <SelectValue placeholder="Language" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="python">Python</SelectItem>
-                      <SelectItem value="sql">SQL</SelectItem>
-                      <SelectItem value="scala">Scala</SelectItem>
-                      <SelectItem value="r">R</SelectItem>
-                    </SelectContent>
-                  </Select>
-
-                  <div className="flex-1" />
-                </div>
-              )}
 
               {/* Error Display */}
               {error && (
-                <div className="px-4 py-2 bg-red-500/10 border-b border-red-500/20 flex items-center gap-2">
+                <div className="pl-2 pr-4 py-2 bg-red-500/10 border-b border-red-500/20 flex items-center gap-2">
                   <AlertCircle className="h-4 w-4 text-red-600" />
                   <span className="text-sm text-red-600 dark:text-red-400">{error}</span>
                 </div>
@@ -505,6 +444,8 @@ export default function NotebookPage() {
                     onSave={handleSave}
                     isSaving={saveNotebookMutation.isPending}
                     readOnly={false}
+                    onClusterChange={handleClusterChange}
+                    onLanguageChange={setLanguage}
                   />
                 </div>
               )}

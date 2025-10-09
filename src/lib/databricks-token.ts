@@ -3,11 +3,13 @@ import { headers } from "next/headers";
 import { db } from "@/db";
 import { organization } from "@/db/schema";
 import { eq } from "drizzle-orm";
+import { decodeJwt } from "jose";
 
 export interface DatabricksTokenInfo {
   accessToken: string;
   workspaceUrl: string;
   activeOrganizationId: string;
+  userEmail: string;
 }
 
 export interface TokenError {
@@ -101,12 +103,17 @@ export async function getDatabricksToken(): Promise<
       };
     }
 
+    // Decode JWT to get user email
+    const decoded = decodeJwt(tokenResponse.accessToken);
+    const userEmail = (decoded.email as string) || (decoded.sub as string);
+
     return {
       success: true,
       data: {
         accessToken: tokenResponse.accessToken,
         workspaceUrl,
         activeOrganizationId: session.session.activeOrganizationId,
+        userEmail,
       },
     };
   } catch (error) {

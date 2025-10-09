@@ -25,6 +25,15 @@ export interface CellOutput {
     "image/png"?: string;
     "image/jpeg"?: string;
     "application/json"?: unknown;
+    "application/vnd.databricks.v1+table"?: {
+      data: unknown[][];
+      schema: {
+        name: string;
+        type: string;
+        metadata?: string;
+      }[];
+      truncated?: boolean;
+    };
     [key: string]: unknown;
   };
   metadata?: Record<string, unknown>;
@@ -150,6 +159,47 @@ export function clearAllOutputs(notebook: Notebook): Notebook {
   };
 }
 
+// Helper function to generate HTML table for Databricks compatibility
+function generateTableHTML(
+  data: unknown[][],
+  schema: { name: string; type: string; metadata?: string }[]
+): string {
+  const escapeHtml = (text: unknown): string => {
+    if (text === null || text === undefined) return "";
+    return String(text)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  };
+
+  const headerRow = schema.map((col) => `<th>${escapeHtml(col.name)}</th>`).join("");
+  const bodyRows = data
+    .map((row) => {
+      const cells = row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("");
+      return `<tr>${cells}</tr>`;
+    })
+    .join("");
+
+  return `<style scoped>
+  .table-result-container {
+    max-height: 300px;
+    overflow: auto;
+  }
+  table, th, td {
+    border: 1px solid black;
+    border-collapse: collapse;
+  }
+  th, td {
+    padding: 5px;
+  }
+  th {
+    text-align: left;
+  }
+</style><div class='table-result-container'><table class='table-result'><thead style='background-color: white'><tr>${headerRow}</tr></thead><tbody>${bodyRows}</tbody></table></div>`;
+}
+
 // Convert Databricks command result to notebook cell output
 export function databricksResultToCellOutput(result: {
   status: string;
@@ -164,9 +214,123 @@ export function databricksResultToCellOutput(result: {
   const outputs: CellOutput[] = [];
 
   if (result.status === "Finished" && result.results) {
-    const { resultType, data, fileName, summary } = result.results;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const results = result.results as any;
+    const { resultType, data, fileName, summary } = results;
 
-    if (resultType === "text" || resultType === "table") {
+    console.log("Processing result:", {
+      resultType,
+      dataType: typeof data,
+      isObject: typeof data === "object" && data !== null,
+    });
+
+    // Handle table result - data and schema are direct properties of results
+    if (resultType === "table" && Array.isArray(results.data) && Array.isArray(results.schema)) {
+      console.log("Table detected with data and schema arrays");
+
+      // Generate HTML table for Databricks compatibility
+      const htmlTable = generateTableHTML(results.data, results.schema);
+
+      outputs.push({
+        output_type: "display_data",
+        data: {
+          "text/html": [htmlTable],
+        },
+        metadata: {
+          "application/vnd.databricks.v1+output": {
+            addedWidgets: {},
+            aggData: [],
+            aggError: "",
+            aggOverflow: false,
+            aggSchema: [],
+            aggSeriesLimitReached: false,
+            aggType: "",
+            arguments: {},
+            columnCustomDisplayInfos: {},
+            data: results.data,
+            datasetInfos: [],
+            dbfsResultPath: null,
+            isJsonSchema: results.isJsonSchema !== undefined ? results.isJsonSchema : true,
+            metadata: {},
+            overflow: results.truncated || false,
+            plotOptions: {
+              customPlotOptions: {},
+              displayType: "table",
+              pivotAggregation: null,
+              pivotColumns: null,
+              xColumns: null,
+              yColumns: null,
+            },
+            removedWidgets: [],
+            schema: results.schema,
+            type: "table",
+          },
+        },
+      });
+    } else if (resultType === "table" && typeof data === "object" && data !== null) {
+      // Fallback: check if data is nested inside the data property
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const tableData = data as any;
+
+      console.log("Table data check:", {
+        hasData: Array.isArray(tableData.data),
+        hasSchema: Array.isArray(tableData.schema),
+        dataKeys: Object.keys(tableData),
+      });
+
+      // Check if data is in the expected format (with data and schema arrays)
+      if (Array.isArray(tableData.data) && Array.isArray(tableData.schema)) {
+        // Generate HTML table for Databricks compatibility
+        const htmlTable = generateTableHTML(tableData.data, tableData.schema);
+
+        outputs.push({
+          output_type: "display_data",
+          data: {
+            "text/html": [htmlTable],
+          },
+          metadata: {
+            "application/vnd.databricks.v1+output": {
+              addedWidgets: {},
+              aggData: [],
+              aggError: "",
+              aggOverflow: false,
+              aggSchema: [],
+              aggSeriesLimitReached: false,
+              aggType: "",
+              arguments: {},
+              columnCustomDisplayInfos: {},
+              data: tableData.data,
+              datasetInfos: [],
+              dbfsResultPath: null,
+              isJsonSchema: tableData.isJsonSchema !== undefined ? tableData.isJsonSchema : true,
+              metadata: {},
+              overflow: tableData.truncated || false,
+              plotOptions: {
+                customPlotOptions: {},
+                displayType: "table",
+                pivotAggregation: null,
+                pivotColumns: null,
+                xColumns: null,
+                yColumns: null,
+              },
+              removedWidgets: [],
+              schema: tableData.schema,
+              type: "table",
+            },
+          },
+        });
+      } else {
+        // Fallback to text if table structure is not as expected
+        console.warn("Table data structure not as expected:", tableData);
+        outputs.push({
+          output_type: "execute_result",
+          data: {
+            "text/plain": JSON.stringify(data, null, 2),
+          },
+          execution_count: null,
+        });
+      }
+    } else if (resultType === "text") {
       const textData = typeof data === "string" ? data : JSON.stringify(data, null, 2);
 
       // Check if the text data is actually HTML (e.g., Plotly charts)
@@ -293,12 +457,22 @@ export function notebookToJson(notebook: Notebook): string {
   const cleaned = {
     cells: notebook.cells.map(cell => ({
       cell_type: cell.type,
+      execution_count: cell.type === "code" ? (cell.executionCount ?? 0) : undefined,
+      metadata: cell.type === "code" ? {
+        "application/vnd.databricks.v1+cell": {
+          cellMetadata: {
+            byteLimit: 2048000,
+            rowLimit: 10000,
+          },
+          inputWidgets: {},
+          nuid: generateCellId().replace("cell-", ""),
+          showTitle: false,
+          tableResultSettingsMap: {},
+          title: "",
+        },
+      } : {},
+      outputs: cell.type === "code" ? (cell.outputs || []) : undefined,
       source: cell.source,
-      ...(cell.type === "code" && {
-        outputs: cell.outputs || [],
-        execution_count: cell.executionCount || null,
-      }),
-      metadata: {},
     })),
     metadata: notebook.metadata,
     nbformat: notebook.nbformat,

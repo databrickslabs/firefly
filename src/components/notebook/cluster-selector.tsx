@@ -37,6 +37,7 @@ interface ClusterSelectorProps {
   onValueChange: (clusterId: string) => void;
   refreshTrigger?: number;
   onClusterStateChange?: (state: Cluster["state"] | undefined) => void;
+  contextHealthy?: boolean;
 }
 
 export function ClusterSelector({
@@ -44,6 +45,7 @@ export function ClusterSelector({
   onValueChange,
   refreshTrigger,
   onClusterStateChange,
+  contextHealthy,
 }: ClusterSelectorProps) {
   const [open, setOpen] = React.useState(false);
 
@@ -95,34 +97,43 @@ export function ClusterSelector({
     }
   };
 
+  // Button color based on context health
+  const getButtonColor = () => {
+    if (contextHealthy === undefined) return "text-yellow-600 dark:text-yellow-400";
+    return contextHealthy
+      ? "text-green-600 dark:text-green-400"
+      : "text-yellow-600 dark:text-yellow-400";
+  };
+
+  const getButtonDotColor = () => {
+    if (contextHealthy === undefined) return "bg-yellow-500";
+    return contextHealthy ? "bg-green-500" : "bg-yellow-500";
+  };
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
-          variant="outline"
+          variant="ghost"
           role="combobox"
           aria-expanded={open}
-          className="w-[400px] justify-between"
+          className={cn(
+            "h-7 px-2 text-xs gap-1.5 font-normal justify-start hover:bg-accent",
+            selectedCluster && getButtonColor()
+          )}
         >
           {selectedCluster ? (
-            <div className="flex items-center gap-2 flex-1 min-w-0">
-              <Server className="h-4 w-4 shrink-0" />
-              <span className="truncate">{selectedCluster.cluster_name}</span>
-              <span
-                className={cn(
-                  "ml-auto px-2 py-0.5 rounded-full text-xs font-medium shrink-0",
-                  getStateBadgeColor(selectedCluster.state)
-                )}
-              >
-                {selectedCluster.state}
-              </span>
-            </div>
+            <>
+              <div className={cn("w-2 h-2 rounded-full shrink-0", getButtonDotColor())} />
+              <Server className="h-3 w-3 shrink-0" />
+              <span className="truncate max-w-[200px]">{selectedCluster.cluster_name}</span>
+              <ChevronsUpDown className="h-3 w-3 shrink-0 opacity-50" />
+            </>
           ) : (
             <span className="text-muted-foreground">
-              {isLoading ? "Loading clusters..." : "Select cluster..."}
+              {isLoading ? "Loading..." : "Select cluster..."}
             </span>
           )}
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[400px] p-0">

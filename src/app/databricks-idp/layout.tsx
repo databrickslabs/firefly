@@ -5,6 +5,7 @@ import { useSession } from "@/lib/auth-client";
 import { useRouter, usePathname } from "next/navigation";
 import { TopNav } from "@/components/top-nav";
 import { Sidebar } from "@/components/sidebar";
+import { UserStoreInitializer } from "@/components/user-store-initializer";
 
 export default function DatabricksIdpLayout({
   children,
@@ -49,23 +50,25 @@ export default function DatabricksIdpLayout({
 
   // Authenticated layout with sidebar
   return (
-    <div className="h-screen flex flex-col">
-      {/* Top Navigation */}
-      <TopNav
-        user={session.user}
-        title="Welcome to Databricks"
-        basePath="/databricks-idp"
-      />
+    <UserStoreInitializer>
+      <div className="h-screen flex flex-col">
+        {/* Top Navigation */}
+        <TopNav
+          user={session.user}
+          title="Welcome to Databricks"
+          basePath="/databricks-idp"
+        />
 
-      {/* Main Layout with Sidebar */}
-      <div className="flex-1 flex overflow-hidden">
-        <Sidebar basePath="/databricks-idp" userEmail={session.user.email} />
+        {/* Main Layout with Sidebar */}
+        <div className="flex-1 flex overflow-hidden">
+          <Sidebar basePath="/databricks-idp" userEmail={session.user.email} />
 
-        {/* Main Content */}
-        <main className="flex-1 overflow-auto bg-background">
-          {children}
-        </main>
+          {/* Main Content */}
+          <main className="flex-1 overflow-auto bg-background">
+            {children}
+          </main>
+        </div>
       </div>
-    </div>
+    </UserStoreInitializer>
   );
 }

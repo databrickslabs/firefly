@@ -599,12 +599,13 @@ export default function SQLPage() {
       </AlertDialog>
 
       {/* Main Layout with Resizable Panels */}
-      <div className="flex-1 overflow-hidden">
-        <PanelGroup direction="horizontal">
-          {/* Left Panel - Collapsible Sidebar */}
-          <Panel
-            ref={sidebarPanelRef}
-            defaultSize={20}
+      <div className="flex-1 overflow-hidden bg-slate-100/80 p-4">
+        <div className="h-full rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <PanelGroup direction="horizontal" className="h-full">
+            {/* Left Panel - Collapsible Sidebar */}
+            <Panel
+              ref={sidebarPanelRef}
+              defaultSize={20}
             minSize={15}
             maxSize={40}
             collapsible={true}
@@ -626,16 +627,16 @@ export default function SQLPage() {
               }
             />
           </Panel>
-          <PanelResizeHandle className="w-1 bg-border hover:bg-accent transition-colors" />
+            <PanelResizeHandle className="w-[3px] bg-slate-200/80 hover:bg-slate-300 transition-colors" />
 
-          {/* Right Panel - Editor and Results */}
-          <Panel>
-            <PanelGroup direction="vertical">
-              {/* Top Section - Toolbar, Tabs, and Editor */}
-              <Panel defaultSize={50} minSize={20} maxSize={80}>
-                <div className="h-full flex flex-col">
-                  {/* Toolbar */}
-                  <div className="px-4 py-2 border-b flex items-center gap-4">
+            {/* Right Panel - Editor and Results */}
+            <Panel>
+              <PanelGroup direction="vertical">
+                {/* Top Section - Toolbar, Tabs, and Editor */}
+                <Panel defaultSize={50} minSize={20} maxSize={80}>
+                  <div className="h-full flex flex-col bg-white">
+                    {/* Toolbar */}
+                    <div className="px-4 py-2 border-b border-slate-200 flex items-center gap-4 bg-slate-50/80">
                     <WarehouseSelector
                       value={warehouseId}
                       onValueChange={setWarehouseId}
@@ -678,7 +679,7 @@ export default function SQLPage() {
                         Stop
                       </Button>
                     )}
-                    <div className="flex gap-2 ml-auto">
+                      <div className="flex gap-2 ml-auto">
                       <Button
                         variant="outline"
                         size="sm"
@@ -719,39 +720,39 @@ export default function SQLPage() {
                           <Kbd className="ml-1">⌘↵</Kbd>
                         </Button>
                       )}
+                      </div>
                     </div>
-                  </div>
 
-                  {/* Editor Tabs */}
-                  <EditorTabs
-                    openFiles={openFiles}
-                    activeFilePath={activeFilePath}
-                    onTabClick={setActiveFilePath}
-                    onTabClose={handleTabClose}
-                  />
-
-                  {/* Monaco Editor */}
-                  <div className="flex-1 min-h-0">
-                    <MonacoMultiFileEditor
+                    {/* Editor Tabs */}
+                    <EditorTabs
                       openFiles={openFiles}
                       activeFilePath={activeFilePath}
-                      onContentChange={handleContentChange}
-                      onSave={handleSave}
-                      onRun={handleRunQuery}
-                      readOnly={isExecuting}
-                      catalogItems={catalogItems}
+                      onTabClick={setActiveFilePath}
+                      onTabClose={handleTabClose}
                     />
-                  </div>
+
+                    {/* Monaco Editor */}
+                    <div className="flex-1 min-h-0">
+                      <MonacoMultiFileEditor
+                        openFiles={openFiles}
+                        activeFilePath={activeFilePath}
+                        onContentChange={handleContentChange}
+                        onSave={handleSave}
+                        onRun={handleRunQuery}
+                        readOnly={isExecuting}
+                        catalogItems={catalogItems}
+                      />
+                    </div>
                 </div>
               </Panel>
 
-              <PanelResizeHandle className="h-1 bg-border hover:bg-accent transition-colors" />
+              <PanelResizeHandle className="h-[3px] bg-slate-200/80 hover:bg-slate-300 transition-colors" />
 
               {/* Bottom Section - Status and Results */}
               <Panel defaultSize={50} minSize={20}>
-                <div className="h-full flex flex-col">
+                <div className="h-full flex flex-col bg-slate-50/80">
                   {/* Status Bar */}
-                  <div className="px-4 py-2 border-b bg-muted/30 flex items-center gap-4">
+                  <div className="px-4 py-2 border-b border-slate-200 bg-white flex items-center gap-4 shadow-sm">
                     {isExecuting ? (
                       <div className="flex items-center gap-2 text-sm">
                         <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
@@ -775,30 +776,33 @@ export default function SQLPage() {
                   </div>
 
                   {/* Results Panel */}
-                  <div className="flex-1 min-h-0 overflow-hidden">
-                    {queryResults ? (
-                      <QueryResultsTable
-                        columns={queryResults.columns}
-                        data={queryResults.data}
-                        rowCount={queryResults.rowCount}
-                        executionTime={executionTime || undefined}
-                      />
-                    ) : (
-                      <div className="flex items-center justify-center h-full">
-                        <div className="text-center text-muted-foreground">
-                          <p className="text-sm">No results yet</p>
-                          <p className="text-xs mt-1">
-                            Select a warehouse and run a query to see results
-                          </p>
+                  <div className="flex-1 min-h-0 overflow-hidden p-4">
+                    <div className="h-full rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                      {queryResults ? (
+                        <QueryResultsTable
+                          columns={queryResults.columns}
+                          data={queryResults.data}
+                          rowCount={queryResults.rowCount}
+                          executionTime={executionTime || undefined}
+                        />
+                      ) : (
+                        <div className="flex h-full items-center justify-center bg-slate-50/70">
+                          <div className="text-center text-muted-foreground">
+                            <p className="text-sm">No results yet</p>
+                            <p className="text-xs mt-1">
+                              Select a warehouse and run a query to see results
+                            </p>
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 </div>
               </Panel>
-            </PanelGroup>
-          </Panel>
-        </PanelGroup>
+              </PanelGroup>
+            </Panel>
+          </PanelGroup>
+        </div>
       </div>
     </div>
   );

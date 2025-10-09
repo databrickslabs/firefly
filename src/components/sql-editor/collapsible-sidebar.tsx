@@ -14,16 +14,23 @@ interface CollapsibleSidebarProps {
   catalogContent: React.ReactNode;
   className?: string;
   panelRef?: React.RefObject<ImperativePanelHandle | null>;
+  onExpandedChange?: (isExpanded: boolean) => void;
 }
 
-export function CollapsibleSidebar({
+export const CollapsibleSidebar = React.memo(function CollapsibleSidebar({
   filesContent,
   catalogContent,
   className,
   panelRef,
+  onExpandedChange,
 }: CollapsibleSidebarProps) {
   const [activeView, setActiveView] = React.useState<SidebarView>("files");
   const [isExpanded, setIsExpanded] = React.useState(true);
+
+  // Notify parent when expanded state changes
+  React.useEffect(() => {
+    onExpandedChange?.(isExpanded);
+  }, [isExpanded, onExpandedChange]);
 
   const handleViewToggle = (view: SidebarView) => {
     if (activeView === view) {
@@ -68,7 +75,10 @@ export function CollapsibleSidebar({
   return (
     <div className={cn("h-full w-full flex", className)}>
       {/* Icon Bar */}
-      <div className="w-12 flex-shrink-0 border-r bg-muted/30 flex flex-col items-center py-4 gap-2">
+      <div className={cn(
+        "flex-col items-center py-4 gap-2 border-r border-slate-200 bg-slate-100/80 flex",
+        isExpanded ? "w-12 flex-shrink-0" : "w-full"
+      )}>
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -110,7 +120,7 @@ export function CollapsibleSidebar({
 
           <div className="flex-1" />
 
-          {activeView && (
+          {activeView && isExpanded && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -119,15 +129,11 @@ export function CollapsibleSidebar({
                   className="h-8 w-8"
                   onClick={handleToggleExpand}
                 >
-                  {isExpanded ? (
-                    <ChevronLeft className="h-4 w-4" />
-                  ) : (
-                    <ChevronRight className="h-4 w-4" />
-                  )}
+                  <ChevronLeft className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="right">
-                <p>{isExpanded ? "Collapse" : "Expand"}</p>
+                <p>Collapse</p>
               </TooltipContent>
             </Tooltip>
           )}
@@ -136,10 +142,10 @@ export function CollapsibleSidebar({
 
       {/* Content Panel */}
       {isExpanded && activeView && (
-        <div className="flex-1 border-r overflow-hidden">
+        <div className="flex-1 border-r border-slate-200 overflow-hidden bg-white">
           {activeView === "files" && (
             <div className="h-full flex flex-col">
-              <div className="px-4 py-3 border-b">
+              <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/80">
                 <h2 className="text-sm font-semibold">Workspace</h2>
               </div>
               <div className="flex-1 min-h-0">
@@ -149,7 +155,7 @@ export function CollapsibleSidebar({
           )}
           {activeView === "catalog" && (
             <div className="h-full flex flex-col">
-              <div className="px-4 py-3 border-b">
+              <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/80">
                 <h2 className="text-sm font-semibold">Catalog</h2>
               </div>
               <div className="flex-1 min-h-0">
@@ -161,4 +167,4 @@ export function CollapsibleSidebar({
       )}
     </div>
   );
-}
+});

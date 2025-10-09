@@ -3,7 +3,20 @@
  * Types and utilities for managing Databricks Workspace files
  */
 
-export const MONACO_ROOT_PATH = "/Workspace/Users/sri.tikkireddy@databricks.com/.monaco";
+/**
+ * Get the Monaco root path for a user
+ * @param userEmail - The user's email address
+ * @returns The workspace path for the user's Monaco files
+ */
+export function getMonacoRootPath(userEmail: string): string {
+  return `/Workspace/Users/${userEmail}/.monaco`;
+}
+
+/**
+ * @deprecated Use getMonacoRootPath(userEmail) instead
+ * This constant is kept for backwards compatibility but should not be used
+ */
+export const MONACO_ROOT_PATH = "/Workspace/Users/.monaco";
 
 export type WorkspaceObjectType = "NOTEBOOK" | "DIRECTORY" | "LIBRARY" | "FILE" | "REPO" | "DASHBOARD";
 
