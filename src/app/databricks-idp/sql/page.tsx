@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Play, Square, Loader2, AlertCircle, CheckCircle2, StopCircle, PlayCircle, Save } from "lucide-react";
 import type { OpenFile } from "@/lib/workspace-file-manager";
+import { getCatalogCache, type CatalogMetadata } from "@/lib/catalog-metadata-cache";
 
 interface ExecuteResponse {
   statement_id: string;
@@ -396,6 +397,183 @@ export default function SQLPage() {
     startWarehouseMutation.mutate(warehouseId);
   };
 
+  // Initialize catalog cache
+  const catalogCache = React.useMemo(() => getCatalogCache(), []);
+
+  // State to store all loaded catalog metadata for autocomplete
+  const [catalogMetadata, setCatalogMetadata] = React.useState<CatalogMetadata>(() => {
+    // Load initial state from cache
+    return catalogCache.getAllMetadata();
+  });
+
+  // Subscribe to cache updates (from other tabs)
+  React.useEffect(() => {
+    const unsubscribe = catalogCache.subscribe(() => {
+      setCatalogMetadata(catalogCache.getAllMetadata());
+    });
+    return unsubscribe;
+  }, [catalogCache]);
+
+  // Cleanup cache on unmount
+  React.useEffect(() => {
+    return () => {
+      catalogCache.cleanup();
+    };
+  }, [catalogCache]);
+
+  // Listen to catalog browser selections to load metadata
+  const handleCatalogItemSelect = React.useCallback(async (item: {
+    type: "catalog" | "schema" | "table";
+    catalog: string;
+    schema?: string;
+    table?: string;
+  }) => {
+    try {
+      if (item.type === "catalog") {
+        // Check cache first
+        const cachedSchemas = catalogCache.getSchemas(item.catalog);
+        if (cachedSchemas) {
+          setCatalogMetadata(prev => ({
+            ...prev,
+            schemas: { ...prev.schemas, [item.catalog]: cachedSchemas },
+          }));
+          return;
+        }
+
+        // Fetch schemas for this catalog
+        const response = await fetch(
+          `/api/databricks/unity-catalog/schemas?catalog_name=${encodeURIComponent(item.catalog)}`
+        );
+        if (response.ok) {
+          const data = await response.json();
+          const schemas = data.schemas?.map((s: { name: string }) => s.name) || [];
+
+          // Update cache
+          catalogCache.setSchemas(item.catalog, schemas);
+
+          // Update state
+          setCatalogMetadata(prev => ({
+            ...prev,
+            schemas: { ...prev.schemas, [item.catalog]: schemas },
+          }));
+        }
+      } else if (item.type === "schema" && item.schema) {
+        const schemaName = item.schema; // Extract to const for TypeScript
+
+        // Check cache first
+        const cachedTables = catalogCache.getTables(item.catalog, schemaName);
+        if (cachedTables) {
+          setCatalogMetadata(prev => ({
+            ...prev,
+            tables: {
+              ...prev.tables,
+              [item.catalog]: {
+                ...prev.tables[item.catalog],
+                [schemaName]: cachedTables,
+              },
+            },
+          }));
+          return;
+        }
+
+        // Fetch tables for this schema
+        const response = await fetch(
+          `/api/databricks/unity-catalog/tables?catalog_name=${encodeURIComponent(item.catalog)}&schema_name=${encodeURIComponent(schemaName)}`
+        );
+        if (response.ok) {
+          const data = await response.json();
+          const tables = data.tables?.map((t: { name: string }) => t.name) || [];
+
+          // Update cache
+          catalogCache.setTables(item.catalog, schemaName, tables);
+
+          // Update state
+          setCatalogMetadata(prev => ({
+            ...prev,
+            tables: {
+              ...prev.tables,
+              [item.catalog]: {
+                ...prev.tables[item.catalog],
+                [schemaName]: tables,
+              },
+            },
+          }));
+        }
+      } else if (item.type === "table" && item.schema && item.table) {
+        const fullName = `${item.catalog}.${item.schema}.${item.table}`;
+
+        // Check cache first
+        const cachedColumns = catalogCache.getColumns(fullName);
+        if (cachedColumns) {
+          setCatalogMetadata(prev => ({
+            ...prev,
+            columns: { ...prev.columns, [fullName]: cachedColumns },
+          }));
+          return;
+        }
+
+        // Fetch columns for this table
+        const response = await fetch(
+          `/api/databricks/unity-catalog/table-details?full_name=${encodeURIComponent(fullName)}`
+        );
+        if (response.ok) {
+          const data = await response.json();
+          const columns = data.columns?.map((c: { name: string; type_text: string; comment?: string }) => ({
+            name: c.name,
+            type: c.type_text,
+            comment: c.comment,
+          })) || [];
+
+          // Update cache
+          catalogCache.setColumns(fullName, columns);
+
+          // Update state
+          setCatalogMetadata(prev => ({
+            ...prev,
+            columns: { ...prev.columns, [fullName]: columns },
+          }));
+        }
+      }
+    } catch (error) {
+      console.error("Failed to fetch catalog metadata:", error);
+    }
+  }, [catalogCache]);
+
+  // Fetch initial catalog list
+  const { data: catalogsData } = useQuery({
+    queryKey: ["catalogs-autocomplete"],
+    queryFn: async () => {
+      // Check cache first
+      const cached = catalogCache.getCatalogs();
+      if (cached) {
+        return { catalogs: cached.map(name => ({ name })) };
+      }
+
+      const response = await fetch("/api/databricks/unity-catalog/catalogs");
+      if (!response.ok) throw new Error("Failed to fetch catalogs");
+      return response.json();
+    },
+    staleTime: 60 * 60 * 1000, // Cache for 1 hour
+  });
+
+  // Update catalog list when data loads
+  React.useEffect(() => {
+    if (catalogsData?.catalogs) {
+      const catalogNames = catalogsData.catalogs.map((c: { name: string }) => c.name);
+
+      // Update cache
+      catalogCache.setCatalogs(catalogNames);
+
+      // Update state
+      setCatalogMetadata(prev => ({
+        ...prev,
+        catalogs: catalogNames,
+      }));
+    }
+  }, [catalogsData, catalogCache]);
+
+  const catalogItems = catalogMetadata.catalogs.length > 0 ? catalogMetadata : undefined;
+
   const isExecuting = executeMutation.isPending || isPolling;
   const activeFile = openFiles.find((f) => f.path === activeFilePath);
   const hasUnsavedChanges = openFiles.some((f) => f.isDirty);
@@ -443,10 +621,7 @@ export default function SQLPage() {
               catalogContent={
                 <CatalogTreeView
                   showColumns={true}
-                  onItemSelect={(item) => {
-                    // Handle catalog item selection if needed
-                    console.log("Selected catalog item:", item);
-                  }}
+                  onItemSelect={handleCatalogItemSelect}
                 />
               }
             />
@@ -564,6 +739,7 @@ export default function SQLPage() {
                       onSave={handleSave}
                       onRun={handleRunQuery}
                       readOnly={isExecuting}
+                      catalogItems={catalogItems}
                     />
                   </div>
                 </div>

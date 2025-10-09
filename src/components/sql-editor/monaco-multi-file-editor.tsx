@@ -4,6 +4,20 @@ import * as React from "react";
 import Editor, { OnMount, loader } from "@monaco-editor/react";
 import type * as Monaco from "monaco-editor";
 import type { OpenFile } from "@/lib/workspace-file-manager";
+import {
+  detectSqlContext,
+  extractTableAliases,
+  extractTableReferences,
+  getTableBeforeDot,
+  resolveAlias,
+  createKeywordCompletions,
+  createFunctionCompletions,
+  createCatalogCompletions,
+  createSchemaCompletions,
+  createTableCompletions,
+  createColumnCompletions,
+} from "@/lib/sql-autocomplete";
+import { getCatalogCache } from "@/lib/catalog-metadata-cache";
 
 interface MonacoMultiFileEditorProps {
   openFiles: OpenFile[];
@@ -33,6 +47,12 @@ export function MonacoMultiFileEditor({
   const monacoRef = React.useRef<typeof Monaco | null>(null);
   const modelsRef = React.useRef<Map<string, Monaco.editor.ITextModel>>(new Map());
 
+  // Use a ref to store catalogItems so completion provider always has latest value
+  const catalogItemsRef = React.useRef(catalogItems);
+
+  // Get catalog cache for preloading
+  const catalogCache = React.useMemo(() => getCatalogCache(), []);
+
   // Use refs to always get the latest callbacks
   const onSaveRef = React.useRef(onSave);
   const onRunRef = React.useRef(onRun);
@@ -44,17 +64,23 @@ export function MonacoMultiFileEditor({
     activeFilePathRef.current = activeFilePath;
   });
 
+  // Keep catalogItemsRef updated
+  React.useEffect(() => {
+    catalogItemsRef.current = catalogItems;
+  }, [catalogItems]);
+
   const activeFile = React.useMemo(() => {
     return openFiles.find((f) => f.path === activeFilePath);
   }, [openFiles, activeFilePath]);
 
-  // Configure monaco-sql-languages on mount
+  // Configure intelligent SQL autocomplete
   const handleEditorWillMount = React.useCallback((monaco: typeof Monaco) => {
     monacoRef.current = monaco;
 
-    // Configure SQL language
+    // Register intelligent SQL completion provider
     monaco.languages.registerCompletionItemProvider("sql", {
-      provideCompletionItems: (model, position) => {
+      triggerCharacters: [".", " "], // Trigger on dot and space
+      provideCompletionItems: async (model, position) => {
         const textUntilPosition = model.getValueInRange({
           startLineNumber: position.lineNumber,
           startColumn: 1,
@@ -62,6 +88,7 @@ export function MonacoMultiFileEditor({
           endColumn: position.column,
         });
 
+        const fullQuery = model.getValue();
         const word = model.getWordUntilPosition(position);
         const range = {
           startLineNumber: position.lineNumber,
@@ -72,91 +99,178 @@ export function MonacoMultiFileEditor({
 
         const suggestions: Monaco.languages.CompletionItem[] = [];
 
-        // SQL Keywords
-        const sqlKeywords = [
-          "SELECT", "FROM", "WHERE", "JOIN", "LEFT JOIN", "RIGHT JOIN",
-          "INNER JOIN", "OUTER JOIN", "ON", "GROUP BY", "ORDER BY",
-          "HAVING", "LIMIT", "OFFSET", "INSERT", "UPDATE", "DELETE",
-          "CREATE", "DROP", "ALTER", "TABLE", "VIEW", "INDEX", "AS",
-          "AND", "OR", "NOT", "IN", "BETWEEN", "LIKE", "IS NULL",
-          "IS NOT NULL", "CASE", "WHEN", "THEN", "ELSE", "END",
-          "DISTINCT", "COUNT", "SUM", "AVG", "MIN", "MAX", "CAST",
-          "UNION", "UNION ALL", "INTERSECT", "EXCEPT", "WITH",
-        ];
+        // Get current catalogItems from ref (always up-to-date)
+        const currentCatalogItems = catalogItemsRef.current;
 
-        sqlKeywords.forEach((keyword) => {
-          suggestions.push({
-            label: keyword,
-            kind: monaco.languages.CompletionItemKind.Keyword,
-            insertText: keyword,
-            range,
-          });
-        });
+        // Detect SQL context
+        const context = detectSqlContext(textUntilPosition);
+        const aliases = extractTableAliases(fullQuery);
 
-        // Add catalog items if provided
-        if (catalogItems) {
-          // Catalogs
-          catalogItems.catalogs.forEach((catalog) => {
-            suggestions.push({
-              label: catalog,
-              kind: monaco.languages.CompletionItemKind.Module,
-              insertText: catalog,
-              detail: "Catalog",
-              range,
-            });
-          });
+        // Handle table.column completion (e.g., users. or u.)
+        if (context === "TABLE_COLUMN") {
+          const tableOrAlias = getTableBeforeDot(textUntilPosition);
+          if (tableOrAlias && currentCatalogItems) {
+            const fullTableName = resolveAlias(tableOrAlias, aliases);
+            const columns = currentCatalogItems.columns[fullTableName] || [];
 
-          // Detect if we're after a catalog name (catalog.)
-          const catalogMatch = textUntilPosition.match(/(\w+)\.$/);
-          if (catalogMatch) {
-            const catalog = catalogMatch[1];
-            const schemas = catalogItems.schemas[catalog] || [];
-            schemas.forEach((schema) => {
-              suggestions.push({
-                label: schema,
-                kind: monaco.languages.CompletionItemKind.Module,
-                insertText: schema,
-                detail: `Schema in ${catalog}`,
-                range,
-              });
-            });
+            suggestions.push(
+              ...createColumnCompletions(monaco, columns, fullTableName, range)
+            );
           }
+          // Always add keywords even in TABLE_COLUMN context
+          suggestions.push(...createKeywordCompletions(monaco, range));
+          return { suggestions };
+        }
 
-          // Detect if we're after catalog.schema (catalog.schema.)
-          const schemaMatch = textUntilPosition.match(/(\w+)\.(\w+)\.$/);
+        // Handle catalog.schema.table completion
+        if (currentCatalogItems) {
+          // After catalog.schema. → suggest tables (check this FIRST - more specific)
+          const schemaMatch = textUntilPosition.match(/\b(\w+)\.(\w+)\.\s*\w*$/);
           if (schemaMatch) {
             const catalog = schemaMatch[1];
             const schema = schemaMatch[2];
-            const tables = catalogItems.tables[catalog]?.[schema] || [];
-            tables.forEach((table) => {
-              suggestions.push({
-                label: table,
-                kind: monaco.languages.CompletionItemKind.Class,
-                insertText: table,
-                detail: `Table in ${catalog}.${schema}`,
-                range,
-              });
-            });
+
+            // Trigger preload of tables in the background
+            const cached = catalogCache.getTables(catalog, schema);
+            if (!cached) {
+              // Check if we have this schema in our catalogs
+              const hasSchema = currentCatalogItems.schemas[catalog]?.includes(schema);
+              if (hasSchema) {
+                // Preload tables in background
+                fetch(`/api/databricks/unity-catalog/tables?catalog_name=${encodeURIComponent(catalog)}&schema_name=${encodeURIComponent(schema)}`)
+                  .then(res => res.json())
+                  .then(data => {
+                    const tables = data.tables?.map((t: { name: string }) => t.name) || [];
+                    catalogCache.setTables(catalog, schema, tables);
+                  })
+                  .catch(err => console.error('Failed to preload tables:', err));
+              }
+            }
+
+            const tables = currentCatalogItems.tables[catalog]?.[schema] || cached || [];
+            suggestions.push(
+              ...createTableCompletions(monaco, tables, `${catalog}.${schema}`, range)
+            );
+            // Add keywords here too
+            suggestions.push(...createKeywordCompletions(monaco, range));
+            return { suggestions };
           }
 
-          // Add columns from all known tables
-          Object.entries(catalogItems.columns).forEach(([fullTableName, columns]) => {
-            columns.forEach((column) => {
-              suggestions.push({
-                label: column.name,
-                kind: monaco.languages.CompletionItemKind.Field,
-                insertText: column.name,
-                detail: `${column.type} - ${fullTableName}`,
-                range,
-              });
-            });
-          });
+          // After catalog. → suggest schemas (check this SECOND - less specific)
+          const catalogMatch = textUntilPosition.match(/\b(\w+)\.\s*\w*$/);
+          if (catalogMatch) {
+            const catalog = catalogMatch[1];
+
+            // Trigger preload of schemas in the background
+            const cached = catalogCache.getSchemas(catalog);
+            if (!cached && currentCatalogItems.catalogs.includes(catalog)) {
+              // Preload schemas in background
+              fetch(`/api/databricks/unity-catalog/schemas?catalog_name=${encodeURIComponent(catalog)}`)
+                .then(res => res.json())
+                .then(data => {
+                  const schemas = data.schemas?.map((s: { name: string }) => s.name) || [];
+                  catalogCache.setSchemas(catalog, schemas);
+                })
+                .catch(err => console.error('Failed to preload schemas:', err));
+            }
+
+            const schemas = currentCatalogItems.schemas[catalog] || cached || [];
+            suggestions.push(
+              ...createSchemaCompletions(monaco, schemas, catalog, range)
+            );
+            // Add keywords here too
+            suggestions.push(...createKeywordCompletions(monaco, range));
+            return { suggestions };
+          }
         }
+
+        // Context-aware suggestions
+        switch (context) {
+          case "SELECT":
+          case "WHERE":
+          case "HAVING":
+          case "ORDER_BY":
+          case "GROUP_BY": {
+            // Suggest columns from tables in the query
+            if (currentCatalogItems) {
+              const tableRefs = extractTableReferences(fullQuery);
+              tableRefs.forEach(tableRef => {
+                const fullTableName = resolveAlias(tableRef, aliases);
+                const columns = currentCatalogItems.columns[fullTableName] || [];
+                suggestions.push(
+                  ...createColumnCompletions(monaco, columns, fullTableName, range)
+                );
+              });
+
+              // Also suggest table.column format
+              aliases.forEach(({ alias, fullTableName }) => {
+                const columns = currentCatalogItems.columns[fullTableName] || [];
+                columns.forEach(col => {
+                  suggestions.push({
+                    label: `${alias}.${col.name}`,
+                    kind: monaco.languages.CompletionItemKind.Field,
+                    insertText: `${alias}.${col.name}`,
+                    range,
+                    detail: col.type,
+                    sortText: "0" + alias + col.name,
+                  });
+                });
+              });
+            }
+
+            // Add SQL functions for SELECT context
+            if (context === "SELECT") {
+              suggestions.push(...createFunctionCompletions(monaco, range));
+            }
+            break;
+          }
+
+          case "FROM":
+          case "JOIN": {
+            // Suggest tables and catalogs
+            if (currentCatalogItems) {
+              // Suggest catalogs
+              suggestions.push(
+                ...createCatalogCompletions(monaco, currentCatalogItems.catalogs, range)
+              );
+
+              // Suggest all known tables
+              Object.entries(currentCatalogItems.tables).forEach(([catalog, schemas]) => {
+                Object.entries(schemas).forEach(([schema, tables]) => {
+                  const fullPath = `${catalog}.${schema}`;
+                  tables.forEach(table => {
+                    suggestions.push({
+                      label: `${fullPath}.${table}`,
+                      kind: monaco.languages.CompletionItemKind.Class,
+                      insertText: `${fullPath}.${table}`,
+                      range,
+                      detail: `Table in ${fullPath}`,
+                      sortText: "1" + fullPath + table,
+                    });
+                  });
+                });
+              });
+            }
+            break;
+          }
+
+          default:
+            // For unknown context, suggest everything
+            if (currentCatalogItems) {
+              suggestions.push(
+                ...createCatalogCompletions(monaco, currentCatalogItems.catalogs, range)
+              );
+            }
+            break;
+        }
+
+        // Always add keywords
+        suggestions.push(...createKeywordCompletions(monaco, range));
 
         return { suggestions };
       },
     });
-  }, [catalogItems]);
+  }, []); // No dependencies - use ref to access latest catalogItems
 
   const handleEditorDidMount: OnMount = React.useCallback(
     (editor, monaco) => {
@@ -176,6 +290,11 @@ export function MonacoMultiFileEditor({
         if (onRunRef.current) {
           onRunRef.current();
         }
+      });
+
+      // Ctrl/Cmd + Space to trigger autocomplete
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Space, () => {
+        editor.trigger("keyboard", "editor.action.triggerSuggest", {});
       });
     },
     [] // No dependencies - we use refs to always get latest values
@@ -282,11 +401,14 @@ export function MonacoMultiFileEditor({
           suggest: {
             showKeywords: true,
             showSnippets: true,
+            snippetsPreventQuickSuggestions: false,
+            filterGraceful: true,
+            localityBonus: true,
           },
           quickSuggestions: {
-            other: true,
-            comments: false,
-            strings: false,
+            other: "on",
+            comments: "off",
+            strings: "off",
           },
           parameterHints: {
             enabled: true,

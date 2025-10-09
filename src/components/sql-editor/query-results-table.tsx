@@ -6,6 +6,7 @@ import {
   getCoreRowModel,
   flexRender,
   ColumnDef,
+  CellContext,
 } from "@tanstack/react-table";
 import {
   Table,
@@ -16,8 +17,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Download, FileSpreadsheet } from "lucide-react";
+import { Download, FileSpreadsheet, ChevronDown, ChevronRight } from "lucide-react";
 import { exportToCSV, exportToExcel } from "@/lib/export-utils";
+import { cn } from "@/lib/utils";
 
 interface Column {
   name: string;
@@ -39,6 +41,21 @@ export function QueryResultsTable({
   rowCount,
   executionTime,
 }: QueryResultsTableProps) {
+  // Track expanded rows
+  const [expandedRows, setExpandedRows] = React.useState<Set<number>>(new Set());
+
+  const toggleRowExpansion = (rowIndex: number) => {
+    setExpandedRows((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(rowIndex)) {
+        newSet.delete(rowIndex);
+      } else {
+        newSet.add(rowIndex);
+      }
+      return newSet;
+    });
+  };
+
   // Convert data array to object array for TanStack Table
   const tableData = React.useMemo(() => {
     return data.map((row) => {
@@ -52,25 +69,70 @@ export function QueryResultsTable({
 
   // Create column definitions
   const columnDefs = React.useMemo<ColumnDef<Record<string, unknown>>[]>(() => {
-    return columns.map((col) => ({
-      accessorKey: col.name,
-      header: () => (
-        <div className="flex flex-col">
-          <span className="font-semibold">{col.name}</span>
-          <span className="text-xs text-muted-foreground font-normal">
-            {col.type_text}
-          </span>
-        </div>
-      ),
-      cell: (info) => {
-        const value = info.getValue();
-        if (value === null || value === undefined) {
-          return <span className="text-muted-foreground italic">NULL</span>;
-        }
-        return <span>{String(value)}</span>;
+    return [
+      // Expander column
+      {
+        id: "expander",
+        header: () => <div className="w-8"></div>,
+        cell: ({ row }) => {
+          const rowIndex = row.index;
+          const isExpanded = expandedRows.has(rowIndex);
+          return (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 w-6 p-0"
+              onClick={() => toggleRowExpansion(rowIndex)}
+            >
+              {isExpanded ? (
+                <ChevronDown className="h-4 w-4" />
+              ) : (
+                <ChevronRight className="h-4 w-4" />
+              )}
+            </Button>
+          );
+        },
+        size: 40,
+        minSize: 40,
+        maxSize: 40,
       },
-    }));
-  }, [columns]);
+      // Data columns
+      ...columns.map((col) => ({
+        accessorKey: col.name,
+        header: () => (
+          <div className="flex flex-col">
+            <span className="font-semibold">{col.name}</span>
+            <span className="text-xs text-muted-foreground font-normal">
+              {col.type_text}
+            </span>
+          </div>
+        ),
+        cell: (info: CellContext<Record<string, unknown>, unknown>) => {
+          const value = info.getValue();
+          const rowIndex = info.row.index;
+          const isExpanded = expandedRows.has(rowIndex);
+
+          if (value === null || value === undefined) {
+            return <span className="text-muted-foreground italic">NULL</span>;
+          }
+
+          const stringValue = String(value);
+
+          return (
+            <div
+              className={cn(
+                "max-w-md",
+                isExpanded ? "whitespace-pre-wrap break-words" : "truncate"
+              )}
+              title={!isExpanded ? stringValue : undefined}
+            >
+              {stringValue}
+            </div>
+          );
+        },
+      })),
+    ];
+  }, [columns, expandedRows]);
 
   const table = useReactTable({
     data: tableData,
@@ -161,15 +223,24 @@ export function QueryResultsTable({
             ))}
           </TableHeader>
           <TableBody>
-            {table.getRowModel().rows.map((row) => (
-              <TableRow key={row.id}>
-                {row.getVisibleCells().map((cell) => (
-                  <TableCell key={cell.id} className="font-mono text-xs">
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </TableCell>
-                ))}
-              </TableRow>
-            ))}
+            {table.getRowModel().rows.map((row) => {
+              const isExpanded = expandedRows.has(row.index);
+              return (
+                <TableRow key={row.id} className={cn(isExpanded && "bg-muted/30")}>
+                  {row.getVisibleCells().map((cell) => (
+                    <TableCell
+                      key={cell.id}
+                      className={cn(
+                        "font-mono text-xs",
+                        isExpanded ? "align-top py-3" : "align-middle"
+                      )}
+                    >
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </div>
