@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { FileTree } from "@/components/sql-editor/file-tree";
 import { CollapsibleSidebar } from "@/components/sql-editor/collapsible-sidebar";
@@ -16,7 +17,7 @@ import {
 } from "@/lib/notebook-manager";
 import { MONACO_ROOT_PATH } from "@/lib/workspace-file-manager";
 import { Button } from "@/components/ui/button";
-import { Loader2, FileJson, AlertCircle } from "lucide-react";
+import { Loader2, FileJson, AlertCircle, Sparkles } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -37,6 +38,7 @@ import { Label } from "@/components/ui/label";
 
 export default function NotebookPage() {
   const queryClient = useQueryClient();
+  const router = useRouter();
   const sidebarPanelRef = React.useRef<React.ElementRef<typeof Panel>>(null);
 
   const [clusterId, setClusterId] = React.useState<string>("");
@@ -225,6 +227,17 @@ export default function NotebookPage() {
                 <Button
                   variant="outline"
                   size="sm"
+                  onClick={() => router.push("/databricks-idp/notebooks/jupyterlite")}
+                  className="gap-2"
+                  title="Switch to JupyterLite"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  Use JupyterLite
+                </Button>
+
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={handleNewNotebook}
                   className="gap-2"
                 >
@@ -258,7 +271,7 @@ export default function NotebookPage() {
                   </div>
                 </div>
               ) : (
-                /* Notebook Editor */
+                /* Custom Notebook Editor */
                 <div className="flex-1 overflow-hidden">
                   <NotebookEditor
                     notebook={notebook}

@@ -217,18 +217,20 @@ export function parseNotebookFile(jsonContent: string): Notebook {
   const parsed = JSON.parse(jsonContent);
 
   // Ensure cells have IDs and convert from Jupyter format
-  const cells = (parsed.cells || []).map((cell: any) => {
+  const cells = (parsed.cells || []).map((cell: unknown) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cellData = cell as any;
     // Jupyter format uses cell_type, source can be array or string
-    const cellType = (cell.cell_type || cell.type || "code") as CellType;
-    const source = Array.isArray(cell.source) ? cell.source.join("") : (cell.source || "");
+    const cellType = (cellData.cell_type || cellData.type || "code") as CellType;
+    const source = Array.isArray(cellData.source) ? cellData.source.join("") : (cellData.source || "");
 
     return {
-      id: cell.id || generateCellId(),
+      id: cellData.id || generateCellId(),
       type: cellType,
       source,
-      outputs: cellType === "code" ? (cell.outputs || []) : undefined,
+      outputs: cellType === "code" ? (cellData.outputs || []) : undefined,
       executionState: cellType === "code" ? ("idle" as CellExecutionState) : undefined,
-      executionCount: cellType === "code" ? (cell.execution_count ?? null) : undefined,
+      executionCount: cellType === "code" ? (cellData.execution_count ?? null) : undefined,
     };
   });
 

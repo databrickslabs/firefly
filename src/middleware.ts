@@ -74,9 +74,21 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  return NextResponse.next();
+  const response = NextResponse.next();
+
+  // Apply COOP/COEP headers for notebooks page and JupyterLite for SharedArrayBuffer support
+  if (
+    pathname.startsWith("/databricks-idp/notebooks") ||
+    pathname.startsWith("/jupyterlite")
+  ) {
+    response.headers.set("Cross-Origin-Embedder-Policy", "credentialless");
+    response.headers.set("Cross-Origin-Opener-Policy", "same-origin");
+    response.headers.set("Cross-Origin-Resource-Policy", "cross-origin");
+  }
+
+  return response;
 }
 
 export const config = {
-  matcher: ["/databricks-idp", "/federation", "/admin/:path*", "/admin-login"],
+  matcher: ["/databricks-idp/:path*", "/federation", "/admin/:path*", "/admin-login", "/jupyterlite/:path*"],
 };
