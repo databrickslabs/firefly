@@ -182,7 +182,7 @@ export function SQLEditorPanel({
       value={value}
       onChange={(value) => onChange(value || "")}
       onMount={handleEditorDidMount}
-      theme="vs-dark"
+      theme="vs"
       options={{
         minimap: { enabled: false },
         fontSize: 14,

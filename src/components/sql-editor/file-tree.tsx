@@ -84,6 +84,23 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
       const response = await fetch(
         `/api/databricks/workspace/list?path=${encodeURIComponent(MONACO_ROOT_PATH)}`
       );
+
+      // If 404, create the .monaco folder
+      if (response.status === 404) {
+        const createResponse = await fetch("/api/databricks/workspace/mkdirs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: MONACO_ROOT_PATH }),
+        });
+
+        if (!createResponse.ok) {
+          throw new Error("Failed to create .monaco folder");
+        }
+
+        // Return empty list after creating folder
+        return { objects: [] };
+      }
+
       if (!response.ok) {
         throw new Error("Failed to fetch workspace files");
       }
@@ -387,7 +404,7 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
   const handleFileClick = (node: FileTreeNode) => {
     if (node.isDirectory) {
       toggleExpanded(node.path);
-    } else if (isSqlFile(node.path)) {
+    } else if (isSqlFile(node.path) || node.path.endsWith(".ipynb")) {
       onFileSelect(node.path);
     }
   };
