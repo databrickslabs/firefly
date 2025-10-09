@@ -147,9 +147,13 @@ export function NotebookEditor({
 
             const data = await response.json();
 
+            // Debug: Log the full response
+            console.log("Command status response:", JSON.stringify(data, null, 2));
+
             if (data.status === "Finished" || data.status === "Error") {
               const executionTime = Date.now() - startTime;
               const outputs = databricksResultToCellOutput(data);
+              console.log("Converted outputs:", JSON.stringify(outputs, null, 2));
 
               onNotebookChange(
                 updateCellAt(notebook, cellIndex, {
@@ -411,7 +415,7 @@ export function NotebookEditor({
       </div>
 
       {/* Cells */}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto pt-4 pb-32 px-4 space-y-4">
         {notebook.cells.map((cell, index) => (
           <NotebookCell
             key={`${cell.id}-v${cellsVersion}`}

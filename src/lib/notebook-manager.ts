@@ -156,6 +156,7 @@ export function databricksResultToCellOutput(result: {
   results?: {
     resultType: string;
     data?: unknown;
+    fileName?: string; // Databricks uses this field for image data
     summary?: string;
     cause?: string;
   };
@@ -163,32 +164,77 @@ export function databricksResultToCellOutput(result: {
   const outputs: CellOutput[] = [];
 
   if (result.status === "Finished" && result.results) {
-    const { resultType, data, summary } = result.results;
+    const { resultType, data, fileName, summary } = result.results;
 
     if (resultType === "text" || resultType === "table") {
-      outputs.push({
-        output_type: "execute_result",
-        data: {
-          "text/plain": typeof data === "string" ? data : JSON.stringify(data, null, 2),
-        },
-        execution_count: null,
-      });
+      const textData = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+
+      // Check if the text data is actually HTML (e.g., Plotly charts)
+      // Plotly and other interactive visualizations are often returned as HTML in text type
+      if (typeof data === "string" && data.trim().startsWith("<html>")) {
+        outputs.push({
+          output_type: "display_data",
+          data: {
+            "text/html": data,
+          },
+          metadata: {},
+        });
+      } else {
+        outputs.push({
+          output_type: "execute_result",
+          data: {
+            "text/plain": textData,
+          },
+          execution_count: null,
+        });
+      }
     } else if (resultType === "image") {
+      // Databricks returns image data in the fileName field as a data URI
+      // Format: "data:image/png;base64,iVBORw0KG..."
+      let base64Data = "";
+
+      if (fileName && typeof fileName === "string") {
+        // Extract base64 data from data URI
+        const match = fileName.match(/data:image\/(png|jpeg|jpg);base64,(.+)/);
+        if (match) {
+          base64Data = match[2];
+        }
+      }
+
       outputs.push({
         output_type: "display_data",
         data: {
-          "image/png": typeof data === "string" ? data : "",
+          "image/png": base64Data,
         },
         metadata: {},
       });
     } else if (resultType === "html") {
-      outputs.push({
-        output_type: "display_data",
-        data: {
-          "text/html": typeof data === "string" ? data : JSON.stringify(data),
-        },
-        metadata: {},
-      });
+      const htmlData = typeof data === "string" ? data : JSON.stringify(data);
+
+      // Check if HTML contains base64 image data
+      // Databricks often embeds images in HTML as: <img src="data:image/png;base64,..."
+      const base64ImageMatch = htmlData.match(/data:image\/(png|jpeg|jpg);base64,([^"']+)/);
+
+      if (base64ImageMatch) {
+        const [, imageType, base64Data] = base64ImageMatch;
+        // Provide both HTML and image data for better compatibility
+        outputs.push({
+          output_type: "display_data",
+          data: {
+            "text/html": htmlData,
+            [`image/${imageType === "jpg" ? "jpeg" : imageType}`]: base64Data,
+          },
+          metadata: {},
+        });
+      } else {
+        outputs.push({
+          output_type: "display_data",
+          data: {
+            "text/html": htmlData,
+          },
+          metadata: {},
+        });
+      }
     } else {
       // Default: treat as plain text
       outputs.push({

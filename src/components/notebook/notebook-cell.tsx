@@ -17,12 +17,15 @@ import {
   Loader2,
   Code,
   Type,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
@@ -63,6 +66,7 @@ export function NotebookCell({
 }: NotebookCellProps) {
   const editorRef = React.useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const [isEditingMarkdown, setIsEditingMarkdown] = React.useState(false);
+  const [isCollapsed, setIsCollapsed] = React.useState(false);
 
   const handleEditorDidMount: OnMount = React.useCallback(
     (editor, monaco) => {
@@ -123,9 +127,9 @@ export function NotebookCell({
   return (
     <div
       className={cn(
-        "group border-l-4 transition-colors",
+        "group border-l-4 transition-colors rounded-lg border border-border bg-card shadow-sm hover:shadow-md",
         getExecutionStateColor(),
-        isSelected ? "bg-accent/20" : "hover:bg-accent/10"
+        isSelected ? "ring-1 ring-primary/30 bg-accent/5" : ""
       )}
       onClick={onSelect}
     >
@@ -181,6 +185,20 @@ export function NotebookCell({
         )}
 
         <div className="flex-1" />
+
+        {/* Toggle code visibility */}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 px-2"
+          onClick={(e) => {
+            e.stopPropagation();
+            setIsCollapsed(!isCollapsed);
+          }}
+          title={isCollapsed ? "Show code" : "Hide code"}
+        >
+          {isCollapsed ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+        </Button>
 
         {onChangeType && (
           <Button
@@ -238,13 +256,15 @@ export function NotebookCell({
               <MoreVertical className="h-3 w-3" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
+          <DropdownMenuContent align="end" className="w-56">
+            {/* Add cells section */}
             {onInsertAbove && (
               <DropdownMenuItem onClick={(e) => {
                 e.stopPropagation();
                 onInsertAbove();
               }}>
-                Insert Cell Above
+                <span className="text-xs text-muted-foreground mr-3 w-4">A</span>
+                <span>Add cell above</span>
               </DropdownMenuItem>
             )}
             {onInsertBelow && (
@@ -252,9 +272,75 @@ export function NotebookCell({
                 e.stopPropagation();
                 onInsertBelow();
               }}>
-                Insert Cell Below
+                <span className="text-xs text-muted-foreground mr-3 w-4">B</span>
+                <span>Add cell below</span>
               </DropdownMenuItem>
             )}
+
+            {/* Move section */}
+            {(onMoveUp || onMoveDown) && <DropdownMenuSeparator />}
+
+            {onMoveUp && (
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onMoveUp();
+                }}
+                disabled={!onMoveUp}
+              >
+                <ChevronUp className="h-4 w-4 mr-2" />
+                Move up
+                <span className="ml-auto text-xs text-muted-foreground">Ctrl+Option+↑</span>
+              </DropdownMenuItem>
+            )}
+
+            {onMoveDown && (
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onMoveDown();
+                }}
+                disabled={!onMoveDown}
+              >
+                <ChevronDown className="h-4 w-4 mr-2" />
+                Move down
+                <span className="ml-auto text-xs text-muted-foreground">Ctrl+Option+↓</span>
+              </DropdownMenuItem>
+            )}
+
+            {/* Cell type section */}
+            {onChangeType && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onChangeType(cell.type === "code" ? "markdown" : "code");
+                  }}
+                >
+                  <span className="text-xs text-muted-foreground mr-3 w-4">T</span>
+                  <span>{cell.type === "code" ? "Convert to markdown" : "Convert to code"}</span>
+                </DropdownMenuItem>
+              </>
+            )}
+
+            {/* Output section */}
+            {cell.type === "code" && cell.outputs && cell.outputs.length > 0 && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    // TODO: Implement clear output
+                  }}
+                >
+                  Clear output
+                </DropdownMenuItem>
+              </>
+            )}
+
+            {/* Delete section */}
+            <DropdownMenuSeparator />
             <DropdownMenuItem
               onClick={(e) => {
                 e.stopPropagation();
@@ -262,69 +348,89 @@ export function NotebookCell({
               }}
               className="text-red-600 focus:text-red-700 focus:bg-red-100 dark:focus:bg-red-900/20"
             >
-              Delete Cell
+              Delete cell
+              <span className="ml-auto text-xs text-muted-foreground">D, D</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
 
       {/* Editor or Rendered Markdown */}
-      <div className="relative min-h-[100px]">
-        {isRunning && (
-          <div className="absolute top-2 right-2 z-10">
-            <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+      {isCollapsed ? (
+        // Collapsed view - show truncated content with blur
+        <div
+          className="relative px-4 py-2 cursor-pointer hover:bg-accent/5 overflow-hidden"
+          onClick={() => setIsCollapsed(false)}
+        >
+          <div className="relative">
+            <div className="text-sm font-mono text-muted-foreground whitespace-nowrap overflow-hidden blur-[1px] select-none">
+              {cell.source || '(empty cell)'}
+            </div>
+            <div className="absolute inset-y-0 right-0 w-32 bg-gradient-to-l from-background to-transparent pointer-events-none" />
+            <span className="absolute right-2 top-0 text-muted-foreground text-xs">...</span>
           </div>
-        )}
+        </div>
+      ) : (
+        // Expanded view - show full content
+        <div className="relative">
+          {isRunning && (
+            <div className="absolute top-2 right-2 z-10">
+              <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+            </div>
+          )}
 
-        {cell.type === "markdown" && !isEditingMarkdown && cell.source.trim() ? (
-          <div
-            className="px-4 py-3 markdown-content cursor-pointer hover:bg-accent/5"
-            onDoubleClick={() => setIsEditingMarkdown(true)}
-            title="Double-click to edit"
-          >
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{cell.source}</ReactMarkdown>
-          </div>
-        ) : (
-          <div
-            onBlur={() => {
-              if (cell.type === "markdown") {
-                setTimeout(() => setIsEditingMarkdown(false), 200);
-              }
-            }}
-          >
-            <Editor
-              key={cell.id}
-              height="100px"
-              defaultLanguage={getLanguage()}
-              language={getLanguage()}
-              value={cell.source}
-              onChange={(value) => onSourceChange(value || "")}
-              onMount={handleEditorDidMount}
-              theme="vs"
-              options={{
-                minimap: { enabled: false },
-                fontSize: 14,
-                lineNumbers: cell.type === "markdown" ? "off" : "on",
-                scrollBeyondLastLine: false,
-                automaticLayout: true,
-                tabSize: 2,
-                readOnly: readOnly || isRunning,
-                wordWrap: "on",
-                padding: { top: 8, bottom: 8 },
-                scrollbar: {
-                  alwaysConsumeMouseWheel: false,
-                },
-                overviewRulerLanes: 0,
-                hideCursorInOverviewRuler: true,
-                overviewRulerBorder: false,
+          {cell.type === "markdown" && !isEditingMarkdown && cell.source.trim() ? (
+            <div
+              className="px-4 py-3 markdown-content cursor-pointer hover:bg-accent/5"
+              onDoubleClick={() => setIsEditingMarkdown(true)}
+              title="Double-click to edit"
+            >
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{cell.source}</ReactMarkdown>
+            </div>
+          ) : (
+            <div
+              onBlur={() => {
+                if (cell.type === "markdown") {
+                  setTimeout(() => setIsEditingMarkdown(false), 200);
+                }
               }}
-            />
-          </div>
-        )}
-      </div>
+            >
+              <Editor
+                key={cell.id}
+                height={`${(cell.source.split('\n').length * 21) + 16}px`}
+                defaultLanguage={getLanguage()}
+                language={getLanguage()}
+                value={cell.source}
+                onChange={(value) => onSourceChange(value || "")}
+                onMount={handleEditorDidMount}
+                theme="vs"
+                options={{
+                  minimap: { enabled: false },
+                  fontSize: 14,
+                  lineNumbers: cell.type === "markdown" ? "off" : "on",
+                  scrollBeyondLastLine: false,
+                  automaticLayout: true,
+                  tabSize: 2,
+                  readOnly: readOnly || isRunning,
+                  wordWrap: "on",
+                  padding: { top: 8, bottom: 8 },
+                  scrollbar: {
+                    vertical: "hidden",
+                    horizontal: "hidden",
+                    alwaysConsumeMouseWheel: false,
+                  },
+                  overviewRulerLanes: 0,
+                  hideCursorInOverviewRuler: true,
+                  overviewRulerBorder: false,
+                }}
+              />
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Output */}
-      {cell.outputs && cell.outputs.length > 0 && (
+      {!isCollapsed && cell.outputs && cell.outputs.length > 0 && (
         <div className="px-2 py-2">
           <CellOutput outputs={cell.outputs} />
         </div>

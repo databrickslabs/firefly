@@ -96,6 +96,12 @@ export async function GET(
     }
 
     const data = await databricksResponse.json();
+
+    // Log the complete response for debugging
+    console.log("=== COMMAND STATUS RESPONSE ===");
+    console.log("Status:", data.status);
+    console.log("Results:", JSON.stringify(data.results, null, 2));
+
     return NextResponse.json(data);
   } catch (error) {
     console.error("Error getting command status:", error);

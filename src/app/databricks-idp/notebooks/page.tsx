@@ -8,6 +8,7 @@ import { CollapsibleSidebar } from "@/components/sql-editor/collapsible-sidebar"
 import { CatalogTreeView } from "@/components/unity-catalog/catalog-tree-view";
 import { ClusterSelector } from "@/components/notebook/cluster-selector";
 import { NotebookEditor } from "@/components/notebook/notebook-editor";
+import { NotebookTabs, type NotebookTab } from "@/components/notebook/notebook-tabs";
 import type { Notebook } from "@/lib/notebook-manager";
 import {
   createEmptyNotebook,
@@ -40,6 +41,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
+interface NotebookState {
+  id: string;
+  notebook: Notebook;
+  filePath: string | null;
+  isDirty: boolean;
+}
+
 export default function NotebookPage() {
   const queryClient = useQueryClient();
   const sidebarPanelRef = React.useRef<React.ElementRef<typeof Panel>>(null);
@@ -47,12 +55,20 @@ export default function NotebookPage() {
   const [clusterId, setClusterId] = React.useState<string>("");
   const [contextId, setContextId] = React.useState<string | null>(null);
   const [language, setLanguage] = React.useState<string>("python");
-  const [notebook, setNotebook] = React.useState<Notebook>(createEmptyNotebook());
-  const [currentFilePath, setCurrentFilePath] = React.useState<string | null>(null);
+
+  // Tab management - start with no notebooks
+  const [notebookStates, setNotebookStates] = React.useState<NotebookState[]>([]);
+  const [activeTabId, setActiveTabId] = React.useState<string>("");
+
   const [error, setError] = React.useState<string | null>(null);
   const [isLoadingFile, setIsLoadingFile] = React.useState(false);
   const [saveAsDialogOpen, setSaveAsDialogOpen] = React.useState(false);
   const [notebookName, setNotebookName] = React.useState("");
+
+  // Get active notebook
+  const activeNotebookState = notebookStates.find((ns) => ns.id === activeTabId);
+  const notebook = activeNotebookState?.notebook || createEmptyNotebook();
+  const currentFilePath = activeNotebookState?.filePath || null;
 
   // Load persisted cluster selection on mount
   React.useEffect(() => {
@@ -159,8 +175,12 @@ export default function NotebookPage() {
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ["workspace-files"] });
-      // Update currentFilePath if this was a "Save As"
-      setCurrentFilePath(variables.path);
+      // Update the notebook state with the new path
+      setNotebookStates((prev) =>
+        prev.map((ns) =>
+          ns.id === activeTabId ? { ...ns, filePath: variables.path, isDirty: false } : ns
+        )
+      );
       setSaveAsDialogOpen(false);
       setNotebookName("");
     },
@@ -173,6 +193,13 @@ export default function NotebookPage() {
     // Only load .ipynb files
     if (!filePath.endsWith(".ipynb")) {
       setError("Please select a .ipynb notebook file");
+      return;
+    }
+
+    // Check if already open
+    const existingTab = notebookStates.find((ns) => ns.filePath === filePath);
+    if (existingTab) {
+      setActiveTabId(existingTab.id);
       return;
     }
 
@@ -201,8 +228,18 @@ export default function NotebookPage() {
       const notebookData = parseNotebookFile(data.content);
       console.log("Parsed notebook:", notebookData);
 
-      setNotebook(notebookData);
-      setCurrentFilePath(filePath);
+      // Create new tab for this notebook
+      const newTabId = `notebook-${Date.now()}`;
+      setNotebookStates((prev) => [
+        ...prev,
+        {
+          id: newTabId,
+          notebook: notebookData,
+          filePath,
+          isDirty: false,
+        },
+      ]);
+      setActiveTabId(newTabId);
 
       // Set language from notebook metadata
       if (notebookData.metadata.language_info?.name) {
@@ -254,9 +291,64 @@ export default function NotebookPage() {
   };
 
   const handleNewNotebook = () => {
-    setNotebook(createEmptyNotebook());
-    setCurrentFilePath(null);
+    const newTabId = `untitled-${Date.now()}`;
+    setNotebookStates((prev) => [
+      ...prev,
+      {
+        id: newTabId,
+        notebook: createEmptyNotebook(),
+        filePath: null,
+        isDirty: false,
+      },
+    ]);
+    setActiveTabId(newTabId);
   };
+
+  // Tab handlers
+  const handleTabClick = (tabId: string) => {
+    setActiveTabId(tabId);
+  };
+
+  const handleTabClose = (tabId: string) => {
+    const filtered = notebookStates.filter((ns) => ns.id !== tabId);
+    setNotebookStates(filtered);
+
+    // Switch to another tab if closing active tab
+    if (tabId === activeTabId) {
+      if (filtered.length > 0) {
+        setActiveTabId(filtered[0].id);
+      } else {
+        setActiveTabId("");
+      }
+    }
+  };
+
+  // Update active notebook when it changes
+  const handleNotebookChange = (updatedNotebook: Notebook) => {
+    setNotebookStates((prev) =>
+      prev.map((ns) =>
+        ns.id === activeTabId
+          ? { ...ns, notebook: updatedNotebook, isDirty: true }
+          : ns
+      )
+    );
+  };
+
+  // Convert notebook states to tabs
+  const tabs: NotebookTab[] = notebookStates.map((ns) => {
+    const name = ns.filePath
+      ? ns.filePath.startsWith(MONACO_ROOT_PATH)
+        ? ns.filePath.slice(MONACO_ROOT_PATH.length + 1)
+        : ns.filePath.split("/").pop() || "Untitled"
+      : "Untitled";
+
+    return {
+      id: ns.id,
+      path: ns.filePath,
+      name,
+      isDirty: ns.isDirty,
+    };
+  });
 
   return (
     <div className="h-full flex flex-col">
@@ -288,90 +380,83 @@ export default function NotebookPage() {
           {/* Right Panel - Notebook Editor */}
           <Panel>
             <div className="h-full flex flex-col">
-              {/* Top Toolbar */}
-              <div className="px-4 py-2 border-b flex items-center gap-4 bg-background">
-                <div className="flex items-center gap-2">
-                  <ClusterSelector
-                    value={clusterId}
-                    onValueChange={handleClusterChange}
-                  />
+              {/* Notebook Tabs */}
+              <NotebookTabs
+                tabs={tabs}
+                activeTabId={activeTabId}
+                onTabClick={handleTabClick}
+                onTabClose={handleTabClose}
+                onNewTab={handleNewNotebook}
+              />
 
-                  {/* Context Status Indicator */}
-                  {clusterId && (
-                    <div className="relative group">
-                      {contextId && contextStatus ? (
-                        <div
-                          className={`w-3 h-3 rounded-full ${
-                            contextStatus.healthy
-                              ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]"
-                              : "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)]"
-                          } cursor-help`}
-                          title={contextId}
-                        />
-                      ) : (
-                        <div className="w-3 h-3 rounded-full bg-yellow-500 animate-pulse shadow-[0_0_8px_rgba(234,179,8,0.6)]"
-                          title="Creating context..."
-                        />
-                      )}
+              {/* Top Toolbar - only show when notebooks are open */}
+              {notebookStates.length > 0 && (
+                <div className="px-4 py-2 border-b flex items-center gap-4 bg-background">
+                  <div className="flex items-center gap-2">
+                    <ClusterSelector
+                      value={clusterId}
+                      onValueChange={handleClusterChange}
+                    />
 
-                      {/* Tooltip */}
-                      <div className="absolute left-0 top-full mt-2 hidden group-hover:block z-50 whitespace-nowrap">
-                        <div className="bg-popover text-popover-foreground px-3 py-2 rounded-md shadow-md border text-sm">
-                          {contextId ? (
-                            <>
-                              <div className="font-semibold">
-                                {contextStatus?.healthy ? "Context Ready" : "Context Unhealthy"}
-                              </div>
-                              <div className="text-xs text-muted-foreground mt-1">
-                                Context ID: {contextId}
-                              </div>
-                              {contextStatus?.reason && (
-                                <div className="text-xs text-muted-foreground mt-1">
-                                  {contextStatus.reason}
+                    {/* Context Status Indicator */}
+                    {clusterId && (
+                      <div className="relative group">
+                        {contextId && contextStatus ? (
+                          <div
+                            className={`w-3 h-3 rounded-full ${
+                              contextStatus.healthy
+                                ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]"
+                                : "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)]"
+                            } cursor-help`}
+                            title={contextId}
+                          />
+                        ) : (
+                          <div className="w-3 h-3 rounded-full bg-yellow-500 animate-pulse shadow-[0_0_8px_rgba(234,179,8,0.6)]"
+                            title="Creating context..."
+                          />
+                        )}
+
+                        {/* Tooltip */}
+                        <div className="absolute left-0 top-full mt-2 hidden group-hover:block z-50 whitespace-nowrap">
+                          <div className="bg-popover text-popover-foreground px-3 py-2 rounded-md shadow-md border text-sm">
+                            {contextId ? (
+                              <>
+                                <div className="font-semibold">
+                                  {contextStatus?.healthy ? "Context Ready" : "Context Unhealthy"}
                                 </div>
-                              )}
-                            </>
-                          ) : (
-                            <div>Creating execution context...</div>
-                          )}
+                                <div className="text-xs text-muted-foreground mt-1">
+                                  Context ID: {contextId}
+                                </div>
+                                {contextStatus?.reason && (
+                                  <div className="text-xs text-muted-foreground mt-1">
+                                    {contextStatus.reason}
+                                  </div>
+                                )}
+                              </>
+                            ) : (
+                              <div>Creating execution context...</div>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
+
+                  <Select value={language} onValueChange={setLanguage}>
+                    <SelectTrigger className="w-[150px]">
+                      <SelectValue placeholder="Language" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="python">Python</SelectItem>
+                      <SelectItem value="sql">SQL</SelectItem>
+                      <SelectItem value="scala">Scala</SelectItem>
+                      <SelectItem value="r">R</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  <div className="flex-1" />
                 </div>
-
-                <Select value={language} onValueChange={setLanguage}>
-                  <SelectTrigger className="w-[150px]">
-                    <SelectValue placeholder="Language" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="python">Python</SelectItem>
-                    <SelectItem value="sql">SQL</SelectItem>
-                    <SelectItem value="scala">Scala</SelectItem>
-                    <SelectItem value="r">R</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                <div className="flex-1" />
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleNewNotebook}
-                  className="gap-2"
-                >
-                  <FileJson className="h-4 w-4" />
-                  New Notebook
-                </Button>
-
-                <div className="text-sm text-muted-foreground">
-                  {currentFilePath
-                    ? currentFilePath.startsWith(MONACO_ROOT_PATH)
-                      ? currentFilePath.slice(MONACO_ROOT_PATH.length + 1)
-                      : currentFilePath.split("/").pop()
-                    : "Untitled Notebook"}
-                </div>
-              </div>
+              )}
 
               {/* Error Display */}
               {error && (
@@ -389,6 +474,23 @@ export default function NotebookPage() {
                     <p className="text-sm text-muted-foreground">Loading notebook...</p>
                   </div>
                 </div>
+              ) : notebookStates.length === 0 ? (
+                /* Empty State */
+                <div className="flex-1 flex items-center justify-center">
+                  <div className="flex flex-col items-center gap-4 text-center">
+                    <FileJson className="h-16 w-16 text-muted-foreground/50" />
+                    <div>
+                      <h3 className="text-lg font-semibold">No Notebooks Open</h3>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Create a new notebook or open one from the file tree
+                      </p>
+                    </div>
+                    <Button onClick={handleNewNotebook} className="gap-2">
+                      <FileJson className="h-4 w-4" />
+                      New Notebook
+                    </Button>
+                  </div>
+                </div>
               ) : (
                 /* Custom Notebook Editor */
                 <div className="flex-1 overflow-hidden">
@@ -398,7 +500,7 @@ export default function NotebookPage() {
                     contextId={contextId}
                     contextStatus={contextStatus}
                     language={language}
-                    onNotebookChange={setNotebook}
+                    onNotebookChange={handleNotebookChange}
                     onContextChange={handleContextChange}
                     onSave={handleSave}
                     isSaving={saveNotebookMutation.isPending}

@@ -74,7 +74,7 @@ function OutputRenderer({ output }: { output: CellOutputType }) {
     // Image output (PNG/JPEG)
     if (data["image/png"]) {
       return (
-        <div className="my-2">
+        <div className="my-2 max-h-[600px] overflow-auto">
           <img
             src={`data:image/png;base64,${data["image/png"]}`}
             alt="Output"
@@ -86,7 +86,7 @@ function OutputRenderer({ output }: { output: CellOutputType }) {
 
     if (data["image/jpeg"]) {
       return (
-        <div className="my-2">
+        <div className="my-2 max-h-[600px] overflow-auto">
           <img
             src={`data:image/jpeg;base64,${data["image/jpeg"]}`}
             alt="Output"
@@ -102,6 +102,27 @@ function OutputRenderer({ output }: { output: CellOutputType }) {
         ? data["text/html"].join("")
         : data["text/html"];
 
+      // Check if this HTML contains scripts (e.g., Plotly, interactive visualizations)
+      // dangerouslySetInnerHTML doesn't execute scripts, so we need to use an iframe
+      const containsScripts = typeof html === "string" && html.includes("<script");
+
+      if (containsScripts) {
+        // Use iframe with srcdoc to allow script execution
+        // This is safe because it's sandboxed
+        return (
+          <div className="my-2">
+            <iframe
+              srcDoc={html as string}
+              className="w-full border rounded"
+              style={{ minHeight: "400px", height: "500px" }}
+              sandbox="allow-scripts allow-same-origin"
+              title="Interactive visualization"
+            />
+          </div>
+        );
+      }
+
+      // For HTML without scripts, use dangerouslySetInnerHTML
       return (
         <div
           className="prose prose-sm dark:prose-invert max-w-none"

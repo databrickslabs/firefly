@@ -557,7 +557,7 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
             {pendingCreations.has(MONACO_ROOT_PATH) && (
               <div
                 className="flex items-center gap-2 px-2 py-1 text-xs text-green-600"
-                style={{ paddingLeft: 8 }}
+                style={{ paddingLeft: 4 }}
               >
                 <Loader2 className="h-3 w-3 animate-spin" />
                 <span className="font-medium">
@@ -581,7 +581,7 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
                 {node.isDirectory && expandedPaths.has(node.path) && loadingFolders.has(node.path) && (
                   <div
                     className="flex items-center gap-2 px-2 py-1 text-xs text-muted-foreground"
-                    style={{ paddingLeft: (node.level + 1) * 12 + 8 }}
+                    style={{ paddingLeft: `${4 + (Math.max(0, node.level) * 12)}px` }}
                   >
                     <Loader2 className="h-3 w-3 animate-spin" />
                     <span>Loading...</span>
@@ -591,7 +591,7 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
                 {node.isDirectory && expandedPaths.has(node.path) && pendingCreations.has(node.path) && (
                   <div
                     className="flex items-center gap-2 px-2 py-1 text-xs text-green-600"
-                    style={{ paddingLeft: (node.level + 1) * 12 + 8 }}
+                    style={{ paddingLeft: `${4 + (Math.max(0, node.level) * 12)}px` }}
                   >
                     <Loader2 className="h-3 w-3 animate-spin" />
                     <span className="font-medium">
@@ -732,18 +732,21 @@ function FileTreeItem({
   onDelete,
   isDeleting = false,
 }: FileTreeItemProps) {
-  const paddingLeft = node.level * 12 + 8;
+  // Calculate padding: base 4px + 12px per level for proper indentation
+  // Subtract 1 from level since we start from MONACO_ROOT_PATH
+  const adjustedLevel = Math.max(0, node.level - 1);
+  const paddingLeft = 4 + (adjustedLevel * 12);
 
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div
           className={`
-            flex items-center gap-1 px-2 py-1 cursor-pointer hover:bg-accent text-sm
+            flex items-center gap-2 py-1.5 cursor-pointer hover:bg-accent text-sm
             ${isSelected ? "bg-accent" : ""}
             ${isDeleting ? "opacity-50" : ""}
           `}
-          style={{ paddingLeft }}
+          style={{ paddingLeft: `${paddingLeft}px`, paddingRight: '4px' }}
           onClick={onClick}
         >
           {isDeleting ? (
@@ -774,7 +777,7 @@ function FileTreeItem({
                 </>
               ) : (
                 <>
-                  <span className="w-3" />
+                  <ChevronRight className="h-3 w-3 shrink-0 opacity-0" />
                   <File className="h-4 w-4 shrink-0 text-blue-600" />
                 </>
               )}
