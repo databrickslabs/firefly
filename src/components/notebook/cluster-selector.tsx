@@ -43,7 +43,7 @@ export function ClusterSelector({
   value,
   onValueChange,
   refreshTrigger,
-  onClusterStateChange
+  onClusterStateChange,
 }: ClusterSelectorProps) {
   const [open, setOpen] = React.useState(false);
 

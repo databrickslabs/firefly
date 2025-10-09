@@ -3,21 +3,28 @@
 import * as React from "react";
 import Editor, { OnMount } from "@monaco-editor/react";
 import type * as Monaco from "monaco-editor";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { NotebookCell as NotebookCellType } from "@/lib/notebook-manager";
 import { CellOutput } from "./cell-output";
 import { Button } from "@/components/ui/button";
 import {
   Play,
   Square,
-  Trash2,
   ChevronUp,
   ChevronDown,
-  Plus,
+  MoreVertical,
   Loader2,
   Code,
   Type,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface NotebookCellProps {
   cell: NotebookCellType;
@@ -55,6 +62,7 @@ export function NotebookCell({
   readOnly = false,
 }: NotebookCellProps) {
   const editorRef = React.useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
+  const [isEditingMarkdown, setIsEditingMarkdown] = React.useState(false);
 
   const handleEditorDidMount: OnMount = React.useCallback(
     (editor, monaco) => {
@@ -77,6 +85,21 @@ export function NotebookCell({
     },
     [isRunning, cell.type, onRun, onInsertBelow]
   );
+
+  // Cleanup editor on unmount
+  React.useEffect(() => {
+    return () => {
+      if (editorRef.current) {
+        try {
+          editorRef.current.dispose();
+        } catch (error) {
+          // Silently handle disposal errors during cleanup
+          console.debug("Editor cleanup error:", error);
+        }
+        editorRef.current = null;
+      }
+    };
+  }, []);
 
   const getLanguage = () => {
     if (cell.type === "markdown") return "markdown";
@@ -204,51 +227,48 @@ export function NotebookCell({
           </Button>
         )}
 
-        {onInsertAbove && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-2"
-            onClick={(e) => {
-              e.stopPropagation();
-              onInsertAbove();
-            }}
-            title="Insert Above"
-          >
-            <Plus className="h-3 w-3" />
-          </Button>
-        )}
-
-        {onInsertBelow && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-2"
-            onClick={(e) => {
-              e.stopPropagation();
-              onInsertBelow();
-            }}
-            title="Insert Below"
-          >
-            <Plus className="h-3 w-3" />
-          </Button>
-        )}
-
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 px-2 text-red-600 hover:text-red-700 hover:bg-red-100 dark:hover:bg-red-900/20"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete();
-          }}
-          title="Delete Cell"
-        >
-          <Trash2 className="h-3 w-3" />
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <MoreVertical className="h-3 w-3" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {onInsertAbove && (
+              <DropdownMenuItem onClick={(e) => {
+                e.stopPropagation();
+                onInsertAbove();
+              }}>
+                Insert Cell Above
+              </DropdownMenuItem>
+            )}
+            {onInsertBelow && (
+              <DropdownMenuItem onClick={(e) => {
+                e.stopPropagation();
+                onInsertBelow();
+              }}>
+                Insert Cell Below
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete();
+              }}
+              className="text-red-600 focus:text-red-700 focus:bg-red-100 dark:focus:bg-red-900/20"
+            >
+              Delete Cell
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
-      {/* Editor */}
+      {/* Editor or Rendered Markdown */}
       <div className="relative min-h-[100px]">
         {isRunning && (
           <div className="absolute top-2 right-2 z-10">
@@ -256,32 +276,51 @@ export function NotebookCell({
           </div>
         )}
 
-        <Editor
-          height="100px"
-          defaultLanguage={getLanguage()}
-          language={getLanguage()}
-          value={cell.source}
-          onChange={(value) => onSourceChange(value || "")}
-          onMount={handleEditorDidMount}
-          theme="vs"
-          options={{
-            minimap: { enabled: false },
-            fontSize: 14,
-            lineNumbers: "on",
-            scrollBeyondLastLine: false,
-            automaticLayout: true,
-            tabSize: 2,
-            readOnly: readOnly || isRunning,
-            wordWrap: "on",
-            padding: { top: 8, bottom: 8 },
-            scrollbar: {
-              alwaysConsumeMouseWheel: false,
-            },
-            overviewRulerLanes: 0,
-            hideCursorInOverviewRuler: true,
-            overviewRulerBorder: false,
-          }}
-        />
+        {cell.type === "markdown" && !isEditingMarkdown && cell.source.trim() ? (
+          <div
+            className="px-4 py-3 markdown-content cursor-pointer hover:bg-accent/5"
+            onDoubleClick={() => setIsEditingMarkdown(true)}
+            title="Double-click to edit"
+          >
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{cell.source}</ReactMarkdown>
+          </div>
+        ) : (
+          <div
+            onBlur={() => {
+              if (cell.type === "markdown") {
+                setTimeout(() => setIsEditingMarkdown(false), 200);
+              }
+            }}
+          >
+            <Editor
+              key={cell.id}
+              height="100px"
+              defaultLanguage={getLanguage()}
+              language={getLanguage()}
+              value={cell.source}
+              onChange={(value) => onSourceChange(value || "")}
+              onMount={handleEditorDidMount}
+              theme="vs"
+              options={{
+                minimap: { enabled: false },
+                fontSize: 14,
+                lineNumbers: cell.type === "markdown" ? "off" : "on",
+                scrollBeyondLastLine: false,
+                automaticLayout: true,
+                tabSize: 2,
+                readOnly: readOnly || isRunning,
+                wordWrap: "on",
+                padding: { top: 8, bottom: 8 },
+                scrollbar: {
+                  alwaysConsumeMouseWheel: false,
+                },
+                overviewRulerLanes: 0,
+                hideCursorInOverviewRuler: true,
+                overviewRulerBorder: false,
+              }}
+            />
+          </div>
+        )}
       </div>
 
       {/* Output */}

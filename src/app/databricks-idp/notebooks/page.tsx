@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { FileTree } from "@/components/sql-editor/file-tree";
 import { CollapsibleSidebar } from "@/components/sql-editor/collapsible-sidebar";
@@ -17,7 +16,12 @@ import {
 } from "@/lib/notebook-manager";
 import { MONACO_ROOT_PATH } from "@/lib/workspace-file-manager";
 import { Button } from "@/components/ui/button";
-import { Loader2, FileJson, AlertCircle, Sparkles } from "lucide-react";
+import { Loader2, FileJson, AlertCircle } from "lucide-react";
+import {
+  loadClusterContext,
+  saveClusterContext,
+} from "@/lib/cluster-storage";
+import { useCreateContext, useContextStatus } from "@/hooks/use-notebook-context";
 import {
   Select,
   SelectContent,
@@ -38,11 +42,10 @@ import { Label } from "@/components/ui/label";
 
 export default function NotebookPage() {
   const queryClient = useQueryClient();
-  const router = useRouter();
   const sidebarPanelRef = React.useRef<React.ElementRef<typeof Panel>>(null);
 
   const [clusterId, setClusterId] = React.useState<string>("");
-  const [clusterState, setClusterState] = React.useState<string | undefined>();
+  const [contextId, setContextId] = React.useState<string | null>(null);
   const [language, setLanguage] = React.useState<string>("python");
   const [notebook, setNotebook] = React.useState<Notebook>(createEmptyNotebook());
   const [currentFilePath, setCurrentFilePath] = React.useState<string | null>(null);
@@ -50,6 +53,89 @@ export default function NotebookPage() {
   const [isLoadingFile, setIsLoadingFile] = React.useState(false);
   const [saveAsDialogOpen, setSaveAsDialogOpen] = React.useState(false);
   const [notebookName, setNotebookName] = React.useState("");
+
+  // Load persisted cluster selection on mount
+  React.useEffect(() => {
+    const stored = loadClusterContext();
+    if (stored) {
+      setClusterId(stored.clusterId);
+      setContextId(stored.contextId);
+      setLanguage(stored.language);
+    }
+  }, []);
+
+  // Create context mutation
+  const createContextMutation = useCreateContext();
+
+  // Monitor context status with periodic health checks (every 5 seconds)
+  const { data: contextStatus } = useContextStatus(clusterId, contextId, {
+    enabled: Boolean(clusterId && contextId),
+    refetchInterval: 5000,
+  });
+
+  // Auto-create context when cluster changes (and no context exists)
+  React.useEffect(() => {
+    if (clusterId && !contextId && !createContextMutation.isPending) {
+      createContextMutation.mutate(
+        { clusterId, language },
+        {
+          onSuccess: (data) => {
+            setContextId(data.id);
+            // Context is saved to localStorage in the hook
+          },
+          onError: (err) => {
+            setError(`Failed to create execution context: ${err.message}`);
+          },
+        }
+      );
+    }
+  }, [clusterId, contextId, language]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Handle dead or unhealthy contexts - recreate if needed
+  React.useEffect(() => {
+    if (
+      contextStatus &&
+      !contextStatus.healthy &&
+      clusterId &&
+      contextId &&
+      !createContextMutation.isPending &&
+      contextStatus.clusterState === "RUNNING"
+    ) {
+      // Cluster is running but context is unhealthy - recreate context
+      console.log("Context unhealthy, recreating...", contextStatus.reason);
+      setContextId(null); // This will trigger context recreation
+    }
+  }, [contextStatus, clusterId, contextId, createContextMutation.isPending]);
+
+  // Handle cluster selection change
+  const handleClusterChange = (newClusterId: string) => {
+    setClusterId(newClusterId);
+    setContextId(null); // Reset context when cluster changes
+    setError(null);
+
+    // Save to localStorage (without context yet)
+    saveClusterContext({
+      clusterId: newClusterId,
+      contextId: null,
+      language,
+      timestamp: Date.now(),
+    });
+  };
+
+  // Handle context change (e.g., from kernel restart)
+  const handleContextChange = (newContextId: string | null) => {
+    setContextId(newContextId);
+
+    // Update localStorage
+    if (clusterId) {
+      saveClusterContext({
+        clusterId,
+        contextId: newContextId,
+        language,
+        timestamp: Date.now(),
+      });
+    }
+  };
 
   // Save notebook mutation
   const saveNotebookMutation = useMutation({
@@ -204,11 +290,55 @@ export default function NotebookPage() {
             <div className="h-full flex flex-col">
               {/* Top Toolbar */}
               <div className="px-4 py-2 border-b flex items-center gap-4 bg-background">
-                <ClusterSelector
-                  value={clusterId}
-                  onValueChange={setClusterId}
-                  onClusterStateChange={setClusterState}
-                />
+                <div className="flex items-center gap-2">
+                  <ClusterSelector
+                    value={clusterId}
+                    onValueChange={handleClusterChange}
+                  />
+
+                  {/* Context Status Indicator */}
+                  {clusterId && (
+                    <div className="relative group">
+                      {contextId && contextStatus ? (
+                        <div
+                          className={`w-3 h-3 rounded-full ${
+                            contextStatus.healthy
+                              ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]"
+                              : "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)]"
+                          } cursor-help`}
+                          title={contextId}
+                        />
+                      ) : (
+                        <div className="w-3 h-3 rounded-full bg-yellow-500 animate-pulse shadow-[0_0_8px_rgba(234,179,8,0.6)]"
+                          title="Creating context..."
+                        />
+                      )}
+
+                      {/* Tooltip */}
+                      <div className="absolute left-0 top-full mt-2 hidden group-hover:block z-50 whitespace-nowrap">
+                        <div className="bg-popover text-popover-foreground px-3 py-2 rounded-md shadow-md border text-sm">
+                          {contextId ? (
+                            <>
+                              <div className="font-semibold">
+                                {contextStatus?.healthy ? "Context Ready" : "Context Unhealthy"}
+                              </div>
+                              <div className="text-xs text-muted-foreground mt-1">
+                                Context ID: {contextId}
+                              </div>
+                              {contextStatus?.reason && (
+                                <div className="text-xs text-muted-foreground mt-1">
+                                  {contextStatus.reason}
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <div>Creating execution context...</div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
 
                 <Select value={language} onValueChange={setLanguage}>
                   <SelectTrigger className="w-[150px]">
@@ -223,17 +353,6 @@ export default function NotebookPage() {
                 </Select>
 
                 <div className="flex-1" />
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => router.push("/databricks-idp/notebooks/jupyterlite")}
-                  className="gap-2"
-                  title="Switch to JupyterLite"
-                >
-                  <Sparkles className="h-4 w-4" />
-                  Use JupyterLite
-                </Button>
 
                 <Button
                   variant="outline"
@@ -276,8 +395,11 @@ export default function NotebookPage() {
                   <NotebookEditor
                     notebook={notebook}
                     clusterId={clusterId || null}
+                    contextId={contextId}
+                    contextStatus={contextStatus}
                     language={language}
                     onNotebookChange={setNotebook}
+                    onContextChange={handleContextChange}
                     onSave={handleSave}
                     isSaving={saveNotebookMutation.isPending}
                     readOnly={false}

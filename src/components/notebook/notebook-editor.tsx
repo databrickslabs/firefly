@@ -1,26 +1,26 @@
 "use client";
 
 import * as React from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { flushSync } from "react-dom";
+import { useMutation } from "@tanstack/react-query";
 import { NotebookCell } from "./notebook-cell";
 import type {
   Notebook,
-  NotebookCell as NotebookCellType,
   CellType,
 } from "@/lib/notebook-manager";
 import {
-  createEmptyCell,
   insertCellAt,
   deleteCellAt,
   updateCellAt,
   moveCellUp,
   moveCellDown,
-  clearCellOutputs,
   clearAllOutputs,
   databricksResultToCellOutput,
 } from "@/lib/notebook-manager";
 import { Button } from "@/components/ui/button";
-import { Plus, Play, Square, Trash2, Save, Loader2 } from "lucide-react";
+import { ButtonGroup } from "@/components/ui/button-group";
+import { Plus, Play, Trash2, Save, Loader2, RotateCcw } from "lucide-react";
+import type { ContextStatusResponse } from "@/hooks/use-notebook-context";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -35,8 +35,11 @@ import {
 interface NotebookEditorProps {
   notebook: Notebook;
   clusterId: string | null;
+  contextId: string | null;
+  contextStatus?: ContextStatusResponse;
   language?: string;
   onNotebookChange: (notebook: Notebook) => void;
+  onContextChange?: (contextId: string | null) => void;
   onSave?: () => void;
   isSaving?: boolean;
   readOnly?: boolean;
@@ -45,46 +48,22 @@ interface NotebookEditorProps {
 export function NotebookEditor({
   notebook,
   clusterId,
+  contextId,
+  contextStatus,
   language = "python",
   onNotebookChange,
+  onContextChange,
   onSave,
   isSaving = false,
   readOnly = false,
 }: NotebookEditorProps) {
   const [selectedCellIndex, setSelectedCellIndex] = React.useState<number>(0);
-  const [contextId, setContextId] = React.useState<string | null>(null);
   const [runningCells, setRunningCells] = React.useState<Set<number>>(new Set());
   const [clearAllDialog, setClearAllDialog] = React.useState(false);
-
-  // Create execution context when cluster changes
-  const createContextMutation = useMutation({
-    mutationFn: async ({ clusterId, lang }: { clusterId: string; lang: string }) => {
-      const response = await fetch("/api/databricks/contexts/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          cluster_id: clusterId,
-          language: lang,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to create execution context");
-      }
-
-      return response.json();
-    },
-    onSuccess: (data) => {
-      setContextId(data.id);
-    },
-  });
-
-  // Create context when cluster is selected
-  React.useEffect(() => {
-    if (clusterId && !contextId) {
-      createContextMutation.mutate({ clusterId, lang: language });
-    }
-  }, [clusterId, language]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [restartKernelDialog, setRestartKernelDialog] = React.useState(false);
+  const [isRestartingKernel, setIsRestartingKernel] = React.useState(false);
+  // Version counter to force remounts during moves - prevents Monaco Editor stale render issues
+  const [cellsVersion, setCellsVersion] = React.useState(0);
 
   // Execute cell mutation
   const executeCellMutation = useMutation({
@@ -128,30 +107,27 @@ export function NotebookEditor({
     },
   });
 
-  // Poll for command status
-  const { data: statusData, refetch: refetchStatus } = useQuery({
-    queryKey: ["command-status", contextId],
-    queryFn: async () => {
-      const runningCellsArray = Array.from(runningCells);
-      if (runningCellsArray.length === 0 || !clusterId || !contextId) {
-        return null;
-      }
-
-      // Get the first running cell
-      const cellIndex = runningCellsArray[0];
-      const cell = notebook.cells[cellIndex];
-
-      // This would need the commandId - we'll need to track it per cell
-      // For now, we'll skip this and use a simpler approach
-      return null;
-    },
-    enabled: false, // Disabled for now - needs refactoring to track commandId per cell
-    refetchInterval: 1000,
-  });
-
   const handleRunCell = (index: number) => {
     const cell = notebook.cells[index];
     if (cell.type !== "code" || !cell.source.trim()) return;
+
+    // Check if context is healthy before executing
+    if (!isContextHealthy) {
+      onNotebookChange(
+        updateCellAt(notebook, index, {
+          executionState: "failed",
+          outputs: [
+            {
+              output_type: "error",
+              ename: "ContextError",
+              evalue: "Execution context is not ready. Please wait for cluster to be running.",
+              traceback: [contextStatus?.reason || "Context not available"],
+            },
+          ],
+        })
+      );
+      return;
+    }
 
     const startTime = Date.now();
 
@@ -270,66 +246,163 @@ export function NotebookEditor({
     setClearAllDialog(false);
   };
 
+  const handleMoveUp = (index: number) => {
+    if (index === 0) return;
+
+    // Use flushSync to ensure DOM updates complete before Monaco Editor tries to render
+    flushSync(() => {
+      onNotebookChange(moveCellUp(notebook, index));
+      setCellsVersion((v) => v + 1);
+      setSelectedCellIndex(index - 1);
+    });
+  };
+
+  const handleMoveDown = (index: number) => {
+    if (index >= notebook.cells.length - 1) return;
+
+    // Use flushSync to ensure DOM updates complete before Monaco Editor tries to render
+    flushSync(() => {
+      onNotebookChange(moveCellDown(notebook, index));
+      setCellsVersion((v) => v + 1);
+      setSelectedCellIndex(index + 1);
+    });
+  };
+
+  const handleRestartKernel = async () => {
+    if (!clusterId || !contextId) return;
+
+    setIsRestartingKernel(true);
+
+    try {
+      // First destroy the existing context
+      const destroyResponse = await fetch("/api/databricks/contexts/destroy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cluster_id: clusterId,
+          context_id: contextId,
+        }),
+      });
+
+      if (!destroyResponse.ok) {
+        throw new Error("Failed to destroy context");
+      }
+
+      // Create a new context
+      const createResponse = await fetch("/api/databricks/contexts/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cluster_id: clusterId,
+          language,
+        }),
+      });
+
+      if (!createResponse.ok) {
+        throw new Error("Failed to create new context");
+      }
+
+      const newContextData = await createResponse.json();
+      const newContextId = newContextData.id;
+
+      // Update parent component with new contextId (this will update localStorage)
+      if (onContextChange) {
+        onContextChange(newContextId);
+      }
+
+      // Clear all outputs
+      onNotebookChange(clearAllOutputs(notebook));
+      setRunningCells(new Set());
+
+      setRestartKernelDialog(false);
+    } catch (error) {
+      console.error("Failed to restart kernel:", error);
+      // Handle error - could show a toast notification here
+    } finally {
+      setIsRestartingKernel(false);
+    }
+  };
+
   const hasRunningCells = runningCells.size > 0;
+  const isContextHealthy = contextStatus?.healthy ?? false;
+  const contextReadyToExecute = clusterId && contextId && isContextHealthy;
 
   return (
     <div className="h-full flex flex-col">
       {/* Toolbar */}
       <div className="px-4 py-2 border-b flex items-center gap-2 bg-background">
-        <Button
-          variant="default"
-          size="sm"
-          onClick={handleRunAll}
-          disabled={!clusterId || !contextId || hasRunningCells || readOnly}
-          className="gap-2"
-        >
-          {hasRunningCells ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Running...
-            </>
-          ) : (
-            <>
-              <Play className="h-4 w-4" />
-              Run All
-            </>
-          )}
-        </Button>
+        <ButtonGroup>
+          <Button
+            variant="default"
+            size="sm"
+            onClick={handleRunAll}
+            disabled={!contextReadyToExecute || hasRunningCells || readOnly}
+          >
+            {hasRunningCells ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                Running...
+              </>
+            ) : (
+              <>
+                <Play className="h-4 w-4 mr-2" />
+                Run All
+              </>
+            )}
+          </Button>
 
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => handleInsertBelow(selectedCellIndex)}
-          disabled={readOnly}
-          className="gap-2"
-        >
-          <Plus className="h-4 w-4" />
-          Insert Cell
-        </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handleInsertBelow(selectedCellIndex)}
+            disabled={readOnly}
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Insert Cell
+          </Button>
 
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setClearAllDialog(true)}
-          disabled={readOnly}
-          className="gap-2"
-        >
-          <Trash2 className="h-4 w-4" />
-          Clear All Outputs
-        </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setClearAllDialog(true)}
+            disabled={readOnly}
+          >
+            <Trash2 className="h-4 w-4 mr-2" />
+            Clear All Outputs
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setRestartKernelDialog(true)}
+            disabled={!contextReadyToExecute || hasRunningCells || readOnly || isRestartingKernel}
+          >
+            {isRestartingKernel ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                Restarting...
+              </>
+            ) : (
+              <>
+                <RotateCcw className="h-4 w-4 mr-2" />
+                Restart Kernel
+              </>
+            )}
+          </Button>
+        </ButtonGroup>
 
         <div className="flex-1" />
 
         {onSave && (
-          <Button variant="outline" size="sm" onClick={onSave} disabled={isSaving} className="gap-2">
+          <Button variant="outline" size="sm" onClick={onSave} disabled={isSaving}>
             {isSaving ? (
               <>
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
                 Saving...
               </>
             ) : (
               <>
-                <Save className="h-4 w-4" />
+                <Save className="h-4 w-4 mr-2" />
                 Save
               </>
             )}
@@ -341,7 +414,7 @@ export function NotebookEditor({
       <div className="flex-1 overflow-auto">
         {notebook.cells.map((cell, index) => (
           <NotebookCell
-            key={cell.id}
+            key={`${cell.id}-v${cellsVersion}`}
             cell={cell}
             index={index}
             isSelected={selectedCellIndex === index}
@@ -350,12 +423,8 @@ export function NotebookEditor({
             onSourceChange={(source) => handleCellSourceChange(index, source)}
             onRun={() => handleRunCell(index)}
             onDelete={() => handleDeleteCell(index)}
-            onMoveUp={index > 0 ? () => onNotebookChange(moveCellUp(notebook, index)) : undefined}
-            onMoveDown={
-              index < notebook.cells.length - 1
-                ? () => onNotebookChange(moveCellDown(notebook, index))
-                : undefined
-            }
+            onMoveUp={index > 0 ? () => handleMoveUp(index) : undefined}
+            onMoveDown={index < notebook.cells.length - 1 ? () => handleMoveDown(index) : undefined}
             onInsertAbove={() => handleInsertAbove(index)}
             onInsertBelow={() => handleInsertBelow(index)}
             onChangeType={(type) => onNotebookChange(updateCellAt(notebook, index, { type }))}
@@ -376,6 +445,32 @@ export function NotebookEditor({
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleClearAllOutputs}>Clear All</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Restart Kernel Dialog */}
+      <AlertDialog open={restartKernelDialog} onOpenChange={setRestartKernelDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Restart Kernel</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will destroy the current execution context and create a new one. All variables and
+              imports will be lost. All cell outputs will be cleared. Do you want to continue?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isRestartingKernel}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleRestartKernel} disabled={isRestartingKernel}>
+              {isRestartingKernel ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Restarting...
+                </>
+              ) : (
+                "Restart Kernel"
+              )}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

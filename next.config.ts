@@ -30,6 +30,14 @@ const nextConfig: NextConfig = {
         source: "/jupyterlite/:path*",
         headers: [
           {
+            key: "Access-Control-Allow-Origin",
+            value: "*",
+          },
+          {
+            key: "Access-Control-Allow-Methods",
+            value: "GET, HEAD, OPTIONS",
+          },
+          {
             key: "Cross-Origin-Embedder-Policy",
             value: "credentialless",
           },

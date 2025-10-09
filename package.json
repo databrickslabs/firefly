@@ -43,13 +43,17 @@
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-jupyter-notebook": "^0.4.0",
+    "react-markdown": "^10.1.0",
     "react-resizable-panels": "^3.0.6",
+    "rehype-raw": "^7.0.0",
+    "remark-gfm": "^4.0.1",
     "tailwind-merge": "^3.3.1",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
+    "@tailwindcss/typography": "^0.5.19",
     "@types/node": "^20",
     "@types/papaparse": "^5.3.16",
     "@types/react": "^19",
