@@ -5,6 +5,7 @@ import {
   ColumnDef,
   ColumnFiltersState,
   SortingState,
+  VisibilityState,
   flexRender,
   getCoreRowModel,
   getFilteredRowModel,
@@ -12,7 +13,7 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import { ArrowUpDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Search } from "lucide-react";
+import { ArrowUpDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Search, SlidersHorizontal } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,6 +32,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ColumnToggle } from "./column-toggle";
+import { FilterDialog } from "./filter-dialog";
 
 interface DataTableProps {
   data: unknown[][];
@@ -45,6 +48,7 @@ interface DataTableProps {
 export function DataTable({ data, schema, truncated = false }: DataTableProps) {
   const [sorting, setSorting] = React.useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([]);
+  const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({});
   const [globalFilter, setGlobalFilter] = React.useState("");
 
   // Convert array data to object data for TanStack Table
@@ -90,6 +94,49 @@ export function DataTable({ data, schema, truncated = false }: DataTableProps) {
         }
         return <span>{String(value)}</span>;
       },
+      filterFn: (row, columnId, filterValue) => {
+        // If filterValue is a simple string, use default filtering
+        if (typeof filterValue === "string") {
+          const cellValue = String(row.getValue(columnId) ?? "");
+          return cellValue.toLowerCase().includes(filterValue.toLowerCase());
+        }
+
+        // If filterValue is an object with operator and filterValue
+        if (filterValue && typeof filterValue === "object") {
+          const { operator, filterValue: value } = filterValue as {
+            operator: string;
+            filterValue: string;
+          };
+          const cellValue = String(row.getValue(columnId) ?? "");
+          const valueLower = value.toLowerCase();
+          const cellValueLower = cellValue.toLowerCase();
+
+          switch (operator) {
+            case "equals":
+              return cellValueLower === valueLower;
+            case "notEquals":
+              return cellValueLower !== valueLower;
+            case "contains":
+              return cellValueLower.includes(valueLower);
+            case "startsWith":
+              return cellValueLower.startsWith(valueLower);
+            case "endsWith":
+              return cellValueLower.endsWith(valueLower);
+            case "greaterThan":
+              return Number(cellValue) > Number(value);
+            case "lessThan":
+              return Number(cellValue) < Number(value);
+            case "greaterThanOrEqual":
+              return Number(cellValue) >= Number(value);
+            case "lessThanOrEqual":
+              return Number(cellValue) <= Number(value);
+            default:
+              return true;
+          }
+        }
+
+        return true;
+      },
     }));
   }, [schema]);
 
@@ -102,10 +149,12 @@ export function DataTable({ data, schema, truncated = false }: DataTableProps) {
     getFilteredRowModel: getFilteredRowModel(),
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
+    onColumnVisibilityChange: setColumnVisibility,
     onGlobalFilterChange: setGlobalFilter,
     state: {
       sorting,
       columnFilters,
+      columnVisibility,
       globalFilter,
     },
     initialState: {
@@ -117,19 +166,9 @@ export function DataTable({ data, schema, truncated = false }: DataTableProps) {
 
   return (
     <div className="space-y-3">
-      {/* Search and Info Bar */}
+      {/* Toolbar */}
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 flex-1">
-          <div className="relative flex-1 max-w-sm">
-            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search all columns..."
-              value={globalFilter ?? ""}
-              onChange={(event) => setGlobalFilter(event.target.value)}
-              className="pl-8 h-8 text-xs"
-            />
-          </div>
-        </div>
+        {/* Left side: Info */}
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           {truncated && (
             <span className="px-2 py-1 rounded bg-yellow-500/10 text-yellow-600 dark:text-yellow-400">
@@ -139,6 +178,31 @@ export function DataTable({ data, schema, truncated = false }: DataTableProps) {
           <span>
             {tableData.length.toLocaleString()} row{tableData.length !== 1 ? "s" : ""}
           </span>
+        </div>
+
+        {/* Right side: Controls */}
+        <div className="flex items-center gap-2">
+          {/* Search */}
+          <div className="relative w-[200px]">
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <Input
+              placeholder="Search"
+              value={globalFilter ?? ""}
+              onChange={(event) => setGlobalFilter(event.target.value)}
+              className="pl-8 h-8 text-xs"
+            />
+          </div>
+
+          {/* Filter */}
+          <FilterDialog table={table} />
+
+          {/* More Options (placeholder for future features) */}
+          <Button variant="outline" size="sm" className="h-8 w-8 p-0">
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+          </Button>
+
+          {/* Column Toggle */}
+          <ColumnToggle table={table} />
         </div>
       </div>
 

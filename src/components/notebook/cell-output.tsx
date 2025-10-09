@@ -130,7 +130,7 @@ function OutputRenderer({ output }: { output: CellOutputType }) {
         // Use iframe with srcdoc to allow script execution
         // This is safe because it's sandboxed
         return (
-          <div className="my-2">
+          <div className="my-2 max-h-[600px] overflow-auto">
             <iframe
               srcDoc={html as string}
               className="w-full border rounded"
