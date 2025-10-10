@@ -12,6 +12,10 @@ interface UserDataResponse {
   data: DatabricksWorkspaceTokenInfo
 }
 
+interface AccountNotFoundError extends Error {
+  accountNotFound?: boolean
+}
+
 export function UserStoreInitializer({ children }: { children: ReactNode }) {
   const router = useRouter()
   const { data: session } = useSession()
@@ -26,15 +30,15 @@ export function UserStoreInitializer({ children }: { children: ReactNode }) {
         let errorData
         try {
           errorData = await response.json()
-        } catch (parseError) {
+        } catch {
           // If JSON parsing fails, throw generic error
           throw new Error('Failed to fetch user data')
         }
 
         // Check if it's an "Account not found" error
         if (errorData.details?.includes('Account not found')) {
-          const error = new Error('Account not found')
-          ;(error as any).accountNotFound = true
+          const error: AccountNotFoundError = new Error('Account not found')
+          error.accountNotFound = true
           console.log('Account not found', error)
           throw error
         }
@@ -49,14 +53,15 @@ export function UserStoreInitializer({ children }: { children: ReactNode }) {
 
   // Handle "Account not found" error - sign out and redirect to login
   useEffect(() => {
+    const accountError = error as AccountNotFoundError | null
     console.log('useEffect check:', {
       hasError: !!error,
-      accountNotFound: (error as any)?.accountNotFound,
+      accountNotFound: accountError?.accountNotFound,
       hasSession: !!session,
       email: session?.user?.email
     })
 
-    if (error && (error as any).accountNotFound) {
+    if (error && accountError?.accountNotFound) {
       // Sign out the user and redirect to org selector
       console.log('Signing out user due to account not found')
       signOut({
