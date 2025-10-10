@@ -14,28 +14,24 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Databricks But Not",
+  title: "FireFly Analytics",
   description: "A reference implementation of building a Analytics + AI platform using Databricks as the backend",
-  icons: {
-    icon: "/logo.png",
-    apple: "/logo.png",
-  },
   openGraph: {
-    title: "Databricks But Not",
+    title: "FireFly Analytics",
     description: "A reference implementation of building a Analytics + AI platform using Databricks as the backend",
     images: [
       {
         url: "/logo.png",
         width: 1200,
         height: 630,
-        alt: "Databricks But Not Logo",
+        alt: "FireFly Analytics Logo",
       },
     ],
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Databricks But Not",
+    title: "FireFly Analytics",
     description: "A reference implementation of building a Analytics + AI platform using Databricks as the backend",
     images: ["/logo.png"],
   },

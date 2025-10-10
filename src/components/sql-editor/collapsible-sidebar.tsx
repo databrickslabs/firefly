@@ -87,7 +87,8 @@ export const CollapsibleSidebar = React.memo(function CollapsibleSidebar({
                 size="icon"
                 className={cn(
                   "h-10 w-10",
-                  activeView === "files" && "bg-accent"
+                  activeView === "files" && isExpanded && "bg-slate-200 border border-slate-300 text-slate-700 hover:bg-slate-300 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300",
+                  activeView === "files" && !isExpanded && "bg-accent text-foreground"
                 )}
                 onClick={() => handleViewToggle("files")}
               >
@@ -106,7 +107,8 @@ export const CollapsibleSidebar = React.memo(function CollapsibleSidebar({
                 size="icon"
                 className={cn(
                   "h-10 w-10",
-                  activeView === "catalog" && "bg-accent"
+                  activeView === "catalog" && isExpanded && "bg-slate-200 border border-slate-300 text-slate-700 hover:bg-slate-300 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300",
+                  activeView === "catalog" && !isExpanded && "bg-accent text-foreground"
                 )}
                 onClick={() => handleViewToggle("catalog")}
               >

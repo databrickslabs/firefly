@@ -128,14 +128,15 @@ function OutputRenderer({ output }: { output: CellOutputType }) {
 
       if (containsScripts) {
         // Use iframe with srcdoc to allow script execution
-        // This is safe because it's sandboxed
+        // Security: Only allow-scripts without allow-same-origin to prevent sandbox escape
+        // This means scripts can run but cannot access parent document
         return (
           <div className="my-2 max-h-[600px] overflow-auto">
             <iframe
               srcDoc={html as string}
               className="w-full border rounded"
               style={{ minHeight: "400px", height: "500px" }}
-              sandbox="allow-scripts allow-same-origin"
+              sandbox="allow-scripts allow-popups"
               title="Interactive visualization"
             />
           </div>

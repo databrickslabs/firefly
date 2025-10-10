@@ -2,13 +2,13 @@ import Link from "next/link";
 
 export default function Home() {
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="h-full overflow-auto flex flex-col">
       {/* Hero Banner with Gradient Background */}
       <section className="relative bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-700 text-white py-24 px-8">
         <div className="absolute inset-0 bg-black/10"></div>
         <div className="relative max-w-4xl mx-auto text-center space-y-6">
           <h1 className="text-6xl font-bold tracking-tight">
-            Databricks <span className="text-cyan-300">But Not</span>
+            <span className="bg-gradient-to-r from-orange-400 to-yellow-400 bg-clip-text text-transparent">FireFly Analytics</span>
           </h1>
           <p className="text-2xl text-white/90 max-w-2xl mx-auto">
             A personalized Databricks experience powered by Databricks itself
@@ -107,7 +107,7 @@ export default function Home() {
       </section>
 
       <footer className="bg-slate-100 dark:bg-slate-900 py-8 text-center text-sm text-muted-foreground border-t">
-        <p>&copy; 2025 Databricks But Not. Powered by Databricks.</p>
+        <p>&copy; 2025 FireFly Analytics. Powered by Databricks.</p>
       </footer>
     </div>
   );

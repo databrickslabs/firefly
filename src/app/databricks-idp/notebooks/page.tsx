@@ -16,8 +16,9 @@ import {
 } from "@/lib/notebook-manager";
 import { useMonacoRootPath } from "@/providers/user-store-provider";
 import { Button } from "@/components/ui/button";
-import { FileJson, AlertCircle } from "lucide-react";
+import { FileJson } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
+import { toast } from "sonner";
 import {
   loadClusterContext,
   saveClusterContext,
@@ -57,7 +58,6 @@ export default function NotebookPage() {
   const [notebookStates, setNotebookStates] = React.useState<NotebookState[]>([]);
   const [activeTabId, setActiveTabId] = React.useState<string>("");
 
-  const [error, setError] = React.useState<string | null>(null);
   const [isLoadingFile, setIsLoadingFile] = React.useState(false);
   const [saveAsDialogOpen, setSaveAsDialogOpen] = React.useState(false);
   const [notebookName, setNotebookName] = React.useState("");
@@ -97,7 +97,7 @@ export default function NotebookPage() {
             // Context is saved to localStorage in the hook
           },
           onError: (err) => {
-            setError(`Failed to create execution context: ${err.message}`);
+            toast.error(`Failed to create execution context: ${err.message}`);
           },
         }
       );
@@ -124,7 +124,6 @@ export default function NotebookPage() {
   const handleClusterChange = (newClusterId: string) => {
     setClusterId(newClusterId);
     setContextId(null); // Reset context when cluster changes
-    setError(null);
 
     // Save to localStorage (without context yet)
     saveClusterContext({
@@ -182,14 +181,14 @@ export default function NotebookPage() {
       setNotebookName("");
     },
     onError: (err: Error) => {
-      setError(`Failed to save notebook: ${err.message}`);
+      toast.error(`Failed to save notebook: ${err.message}`);
     },
   });
 
   const handleFileSelect = async (filePath: string) => {
     // Only load .ipynb files
     if (!filePath.endsWith(".ipynb")) {
-      setError("Please select a .ipynb notebook file");
+      toast.error("Please select a .ipynb notebook file");
       return;
     }
 
@@ -201,7 +200,6 @@ export default function NotebookPage() {
     }
 
     setIsLoadingFile(true);
-    setError(null);
 
     try {
       console.log("Loading notebook from:", filePath);
@@ -244,7 +242,7 @@ export default function NotebookPage() {
       }
     } catch (err) {
       console.error("Failed to load notebook:", err);
-      setError(`Failed to load notebook: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error(`Failed to load notebook: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsLoadingFile(false);
     }
@@ -267,7 +265,7 @@ export default function NotebookPage() {
 
   const handleSaveAs = () => {
     if (!notebookName.trim()) {
-      setError("Please enter a valid notebook name");
+      toast.error("Please enter a valid notebook name");
       return;
     }
 
@@ -396,15 +394,6 @@ export default function NotebookPage() {
                 onTabClose={handleTabClose}
                 onNewTab={handleNewNotebook}
               />
-
-
-              {/* Error Display */}
-              {error && (
-                <div className="pl-2 pr-4 py-2 bg-red-500/10 border-b border-red-500/20 flex items-center gap-2">
-                  <AlertCircle className="h-4 w-4 text-red-600" />
-                  <span className="text-sm text-red-600 dark:text-red-400">{error}</span>
-                </div>
-              )}
 
               {/* Loading State */}
               {isLoadingFile ? (

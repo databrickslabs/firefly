@@ -134,7 +134,7 @@ export function NotebookCell({
       onClick={onSelect}
     >
       {/* Cell Toolbar */}
-      <div className="flex items-center gap-1 px-2 py-1 bg-muted/30 border-b opacity-0 group-hover:opacity-100 transition-opacity rounded-t-lg">
+      <div className="flex items-center gap-1 px-2 py-1 bg-slate-100 border-b border-slate-200 opacity-0 group-hover:opacity-100 transition-opacity rounded-t-lg">
         <div className="flex items-center gap-1 text-xs text-muted-foreground mr-2">
           {cell.type === "code" ? (
             <>
@@ -431,7 +431,7 @@ export function NotebookCell({
 
       {/* Output */}
       {!isCollapsed && cell.outputs && cell.outputs.length > 0 && (
-        <div className="px-2 py-2">
+        <div className="px-4 py-3 bg-slate-50 border-t border-slate-200">
           <CellOutput outputs={cell.outputs} />
         </div>
       )}

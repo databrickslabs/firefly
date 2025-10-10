@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -35,8 +36,17 @@ export function TopNav({ user, title, basePath }: TopNavProps) {
   return (
     <header className="h-14 border-b bg-background flex items-center justify-between px-4 gap-4">
       {/* Left Section - Logo/Title */}
-      <Link href={`${basePath}/dashboard`} className="flex items-center flex-shrink-0">
-        <h1 className="text-lg font-semibold">{title}</h1>
+      <Link href={`${basePath}/dashboard`} className="flex items-center gap-3 flex-shrink-0 hover:opacity-80 transition-opacity">
+        <Image
+          src="/logo.png"
+          alt="FireFly Analytics Logo"
+          width={32}
+          height={32}
+          className="object-contain"
+        />
+        <h1 className="text-xl font-semibold bg-gradient-to-r from-orange-500 to-yellow-500 bg-clip-text text-transparent">
+          FireFly Analytics
+        </h1>
       </Link>
 
       {/* Center Section - Search Bar */}

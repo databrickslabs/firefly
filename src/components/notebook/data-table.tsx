@@ -13,7 +13,7 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import { ArrowUpDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Search, SlidersHorizontal } from "lucide-react";
+import { ArrowUpDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Search } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -195,11 +195,6 @@ export function DataTable({ data, schema, truncated = false }: DataTableProps) {
 
           {/* Filter */}
           <FilterDialog table={table} />
-
-          {/* More Options (placeholder for future features) */}
-          <Button variant="outline" size="sm" className="h-8 w-8 p-0">
-            <SlidersHorizontal className="h-3.5 w-3.5" />
-          </Button>
 
           {/* Column Toggle */}
           <ColumnToggle table={table} />
