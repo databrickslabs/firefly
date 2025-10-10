@@ -9,6 +9,7 @@ export const user = pgTable('user', {
   image: text('image'),
   createdAt: timestamp('createdAt').notNull().defaultNow(),
   updatedAt: timestamp('updatedAt').notNull().defaultNow().$onUpdate(() => new Date()),
+  accountIdUserIdMapping: text('accountIdUserIdMapping'), // JSON string mapping Databricks account ID to SCIM user ID
 });
 
 // Session table

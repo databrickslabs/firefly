@@ -6,6 +6,7 @@ import * as schema from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { decodeJwt } from "jose";
 import { unstable_cache } from "next/cache";
+import { updateUserScimMapping } from "./databricks-scim";
 
 export const ORGANIZATIONS_CACHE_TAG = "organizations";
 
@@ -60,6 +61,15 @@ export async function createAuthInstance() {
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: false,
+    },
+    user: {
+      additionalFields: {
+        accountIdUserIdMapping: {
+          type: "string",
+          required: false,
+          input: false, // Don't allow direct user input
+        },
+      },
     },
     plugins: [
       organization({
@@ -158,6 +168,30 @@ export async function createAuthInstance() {
                 activeOrganizationId: targetOrgId,
               },
             };
+          },
+          after: async (session) => {
+            console.log("=== DYNAMIC AUTH SESSION CREATE AFTER HOOK ===");
+            console.log("Session created for user:", session.userId);
+
+            // Get user details to fetch email
+            const users = await db
+              .select()
+              .from(schema.user)
+              .where(eq(schema.user.id, session.userId));
+
+            if (users.length === 0) {
+              console.log("User not found, skipping SCIM mapping");
+              return;
+            }
+
+            const user = users[0];
+
+            // Update SCIM mapping after session creation
+            try {
+              await updateUserScimMapping(user.id, user.email);
+            } catch (error) {
+              console.error("Error updating SCIM mapping in dynamic auth after hook:", error);
+            }
           },
         },
       },
