@@ -50,6 +50,7 @@ import {
   useCreateOrganization,
   useUpdateOrganization,
 } from "@/hooks/use-admin-api";
+import { WorkspaceSelector } from "@/components/workspace-selector";
 
 interface Organization {
   id: string;
@@ -317,11 +318,10 @@ export default function OrganizationsPage() {
                 <label className="text-sm font-medium">
                   Workspace URL (optional)
                 </label>
-                <Input
-                  type="url"
+                <WorkspaceSelector
                   value={newOrgWorkspaceUrl}
-                  onChange={(e) => setNewOrgWorkspaceUrl(e.target.value)}
-                  placeholder="https://acme.databricks.com"
+                  onValueChange={setNewOrgWorkspaceUrl}
+                  className="w-full"
                 />
               </div>
             </div>
@@ -503,11 +503,10 @@ export default function OrganizationsPage() {
               <label className="text-sm font-medium">
                 Workspace URL (optional)
               </label>
-              <Input
-                type="url"
+              <WorkspaceSelector
                 value={editOrgWorkspaceUrl}
-                onChange={(e) => setEditOrgWorkspaceUrl(e.target.value)}
-                placeholder="https://acme.databricks.com"
+                onValueChange={setEditOrgWorkspaceUrl}
+                className="w-full"
               />
             </div>
           </div>

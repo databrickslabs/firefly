@@ -7,6 +7,7 @@ import {
   generateSlug,
 } from "@/lib/admin-utils";
 import { Building2, Globe, Tag, AlertCircle, CheckCircle } from "lucide-react";
+import { WorkspaceSelector } from "@/components/workspace-selector";
 
 interface OrganizationFormProps {
   onSuccess?: () => void;
@@ -142,15 +143,10 @@ export function OrganizationForm({ onSuccess }: OrganizationFormProps) {
             <Globe className="h-4 w-4" />
             Databricks Workspace URL *
           </label>
-          <input
-            type="url"
+          <WorkspaceSelector
             value={workspaceUrl}
-            onChange={(e) => setWorkspaceUrl(e.target.value)}
-            placeholder="https://your-workspace.cloud.databricks.com"
-            required
-            className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary ${
-              urlError ? "border-red-500" : ""
-            }`}
+            onValueChange={setWorkspaceUrl}
+            className="w-full"
           />
           {urlError && (
             <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
