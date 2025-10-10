@@ -1,5 +1,5 @@
 import { createAuthClient } from "better-auth/react";
-import { organizationClient, genericOAuthClient } from "better-auth/client/plugins";
+import { organizationClient, genericOAuthClient, adminClient } from "better-auth/client/plugins";
 
 // Use the environment variable if set, otherwise use the current origin (for production)
 // or fallback to localhost for development
@@ -20,6 +20,7 @@ const getBaseURL = () => {
 export const authClient = createAuthClient({
   baseURL: getBaseURL(),
   plugins: [
+    adminClient(),
     organizationClient({
       schema: {
         organization: {
@@ -34,6 +35,11 @@ export const authClient = createAuthClient({
     }),
     genericOAuthClient(),
   ],
+  fetchOptions: {
+    onError(context) {
+      console.error("Auth client error:", context);
+    },
+  },
 });
 
 export const {
@@ -42,6 +48,7 @@ export const {
   signUp,
   useSession,
   organization,
+  admin,
 } = authClient;
 
 // Also export organization as orgClient for backwards compatibility

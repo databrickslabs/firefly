@@ -8,6 +8,7 @@ import {
   UserPlus,
   UserX,
   Home,
+  Users,
 } from "lucide-react";
 
 const navigationItems = [
@@ -20,6 +21,11 @@ const navigationItems = [
     name: "Organizations",
     href: "/admin/organizations",
     icon: Building2,
+  },
+  {
+    name: "Users",
+    href: "/admin/users",
+    icon: Users,
   },
   {
     name: "Invite Users",

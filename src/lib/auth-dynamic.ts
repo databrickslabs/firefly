@@ -1,6 +1,6 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { organization, genericOAuth } from "better-auth/plugins";
+import { organization, genericOAuth, admin } from "better-auth/plugins";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
 import { eq } from "drizzle-orm";
@@ -71,7 +71,19 @@ export async function createAuthInstance() {
         },
       },
     },
+    session: {
+      additionalFields: {
+        impersonatedBy: {
+          type: "string",
+          required: false,
+        },
+      },
+    },
     plugins: [
+      admin({
+        defaultRole: "user",
+        adminRoles: ["admin"],
+      }),
       organization({
         async sendInvitationEmail(data) {
           console.log("Invitation email:", data);

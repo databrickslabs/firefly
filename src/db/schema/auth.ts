@@ -10,6 +10,11 @@ export const user = pgTable('user', {
   createdAt: timestamp('createdAt').notNull().defaultNow(),
   updatedAt: timestamp('updatedAt').notNull().defaultNow().$onUpdate(() => new Date()),
   accountIdUserIdMapping: text('accountIdUserIdMapping'), // JSON string mapping Databricks account ID to SCIM user ID
+  // Admin plugin fields
+  role: text('role').notNull().default('user'),
+  banned: boolean('banned'),
+  banReason: text('banReason'),
+  banExpires: timestamp('banExpires'),
 });
 
 // Session table
@@ -23,6 +28,8 @@ export const session = pgTable('session', {
   userAgent: text('userAgent'),
   userId: text('userId').notNull().references(() => user.id, { onDelete: 'cascade' }),
   activeOrganizationId: text('activeOrganizationId').references(() => organization.id, { onDelete: 'set null' }),
+  // Admin plugin field
+  impersonatedBy: text('impersonatedBy'),
 });
 
 // Account table - for OAuth and password authentication

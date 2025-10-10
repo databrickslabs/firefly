@@ -8,6 +8,13 @@
       "when": 1760071351513,
       "tag": "0000_bent_energizer",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1760073215462,
+      "tag": "0001_smooth_frog_thor",
+      "breakpoints": true
     }
   ]
 }
