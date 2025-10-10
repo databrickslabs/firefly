@@ -16,7 +16,8 @@ import {
 } from "@/lib/notebook-manager";
 import { useMonacoRootPath } from "@/providers/user-store-provider";
 import { Button } from "@/components/ui/button";
-import { Loader2, FileJson, AlertCircle } from "lucide-react";
+import { FileJson, AlertCircle } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import {
   loadClusterContext,
   saveClusterContext,
@@ -409,7 +410,7 @@ export default function NotebookPage() {
               {isLoadingFile ? (
                 <div className="flex-1 flex items-center justify-center">
                   <div className="flex flex-col items-center gap-2">
-                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                    <Spinner className="h-8 w-8 text-purple-600" />
                     <p className="text-sm text-muted-foreground">Loading notebook...</p>
                   </div>
                 </div>
@@ -490,7 +491,7 @@ export default function NotebookPage() {
             <Button onClick={handleSaveAs} disabled={saveNotebookMutation.isPending}>
               {saveNotebookMutation.isPending ? (
                 <>
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  <Spinner className="h-4 w-4 text-purple-600 mr-2" />
                   Saving...
                 </>
               ) : (

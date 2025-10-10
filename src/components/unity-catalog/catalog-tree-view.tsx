@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { ChevronRight, Database, Folder, Table as TableIcon, Columns, Loader2 } from "lucide-react";
+import { ChevronRight, Database, Folder, Table as TableIcon, Columns } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import { useQuery } from "@tanstack/react-query";
 import {
   Collapsible,
@@ -92,7 +93,7 @@ export function CatalogTreeView({
     return (
       <div className="flex items-center justify-center p-8">
         <div className="text-center space-y-4">
-          <div className="animate-spin w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full mx-auto"></div>
+          <Spinner className="w-8 h-8 text-purple-600 mx-auto" />
           <p className="text-sm text-muted-foreground">Loading catalogs...</p>
         </div>
       </div>
@@ -219,7 +220,7 @@ function SchemaList({
   if (isLoading) {
     return (
       <div className="py-2 px-2 flex items-center gap-2 text-xs text-muted-foreground">
-        <Loader2 className="h-3 w-3 animate-spin" />
+        <Spinner className="h-3 w-3 text-purple-600" />
         <span>Loading schemas...</span>
       </div>
     );
@@ -342,7 +343,7 @@ function TableList({
   if (isLoading) {
     return (
       <div className="py-2 px-2 flex items-center gap-2 text-xs text-muted-foreground">
-        <Loader2 className="h-3 w-3 animate-spin" />
+        <Spinner className="h-3 w-3 text-purple-600" />
         <span>Loading tables...</span>
       </div>
     );
@@ -470,7 +471,7 @@ function ColumnList({ fullName }: ColumnListProps) {
   if (isLoading) {
     return (
       <div className="py-2 px-2 flex items-center gap-2 text-xs text-muted-foreground">
-        <Loader2 className="h-3 w-3 animate-spin" />
+        <Spinner className="h-3 w-3 text-purple-600" />
         <span>Loading columns...</span>
       </div>
     );

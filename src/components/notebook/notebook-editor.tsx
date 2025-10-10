@@ -20,7 +20,8 @@ import {
 } from "@/lib/notebook-manager";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
-import { Plus, Play, Trash2, Save, Loader2, RotateCcw, Square } from "lucide-react";
+import { Plus, Play, Trash2, Save, RotateCcw, Square } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import type { ContextStatusResponse } from "@/hooks/use-notebook-context";
 import {
   Select,
@@ -543,7 +544,7 @@ export function NotebookEditor({
           >
             {isRestartingKernel ? (
               <>
-                <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                <Spinner className="h-3 w-3 text-purple-600 mr-1" />
                 Restarting
               </>
             ) : (
@@ -564,7 +565,7 @@ export function NotebookEditor({
             >
               {isSaving ? (
                 <>
-                  <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                  <Spinner className="h-3 w-3 text-purple-600 mr-1" />
                   Saving
                 </>
               ) : (
@@ -710,7 +711,7 @@ export function NotebookEditor({
             <AlertDialogAction onClick={handleRestartKernel} disabled={isRestartingKernel}>
               {isRestartingKernel ? (
                 <>
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  <Spinner className="h-4 w-4 text-purple-600 mr-2" />
                   Restarting...
                 </>
               ) : (

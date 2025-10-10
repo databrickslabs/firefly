@@ -14,12 +14,12 @@ import {
   ChevronUp,
   ChevronDown,
   MoreVertical,
-  Loader2,
   Code,
   Type,
   Eye,
   EyeOff,
 } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
@@ -375,7 +375,7 @@ export function NotebookCell({
         <div className="relative">
           {isRunning && (
             <div className="absolute top-2 right-2 z-10">
-              <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+              <Spinner className="h-4 w-4 text-purple-600" />
             </div>
           )}
 

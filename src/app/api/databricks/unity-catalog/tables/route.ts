@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDatabricksToken } from "@/lib/databricks-token";
+import { getDatabricksWorkspaceToken } from "@/lib/databricks-workspace-token";
 import { unstable_cache } from "next/cache";
 
 export const dynamic = "force-dynamic";
@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const tokenResult = await getDatabricksToken();
+    const tokenResult = await getDatabricksWorkspaceToken();
 
     if (!tokenResult.success) {
       return NextResponse.json(

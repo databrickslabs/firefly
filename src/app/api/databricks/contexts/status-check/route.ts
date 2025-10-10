@@ -1,9 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAuthInstance } from "@/lib/auth-dynamic";
-import { headers } from "next/headers";
-import { db } from "@/db";
-import { organization } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { getDatabricksWorkspaceToken } from "@/lib/databricks-workspace-token";
 
 export const dynamic = "force-dynamic";
 
@@ -13,52 +9,16 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request: Request) {
   try {
-    const auth = await getAuthInstance();
-    const session = await auth.api.getSession({
-      headers: await headers(),
-    });
+    const tokenResult = await getDatabricksWorkspaceToken();
 
-    if (!session) {
+    if (!tokenResult.success) {
       return NextResponse.json(
-        { error: "Unauthorized - No active session" },
-        { status: 401 }
+        { error: tokenResult.error.error, details: tokenResult.error.details },
+        { status: tokenResult.error.status }
       );
     }
 
-    if (!session.session.activeOrganizationId) {
-      return NextResponse.json(
-        { error: "No active organization set in session" },
-        { status: 400 }
-      );
-    }
-
-    const tokenResponse = await auth.api.getAccessToken({
-      headers: await headers(),
-      body: {
-        providerId: `databricks-workspace-${session.session.activeOrganizationId}`,
-      },
-    });
-
-    if (!tokenResponse || !tokenResponse.accessToken) {
-      return NextResponse.json(
-        { error: "No Databricks access token found" },
-        { status: 401 }
-      );
-    }
-
-    const [org] = await db
-      .select()
-      .from(organization)
-      .where(eq(organization.id, session.session.activeOrganizationId))
-      .limit(1);
-
-    if (!org || !org.workspaceUrl) {
-      return NextResponse.json(
-        { error: "Workspace URL not configured" },
-        { status: 400 }
-      );
-    }
-
+    const { accessToken, workspaceUrl } = tokenResult.data;
     const { searchParams } = new URL(request.url);
     const clusterId = searchParams.get("cluster_id");
     const contextId = searchParams.get("context_id");
@@ -71,11 +31,11 @@ export async function GET(request: Request) {
     }
 
     // Check cluster status
-    const clusterApiUrl = `${org.workspaceUrl}/api/2.0/clusters/get`;
+    const clusterApiUrl = `${workspaceUrl}/api/2.0/clusters/get`;
     const clusterResponse = await fetch(clusterApiUrl, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${tokenResponse.accessToken}`,
+        Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({

@@ -10,7 +10,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
-import { Server, Loader2, Play, RotateCw, Power, Unplug } from "lucide-react";
+import { Server, Play, RotateCw, Power, Unplug } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 
 interface Cluster {
@@ -186,7 +187,7 @@ export function ClusterActionsMenu({
           disabled={isPending}
         >
           {isPending || isTransitioning ? (
-            <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+            <Spinner className="h-3 w-3 text-purple-600 shrink-0" />
           ) : (
             <div className={cn("w-2 h-2 rounded-full shrink-0", getButtonDotColor())} />
           )}
@@ -216,7 +217,7 @@ export function ClusterActionsMenu({
             <Play className="h-4 w-4 mr-2" />
             Start cluster
             {startClusterMutation.isPending && (
-              <Loader2 className="h-3 w-3 ml-auto animate-spin" />
+              <Spinner className="h-3 w-3 text-purple-600 ml-auto" />
             )}
           </DropdownMenuItem>
         )}
@@ -230,7 +231,7 @@ export function ClusterActionsMenu({
               <RotateCw className="h-4 w-4 mr-2" />
               Restart
               {restartClusterMutation.isPending && (
-                <Loader2 className="h-3 w-3 ml-auto animate-spin" />
+                <Spinner className="h-3 w-3 text-purple-600 ml-auto" />
               )}
             </DropdownMenuItem>
 
@@ -242,7 +243,7 @@ export function ClusterActionsMenu({
               <Power className="h-4 w-4 mr-2" />
               Terminate
               {terminateClusterMutation.isPending && (
-                <Loader2 className="h-3 w-3 ml-auto animate-spin" />
+                <Spinner className="h-3 w-3 text-purple-600 ml-auto" />
               )}
             </DropdownMenuItem>
           </>
@@ -250,7 +251,7 @@ export function ClusterActionsMenu({
 
         {isTransitioning && (
           <div className="px-2 py-2 text-xs text-muted-foreground flex items-center gap-2">
-            <Loader2 className="h-3 w-3 animate-spin" />
+            <Spinner className="h-3 w-3 text-purple-600" />
             <span>{cluster.state}...</span>
           </div>
         )}

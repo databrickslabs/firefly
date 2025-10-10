@@ -3,14 +3,14 @@
 import { createContext, useContext, useRef, type ReactNode } from 'react'
 import { useStore } from 'zustand'
 import { createUserStore, type UserStore } from '@/stores/user-store'
-import type { DatabricksTokenInfo } from '@/lib/databricks-token'
+import type { DatabricksWorkspaceTokenInfo } from '@/lib/databricks-workspace-token'
 import { getMonacoRootPath } from '@/lib/workspace-file-manager'
 
 const UserStoreContext = createContext<UserStore | null>(null)
 
 export interface UserStoreProviderProps {
   children: ReactNode
-  initialData: DatabricksTokenInfo
+  initialData: DatabricksWorkspaceTokenInfo
 }
 
 /**

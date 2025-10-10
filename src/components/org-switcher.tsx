@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Building2, Check, ChevronsUpDown, Loader2 } from "lucide-react";
+import { Building2, Check, ChevronsUpDown } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import { authClient, useSession } from "@/lib/auth-client";
 import {
   DropdownMenu,
@@ -89,7 +90,7 @@ export function OrgSwitcher() {
       <DropdownMenuTrigger asChild>
         <Button variant="outline" size="sm" className="flex items-center gap-2" disabled={switching}>
           {switching ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <Spinner className="h-4 w-4 text-purple-600" />
           ) : (
             <Building2 className="h-4 w-4" />
           )}
@@ -109,7 +110,7 @@ export function OrgSwitcher() {
           >
             <div className="flex items-center gap-2">
               {switchingToOrgId === org.id ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Spinner className="h-4 w-4 text-purple-600" />
               ) : (
                 <Building2 className="h-4 w-4" />
               )}

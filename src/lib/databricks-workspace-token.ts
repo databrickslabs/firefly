@@ -5,7 +5,7 @@ import { organization } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { decodeJwt } from "jose";
 
-export interface DatabricksTokenInfo {
+export interface DatabricksWorkspaceTokenInfo {
   accessToken: string;
   workspaceUrl: string;
   activeOrganizationId: string;
@@ -19,11 +19,12 @@ export interface TokenError {
 }
 
 /**
- * Gets Databricks access token and workspace URL for the current session
- * Returns either token info or error with status code
+ * Gets Databricks workspace-level OAuth access token and workspace URL for the current session.
+ * This is for workspace APIs only, not account-level APIs.
+ * Returns either token info or error with status code.
  */
-export async function getDatabricksToken(): Promise<
-  { success: true; data: DatabricksTokenInfo } | { success: false; error: TokenError }
+export async function getDatabricksWorkspaceToken(): Promise<
+  { success: true; data: DatabricksWorkspaceTokenInfo } | { success: false; error: TokenError }
 > {
   try {
     // Get the session from Better Auth

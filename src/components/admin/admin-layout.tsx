@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { isAdmin } from "@/lib/admin-utils";
 import { AdminSidebar } from "./admin-sidebar";
 import { ShieldAlert } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 
 interface AdminLayoutProps {
   children: ReactNode;
@@ -27,7 +28,7 @@ export function AdminLayout({ children }: AdminLayoutProps) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center space-y-4">
-          <div className="animate-spin w-12 h-12 border-4 border-primary border-t-transparent rounded-full mx-auto"></div>
+          <Spinner className="w-12 h-12 text-purple-600 mx-auto" />
           <p className="text-muted-foreground">Loading...</p>
         </div>
       </div>

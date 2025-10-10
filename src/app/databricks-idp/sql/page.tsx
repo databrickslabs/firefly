@@ -22,7 +22,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Play, Square, Loader2, AlertCircle, CheckCircle2, StopCircle, PlayCircle, Save } from "lucide-react";
+import { Play, Square, AlertCircle, CheckCircle2, StopCircle, PlayCircle, Save } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import type { OpenFile } from "@/lib/workspace-file-manager";
 import { getCatalogCache, type CatalogMetadata } from "@/lib/catalog-metadata-cache";
 
@@ -652,7 +653,7 @@ export default function SQLPage() {
                         className="gap-2"
                       >
                         {startWarehouseMutation.isPending ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <Spinner className="h-4 w-4 text-purple-600" />
                         ) : (
                           <PlayCircle className="h-4 w-4" />
                         )}
@@ -672,7 +673,7 @@ export default function SQLPage() {
                         className="gap-2"
                       >
                         {stopWarehouseMutation.isPending ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <Spinner className="h-4 w-4 text-purple-600" />
                         ) : (
                           <StopCircle className="h-4 w-4" />
                         )}
@@ -688,7 +689,7 @@ export default function SQLPage() {
                         className="gap-2"
                       >
                         {saveFileMutation.isPending ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <Spinner className="h-4 w-4 text-purple-600" />
                         ) : (
                           <Save className="h-4 w-4" />
                         )}
@@ -755,8 +756,8 @@ export default function SQLPage() {
                   <div className="px-4 py-2 border-b border-slate-200 bg-white flex items-center gap-4 shadow-sm">
                     {isExecuting ? (
                       <div className="flex items-center gap-2 text-sm">
-                        <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
-                        <span className="text-blue-600 dark:text-blue-400">
+                        <Spinner className="h-4 w-4 text-purple-600" />
+                        <span className="text-purple-600 dark:text-purple-400">
                           Executing query...
                         </span>
                       </div>

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getDatabricksToken } from "@/lib/databricks-token";
+import { getDatabricksWorkspaceToken } from "@/lib/databricks-workspace-token";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +10,7 @@ export async function POST(
   try {
     const { id } = await params;
 
-    const tokenResult = await getDatabricksToken();
+    const tokenResult = await getDatabricksWorkspaceToken();
 
     if (!tokenResult.success) {
       return NextResponse.json(

@@ -3,11 +3,11 @@
 import { type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { UserStoreProvider } from '@/providers/user-store-provider'
-import type { DatabricksTokenInfo } from '@/lib/databricks-token'
-import { Loader2 } from 'lucide-react'
+import type { DatabricksWorkspaceTokenInfo } from '@/lib/databricks-workspace-token'
+import { Spinner } from '@/components/ui/spinner'
 
 interface UserDataResponse {
-  data: DatabricksTokenInfo
+  data: DatabricksWorkspaceTokenInfo
 }
 
 export function UserStoreInitializer({ children }: { children: ReactNode }) {
@@ -30,7 +30,7 @@ export function UserStoreInitializer({ children }: { children: ReactNode }) {
     return (
       <div className="h-screen flex items-center justify-center">
         <div className="text-center space-y-4">
-          <Loader2 className="w-12 h-12 animate-spin text-primary mx-auto" />
+          <Spinner className="w-12 h-12 text-purple-600 mx-auto" />
           <p className="text-muted-foreground">Initializing workspace...</p>
         </div>
       </div>

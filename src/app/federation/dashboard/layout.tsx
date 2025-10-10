@@ -5,6 +5,7 @@ import { useSession } from "@/lib/auth-client";
 import { useRouter } from "next/navigation";
 import { TopNav } from "@/components/top-nav";
 import { Sidebar } from "@/components/sidebar";
+import { Spinner } from "@/components/ui/spinner";
 
 export default function FederationAuthenticatedLayout({
   children,
@@ -24,7 +25,7 @@ export default function FederationAuthenticatedLayout({
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center space-y-4">
-          <div className="animate-spin w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full mx-auto"></div>
+          <Spinner className="w-12 h-12 text-purple-600 mx-auto" />
           <p className="text-muted-foreground">Loading...</p>
         </div>
       </div>

@@ -4,6 +4,7 @@ import { useState, useEffect, Suspense, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Building2, ExternalLink } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 
 interface Organization {
   id: string;
@@ -122,7 +123,7 @@ function SelectOrgContent() {
           {isLoading && (
             <div className="p-12 border-2 border-purple-200 dark:border-purple-800 rounded-2xl bg-white dark:bg-slate-900 shadow-2xl">
               <div className="text-center space-y-4">
-                <div className="animate-spin w-12 h-12 border-4 border-purple-600 border-t-transparent rounded-full mx-auto"></div>
+                <Spinner className="w-12 h-12 text-purple-600 mx-auto" />
                 <p className="text-muted-foreground">Loading organizations...</p>
               </div>
             </div>
@@ -252,7 +253,7 @@ export default function SelectOrgPage() {
       fallback={
         <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-purple-50 to-white dark:from-purple-950/20 dark:to-background">
           <div className="text-center space-y-4">
-            <div className="animate-spin w-12 h-12 border-4 border-purple-600 border-t-transparent rounded-full mx-auto"></div>
+            <Spinner className="w-12 h-12 text-purple-600 mx-auto" />
             <p className="text-muted-foreground">Loading...</p>
           </div>
         </div>

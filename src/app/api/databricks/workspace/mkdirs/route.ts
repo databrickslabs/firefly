@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getDatabricksToken } from "@/lib/databricks-token";
+import { getDatabricksWorkspaceToken } from "@/lib/databricks-workspace-token";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +9,7 @@ export interface MkdirsRequest {
 
 export async function POST(request: Request) {
   try {
-    const tokenResult = await getDatabricksToken();
+    const tokenResult = await getDatabricksWorkspaceToken();
 
     if (!tokenResult.success) {
       return NextResponse.json(

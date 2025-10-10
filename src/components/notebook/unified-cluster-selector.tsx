@@ -2,7 +2,8 @@
 
 import * as React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ChevronsUpDown, Server, Loader2, Play, RotateCw, Power, Unplug, Database } from "lucide-react";
+import { ChevronsUpDown, Server, Play, RotateCw, Power, Unplug, Database } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -201,16 +202,40 @@ export function UnifiedClusterSelector({
 
   const getButtonColor = () => {
     if (!selectedCluster) return "text-muted-foreground";
-    if (contextHealthy === undefined) return "text-yellow-600 dark:text-yellow-400";
-    return contextHealthy
-      ? "text-green-600 dark:text-green-400"
-      : "text-yellow-600 dark:text-yellow-400";
+
+    // Red if cluster is terminated or in error state
+    if (selectedCluster.state === "TERMINATED" || selectedCluster.state === "ERROR") {
+      return "text-red-600 dark:text-red-400";
+    }
+
+    // If cluster is running, check context health
+    if (selectedCluster.state === "RUNNING") {
+      if (contextHealthy === undefined) return "text-yellow-600 dark:text-yellow-400";
+      return contextHealthy
+        ? "text-green-600 dark:text-green-400"
+        : "text-yellow-600 dark:text-yellow-400";
+    }
+
+    // Yellow for transitioning states (PENDING, RESTARTING, etc.)
+    return "text-yellow-600 dark:text-yellow-400";
   };
 
   const getButtonDotColor = () => {
     if (!selectedCluster) return "bg-gray-500";
-    if (contextHealthy === undefined) return "bg-yellow-500";
-    return contextHealthy ? "bg-green-500" : "bg-yellow-500";
+
+    // Red if cluster is terminated or in error state
+    if (selectedCluster.state === "TERMINATED" || selectedCluster.state === "ERROR") {
+      return "bg-red-500";
+    }
+
+    // If cluster is running, check context health
+    if (selectedCluster.state === "RUNNING") {
+      if (contextHealthy === undefined) return "bg-yellow-500";
+      return contextHealthy ? "bg-green-500" : "bg-yellow-500";
+    }
+
+    // Yellow for transitioning states (PENDING, RESTARTING, etc.)
+    return "bg-yellow-500";
   };
 
   const isTransitioning =
@@ -269,7 +294,7 @@ export function UnifiedClusterSelector({
           {selectedCluster ? (
             <>
               {isPending || isTransitioning ? (
-                <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                <Spinner className="h-3 w-3 text-purple-600 shrink-0" />
               ) : (
                 <div className={cn("w-2 h-2 rounded-full shrink-0", getButtonDotColor())} />
               )}
@@ -328,7 +353,7 @@ export function UnifiedClusterSelector({
                     <Play className="h-4 w-4 mr-2" />
                     Start cluster
                     {startClusterMutation.isPending && (
-                      <Loader2 className="h-3 w-3 ml-auto animate-spin" />
+                      <Spinner className="h-3 w-3 text-purple-600 ml-auto" />
                     )}
                   </DropdownMenuItem>
                 )}
@@ -339,7 +364,7 @@ export function UnifiedClusterSelector({
                       <RotateCw className="h-4 w-4 mr-2" />
                       Restart
                       {restartClusterMutation.isPending && (
-                        <Loader2 className="h-3 w-3 ml-auto animate-spin" />
+                        <Spinner className="h-3 w-3 text-purple-600 ml-auto" />
                       )}
                     </DropdownMenuItem>
 
@@ -351,7 +376,7 @@ export function UnifiedClusterSelector({
                       <Power className="h-4 w-4 mr-2" />
                       Terminate
                       {terminateClusterMutation.isPending && (
-                        <Loader2 className="h-3 w-3 ml-auto animate-spin" />
+                        <Spinner className="h-3 w-3 text-purple-600 ml-auto" />
                       )}
                     </DropdownMenuItem>
                   </>
@@ -359,7 +384,7 @@ export function UnifiedClusterSelector({
 
                 {isTransitioning && (
                   <div className="px-2 py-2 text-xs text-muted-foreground flex items-center gap-2">
-                    <Loader2 className="h-3 w-3 animate-spin" />
+                    <Spinner className="h-3 w-3 text-purple-600" />
                     <span>{selectedCluster.state}...</span>
                   </div>
                 )}

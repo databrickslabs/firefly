@@ -11,9 +11,9 @@ import {
   FilePlus,
   FolderPlus,
   Trash2,
-  Loader2,
   RefreshCw,
 } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
@@ -553,7 +553,7 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
       <div className="flex-1 overflow-auto">
         {isLoading ? (
           <div className="flex items-center justify-center p-4">
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <Spinner className="h-4 w-4 text-purple-600" />
           </div>
         ) : (
           <div className="py-1">
@@ -563,7 +563,7 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
                 className="flex items-center gap-2 px-2 py-1 text-xs text-green-600"
                 style={{ paddingLeft: 4 }}
               >
-                <Loader2 className="h-3 w-3 animate-spin" />
+                <Spinner className="h-3 w-3 text-green-600" />
                 <span className="font-medium">
                   Creating {pendingCreations.get(monacoRootPath)?.name}...
                 </span>
@@ -587,7 +587,7 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
                     className="flex items-center gap-2 px-2 py-1 text-xs text-muted-foreground"
                     style={{ paddingLeft: `${4 + (Math.max(0, node.level) * 12)}px` }}
                   >
-                    <Loader2 className="h-3 w-3 animate-spin" />
+                    <Spinner className="h-3 w-3 text-purple-600" />
                     <span>Loading...</span>
                   </div>
                 )}
@@ -597,7 +597,7 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
                     className="flex items-center gap-2 px-2 py-1 text-xs text-green-600"
                     style={{ paddingLeft: `${4 + (Math.max(0, node.level) * 12)}px` }}
                   >
-                    <Loader2 className="h-3 w-3 animate-spin" />
+                    <Spinner className="h-3 w-3 text-green-600" />
                     <span className="font-medium">
                       Creating {pendingCreations.get(node.path)?.name}...
                     </span>
@@ -640,7 +640,7 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={createFileMutation.isPending}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={confirmCreateFile} disabled={createFileMutation.isPending}>
-              {createFileMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              {createFileMutation.isPending && <Spinner className="h-4 w-4 text-purple-600 mr-2" />}
               Create
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -678,7 +678,7 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={createFolderMutation.isPending}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={confirmCreateFolder} disabled={createFolderMutation.isPending}>
-              {createFolderMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              {createFolderMutation.isPending && <Spinner className="h-4 w-4 text-purple-600 mr-2" />}
               Create
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -705,7 +705,7 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={confirmDelete} disabled={deleteMutation.isPending}>
-              {deleteMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              {deleteMutation.isPending && <Spinner className="h-4 w-4 text-purple-600 mr-2" />}
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -755,7 +755,7 @@ function FileTreeItem({
         >
           {isDeleting ? (
             <>
-              <Loader2 className="h-3 w-3 shrink-0 animate-spin text-red-600" />
+              <Spinner className="h-3 w-3 text-red-600 shrink-0" />
               {node.isDirectory ? (
                 <Folder className="h-4 w-4 shrink-0 text-yellow-600" />
               ) : (
