@@ -55,7 +55,7 @@ interface InsertCellTriggerProps {
 function InsertCellTrigger({ onInsert, disabled = false }: InsertCellTriggerProps) {
   return (
     <div className="relative flex items-center justify-center py-2 hover:py-5 transition-all duration-150 group">
-      <div className="h-px w-full border-t border-dashed border-muted-foreground/30" />
+      <div className="h-px w-full border-t border-dashed border-transparent group-hover:border-muted-foreground/30 transition-colors duration-150" />
       <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
         <Button
           type="button"
@@ -647,7 +647,7 @@ export function NotebookEditor({
       </div>
 
       {/* Cells */}
-      <div className="flex-1 overflow-auto pt-4 pb-32 px-4 space-y-4">
+      <div className="flex-1 overflow-auto pt-4 pb-32 px-4 space-y-4 bg-slate-50 dark:bg-slate-900">
         {notebook.cells.map((cell, index) => {
           const cellKey = `${cell.id}-v${cellsVersion}`;
 
