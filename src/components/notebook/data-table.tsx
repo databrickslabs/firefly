@@ -176,7 +176,24 @@ export function DataTable({ data, schema, truncated = false }: DataTableProps) {
             </span>
           )}
           <span>
-            {tableData.length.toLocaleString()} row{tableData.length !== 1 ? "s" : ""}
+            {(() => {
+              const totalRows = tableData.length;
+              const filteredRows = table.getFilteredRowModel().rows.length;
+              const hasFilters = columnFilters.length > 0 || globalFilter;
+
+              if (hasFilters && filteredRows !== totalRows) {
+                return (
+                  <>
+                    {filteredRows.toLocaleString()} of {totalRows.toLocaleString()} row{totalRows !== 1 ? "s" : ""}
+                  </>
+                );
+              }
+              return (
+                <>
+                  {totalRows.toLocaleString()} row{totalRows !== 1 ? "s" : ""}
+                </>
+              );
+            })()}
           </span>
         </div>
 

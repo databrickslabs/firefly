@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ImperativePanelHandle } from "react-resizable-panels";
+import { useQueryStates, parseAsStringLiteral, parseAsBoolean } from "nuqs";
 
 type SidebarView = "files" | "catalog" | null;
 
@@ -24,8 +25,20 @@ export const CollapsibleSidebar = React.memo(function CollapsibleSidebar({
   panelRef,
   onExpandedChange,
 }: CollapsibleSidebarProps) {
-  const [activeView, setActiveView] = React.useState<SidebarView>("files");
-  const [isExpanded, setIsExpanded] = React.useState(true);
+  // Use nuqs for URL state management
+  const [urlState, setUrlState] = useQueryStates(
+    {
+      sidebarView: parseAsStringLiteral(["files", "catalog"] as const).withDefault("files"),
+      sidebarExpanded: parseAsBoolean.withDefault(true),
+    },
+    {
+      history: "replace", // Use replace to avoid polluting browser history
+      shallow: true, // Shallow routing for better performance
+    }
+  );
+
+  const activeView = urlState.sidebarView as SidebarView;
+  const isExpanded = urlState.sidebarExpanded;
 
   // Notify parent when expanded state changes
   React.useEffect(() => {
@@ -36,7 +49,7 @@ export const CollapsibleSidebar = React.memo(function CollapsibleSidebar({
     if (activeView === view) {
       // Clicking active button toggles expanded/collapsed
       const newExpandedState = !isExpanded;
-      setIsExpanded(newExpandedState);
+      setUrlState({ sidebarExpanded: newExpandedState });
 
       // Collapse or expand the panel
       if (panelRef?.current) {
@@ -48,8 +61,7 @@ export const CollapsibleSidebar = React.memo(function CollapsibleSidebar({
       }
     } else {
       // Switching to different view
-      setActiveView(view);
-      setIsExpanded(true);
+      setUrlState({ sidebarView: view as "files" | "catalog", sidebarExpanded: true });
 
       // Ensure panel is expanded
       if (panelRef?.current) {
@@ -60,7 +72,7 @@ export const CollapsibleSidebar = React.memo(function CollapsibleSidebar({
 
   const handleToggleExpand = () => {
     const newExpandedState = !isExpanded;
-    setIsExpanded(newExpandedState);
+    setUrlState({ sidebarExpanded: newExpandedState });
 
     // Collapse or expand the panel
     if (panelRef?.current) {
@@ -75,10 +87,7 @@ export const CollapsibleSidebar = React.memo(function CollapsibleSidebar({
   return (
     <div className={cn("h-full w-full flex", className)}>
       {/* Icon Bar */}
-      <div className={cn(
-        "flex-col items-center py-4 gap-2 border-r border-slate-200 bg-slate-100/80 flex",
-        isExpanded ? "w-12 flex-shrink-0" : "w-full"
-      )}>
+      <div className="w-12 flex-shrink-0 flex-col items-center py-4 gap-2 border-r border-slate-200 bg-slate-100/80 flex">
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>

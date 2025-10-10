@@ -62,20 +62,25 @@ export function FilterDialog<TData>({ table }: FilterDialogProps<TData>) {
     // Replace the last word with the selected column
     const words = filterText.split(/\s+/);
     words[words.length - 1] = value;
-    setFilterText(words.join(" ") + " ");
+    const newText = words.join(" ") + " ";
+    setFilterText(newText);
     setShowColumnSuggestions(false);
 
-    // Return focus to input
+    // Return focus to input and move cursor to end
     setTimeout(() => {
-      inputRef.current?.focus();
+      if (inputRef.current) {
+        inputRef.current.focus();
+        // Move cursor to the end
+        inputRef.current.setSelectionRange(newText.length, newText.length);
+      }
     }, 0);
   };
 
-  // Track active filters
+  // Track active filters - watch the actual filter state changes
+  const columnFilters = table.getState().columnFilters;
   React.useEffect(() => {
-    const columnFilters = table.getState().columnFilters;
     setActiveFilterCount(columnFilters.length);
-  }, [table]);
+  }, [columnFilters]);
 
   // Parse SQL-like filter expressions with support for AND/OR and parentheses
   const parseFilters = (text: string): ParsedFilter[] => {
@@ -311,52 +316,43 @@ export function FilterDialog<TData>({ table }: FilterDialogProps<TData>) {
 
           <div className="px-4 py-3 space-y-3">
             {/* Filter input with dropdown autocomplete */}
-            <div className="space-y-2">
-              <Popover open={showColumnSuggestions} onOpenChange={setShowColumnSuggestions}>
-                <PopoverTrigger asChild>
-                  <Input
-                    ref={inputRef}
-                    placeholder="Example: trip_distance > 5 and fare_amount < 100"
-                    value={filterText}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      setFilterText(value);
-                      setParseError(null);
-                      setShowColumnSuggestions(value.length > 0 && filteredColumns.length > 0);
-                    }}
-                    onFocus={() => {
-                      if (filterText.length > 0 && filteredColumns.length > 0) {
-                        setShowColumnSuggestions(true);
-                      }
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !showColumnSuggestions) {
-                        e.preventDefault();
-                        applyFilters();
-                      } else if (e.key === "Escape") {
-                        setShowColumnSuggestions(false);
-                      } else if (e.key === "ArrowDown" && filteredColumns.length > 0) {
-                        e.preventDefault();
-                        setShowColumnSuggestions(true);
-                      } else if (e.key === "Tab" && showColumnSuggestions && filteredColumns.length > 0) {
-                        e.preventDefault();
-                        selectColumn(filteredColumns[0]);
-                      }
-                    }}
-                    className="h-9 text-xs font-mono"
-                  />
-                </PopoverTrigger>
-                <PopoverContent
-                  className="w-[452px] p-0"
-                  align="start"
-                  side="bottom"
-                  sideOffset={4}
-                  onOpenAutoFocus={(e) => {
-                    // Prevent popover from stealing focus, let Command handle it
+            <div className="space-y-2 relative">
+              <Input
+                ref={inputRef}
+                placeholder="Example: trip_distance > 5 and fare_amount < 100"
+                value={filterText}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setFilterText(value);
+                  setParseError(null);
+                  setShowColumnSuggestions(value.length > 0 && filteredColumns.length > 0);
+                }}
+                onFocus={() => {
+                  if (filterText.length > 0 && filteredColumns.length > 0) {
+                    setShowColumnSuggestions(true);
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !showColumnSuggestions) {
                     e.preventDefault();
-                  }}
-                >
-                  <Command shouldFilter={false} className="max-h-[300px]">
+                    applyFilters();
+                  } else if (e.key === "Escape") {
+                    setShowColumnSuggestions(false);
+                  } else if (e.key === "ArrowDown" && filteredColumns.length > 0) {
+                    e.preventDefault();
+                    setShowColumnSuggestions(true);
+                  } else if (e.key === "Tab" && showColumnSuggestions && filteredColumns.length > 0) {
+                    e.preventDefault();
+                    selectColumn(filteredColumns[0]);
+                  }
+                }}
+                className="h-9 text-xs font-mono"
+              />
+
+              {/* Simple dropdown for column suggestions */}
+              {showColumnSuggestions && filteredColumns.length > 0 && (
+                <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-popover border rounded-md shadow-md max-h-[300px] overflow-auto">
+                  <Command shouldFilter={false} className="border-0">
                     <CommandList>
                       <CommandEmpty>No column suggestions</CommandEmpty>
                       <CommandGroup heading="Available Columns">
@@ -373,8 +369,8 @@ export function FilterDialog<TData>({ table }: FilterDialogProps<TData>) {
                       </CommandGroup>
                     </CommandList>
                   </Command>
-                </PopoverContent>
-              </Popover>
+                </div>
+              )}
 
               {/* Parse error */}
               {parseError && (

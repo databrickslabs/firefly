@@ -2,7 +2,7 @@
 
 export type CellType = "code" | "markdown" | "raw";
 
-export type CellExecutionState = "idle" | "pending" | "running" | "succeeded" | "failed";
+export type CellExecutionState = "idle" | "pending" | "running" | "cancelling" | "cancelled" | "succeeded" | "failed";
 
 export interface NotebookCell {
   id: string;

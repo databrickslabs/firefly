@@ -108,10 +108,12 @@ export function NotebookEditor({
   onLanguageChange,
 }: NotebookEditorProps) {
   const [selectedCellIndex, setSelectedCellIndex] = React.useState<number>(0);
-  const [runningCells, setRunningCells] = React.useState<Set<number>>(new Set());
+  // Map of cell index to command ID for tracking running cells
+  const [runningCells, setRunningCells] = React.useState<Map<number, string>>(new Map());
   const [clearAllDialog, setClearAllDialog] = React.useState(false);
   const [restartKernelDialog, setRestartKernelDialog] = React.useState(false);
   const [isRestartingKernel, setIsRestartingKernel] = React.useState(false);
+  const [isRunningAll, setIsRunningAll] = React.useState(false);
   // Version counter to force remounts during moves - prevents Monaco Editor stale render issues
   const [cellsVersion, setCellsVersion] = React.useState(0);
   // Track run all state
@@ -135,6 +137,43 @@ export function NotebookEditor({
     if (!clusterId || !clustersData?.clusters) return undefined;
     return clustersData.clusters.find((c: { cluster_id: string }) => c.cluster_id === clusterId);
   }, [clusterId, clustersData]);
+
+  // Cancel cell execution
+  const handleCancelCell = async (cellIndex: number) => {
+    const commandId = runningCells.get(cellIndex);
+    if (!commandId || !clusterId || !contextId) {
+      return;
+    }
+
+    try {
+      console.log(`Cancelling cell ${cellIndex}, command ${commandId}`);
+
+      // Immediately update UI to show cancelling state
+      onNotebookChange(
+        updateCellAt(notebook, cellIndex, {
+          executionState: "cancelling",
+        })
+      );
+
+      const response = await fetch("/api/databricks/contexts/cancel-command", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cluster_id: clusterId,
+          context_id: contextId,
+          command_id: commandId,
+        }),
+      });
+
+      if (!response.ok) {
+        console.error("Failed to cancel command");
+      } else {
+        console.log(`Successfully initiated cancellation for cell ${cellIndex}`);
+      }
+    } catch (error) {
+      console.error("Error cancelling command:", error);
+    }
+  };
 
   // Execute cell mutation
   const executeCellMutation = useMutation({
@@ -168,7 +207,7 @@ export function NotebookEditor({
       return { cellIndex, commandId: data.id };
     },
     onMutate: ({ cellIndex }) => {
-      setRunningCells((prev) => new Set(prev).add(cellIndex));
+      // Mark cell as running (will add command ID in onSuccess)
       onNotebookChange(
         updateCellAt(notebook, cellIndex, {
           executionState: "running",
@@ -210,6 +249,13 @@ export function NotebookEditor({
       { cellIndex: index, command: cell.source },
       {
         onSuccess: async ({ cellIndex, commandId }) => {
+          // Track command ID for this cell
+          setRunningCells((prev) => {
+            const next = new Map(prev);
+            next.set(cellIndex, commandId);
+            return next;
+          });
+
           // Poll for results
           const pollForResults = async (): Promise<void> => {
             const response = await fetch(
@@ -225,22 +271,28 @@ export function NotebookEditor({
             // Debug: Log the full response
             console.log("Command status response:", JSON.stringify(data, null, 2));
 
-            if (data.status === "Finished" || data.status === "Error") {
+            // Handle terminal states
+            if (data.status === "Finished" || data.status === "Error" || data.status === "Cancelled") {
               const executionTime = Date.now() - startTime;
-              const outputs = databricksResultToCellOutput(data);
+
+              // Create custom output for cancelled cells
+              const outputs = data.status === "Cancelled" ? [] : databricksResultToCellOutput(data);
+
               console.log("Converted outputs:", JSON.stringify(outputs, null, 2));
 
               onNotebookChange(
                 updateCellAt(notebook, cellIndex, {
-                  executionState: data.status === "Finished" ? "succeeded" : "failed",
+                  executionState:
+                    data.status === "Finished" ? "succeeded" :
+                    data.status === "Cancelled" ? "cancelled" : "failed",
                   outputs,
                   executionTime,
-                  executionCount: (notebook.cells[cellIndex].executionCount || 0) + 1,
+                  executionCount: data.status === "Finished" ? (notebook.cells[cellIndex].executionCount || 0) + 1 : notebook.cells[cellIndex].executionCount,
                 })
               );
 
               setRunningCells((prev) => {
-                const next = new Set(prev);
+                const next = new Map(prev);
                 next.delete(cellIndex);
                 return next;
               });
@@ -250,7 +302,15 @@ export function NotebookEditor({
                 onComplete?.(data.status === "Finished");
               }, 300);
             } else if (data.status === "Running" || data.status === "Queued") {
-              // Continue polling
+              // Continue polling for running or queued states
+              setTimeout(pollForResults, 1000);
+            } else if (data.status === "Cancelling") {
+              // Update to cancelling state and continue polling
+              onNotebookChange(
+                updateCellAt(notebook, cellIndex, {
+                  executionState: "cancelling",
+                })
+              );
               setTimeout(pollForResults, 1000);
             }
           };
@@ -273,7 +333,7 @@ export function NotebookEditor({
           );
 
           setRunningCells((prev) => {
-            const next = new Set(prev);
+            const next = new Map(prev);
             next.delete(cellIndex);
             return next;
           });
@@ -286,6 +346,9 @@ export function NotebookEditor({
   };
 
   const handleRunAll = () => {
+    // Set running all state
+    setIsRunningAll(true);
+
     // Create abort controller for this run
     runAllAbortController.current = new AbortController();
     const signal = runAllAbortController.current.signal;
@@ -295,11 +358,13 @@ export function NotebookEditor({
       // Check if aborted
       if (signal.aborted) {
         console.log("Run All aborted");
+        setIsRunningAll(false);
         return;
       }
 
       if (index >= notebook.cells.length) {
         runAllAbortController.current = null;
+        setIsRunningAll(false);
         return;
       }
 
@@ -312,6 +377,7 @@ export function NotebookEditor({
             if (!success || signal.aborted) {
               console.log(`Cell ${index} failed or aborted, stopping Run All`);
               runAllAbortController.current = null;
+              setIsRunningAll(false);
               resolve();
               return;
             }
@@ -335,13 +401,21 @@ export function NotebookEditor({
     runNext(0);
   };
 
-  const handleStopAll = () => {
+  const handleStopAll = async () => {
+    // Abort the run all queue
     if (runAllAbortController.current) {
       runAllAbortController.current.abort();
       runAllAbortController.current = null;
     }
-    // Clear running cells
-    setRunningCells(new Set());
+
+    // Cancel any currently running cells
+    const runningCellIndices = Array.from(runningCells.keys());
+    for (const cellIndex of runningCellIndices) {
+      await handleCancelCell(cellIndex);
+    }
+
+    // Clear running state
+    setIsRunningAll(false);
   };
 
   const handleInsertBelow = (index: number, type: CellType = "code") => {
@@ -439,7 +513,7 @@ export function NotebookEditor({
 
       // Clear all outputs
       onNotebookChange(clearAllOutputs(notebook));
-      setRunningCells(new Set());
+      setRunningCells(new Map());
 
       setRestartKernelDialog(false);
     } catch (error) {
@@ -474,7 +548,7 @@ export function NotebookEditor({
       }
 
       // Clear running cells
-      setRunningCells(new Set());
+      setRunningCells(new Map());
     } catch (error) {
       console.error("Failed to detach:", error);
     }
@@ -483,6 +557,7 @@ export function NotebookEditor({
   const hasRunningCells = runningCells.size > 0;
   const isContextHealthy = contextStatus?.healthy ?? false;
   const contextReadyToExecute = clusterId && contextId && isContextHealthy;
+  const showStopButton = isRunningAll || hasRunningCells;
 
   return (
     <div className="h-full flex flex-col">
@@ -494,10 +569,10 @@ export function NotebookEditor({
             variant="default"
             size="sm"
             className="h-7 text-xs px-2"
-            onClick={hasRunningCells ? handleStopAll : handleRunAll}
+            onClick={showStopButton ? handleStopAll : handleRunAll}
             disabled={!contextReadyToExecute || readOnly}
           >
-            {hasRunningCells ? (
+            {showStopButton ? (
               <>
                 <Square className="h-3 w-3 mr-1" />
                 Stop
@@ -665,6 +740,7 @@ export function NotebookEditor({
                 onSelect={() => setSelectedCellIndex(index)}
                 onSourceChange={(source) => handleCellSourceChange(index, source)}
                 onRun={() => handleRunCell(index)}
+                onStop={() => handleCancelCell(index)}
                 onDelete={() => handleDeleteCell(index)}
                 onMoveUp={index > 0 ? () => handleMoveUp(index) : undefined}
                 onMoveDown={index < notebook.cells.length - 1 ? () => handleMoveDown(index) : undefined}

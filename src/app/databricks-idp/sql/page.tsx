@@ -26,6 +26,10 @@ import { Play, Square, AlertCircle, CheckCircle2, StopCircle, PlayCircle, Save }
 import { Spinner } from "@/components/ui/spinner";
 import type { OpenFile } from "@/lib/workspace-file-manager";
 import { getCatalogCache, type CatalogMetadata } from "@/lib/catalog-metadata-cache";
+import {
+  loadWarehouse,
+  saveWarehouse,
+} from "@/lib/warehouse-storage";
 
 interface ExecuteResponse {
   statement_id: string;
@@ -98,6 +102,14 @@ export default function SQLPage() {
   const [openFiles, setOpenFiles] = React.useState<OpenFile[]>([]);
   const [activeFilePath, setActiveFilePath] = React.useState<string | null>(null);
   const [fileToClose, setFileToClose] = React.useState<string | null>(null);
+
+  // Load persisted warehouse selection on mount
+  React.useEffect(() => {
+    const stored = loadWarehouse();
+    if (stored) {
+      setWarehouseId(stored.warehouseId);
+    }
+  }, []);
 
   // Execute SQL mutation
   const executeMutation = useMutation({
@@ -398,6 +410,16 @@ export default function SQLPage() {
     startWarehouseMutation.mutate(warehouseId);
   };
 
+  const handleWarehouseChange = (newWarehouseId: string) => {
+    setWarehouseId(newWarehouseId);
+
+    // Save to localStorage
+    saveWarehouse({
+      warehouseId: newWarehouseId,
+      timestamp: Date.now(),
+    });
+  };
+
   // Initialize catalog cache
   const catalogCache = React.useMemo(() => getCatalogCache(), []);
 
@@ -640,7 +662,7 @@ export default function SQLPage() {
                     <div className="px-4 py-2 border-b border-slate-200 flex items-center gap-4 bg-slate-50/80">
                     <WarehouseSelector
                       value={warehouseId}
-                      onValueChange={setWarehouseId}
+                      onValueChange={handleWarehouseChange}
                       refreshTrigger={warehouseRefreshTrigger}
                       onWarehouseStateChange={setWarehouseState}
                     />

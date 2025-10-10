@@ -10,7 +10,6 @@ import { CellOutput } from "./cell-output";
 import { Button } from "@/components/ui/button";
 import {
   Play,
-  Square,
   ChevronUp,
   ChevronDown,
   MoreVertical,
@@ -18,8 +17,8 @@ import {
   Type,
   Eye,
   EyeOff,
+  Loader2,
 } from "lucide-react";
-import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
@@ -49,7 +48,7 @@ interface NotebookCellProps {
 
 export function NotebookCell({
   cell,
-  index,
+  index: _index,
   isSelected,
   isRunning,
   onSelect,
@@ -115,6 +114,10 @@ export function NotebookCell({
     switch (cell.executionState) {
       case "running":
         return "border-blue-500";
+      case "cancelling":
+        return "border-orange-500";
+      case "cancelled":
+        return "border-gray-500";
       case "succeeded":
         return "border-green-500";
       case "failed":
@@ -134,7 +137,10 @@ export function NotebookCell({
       onClick={onSelect}
     >
       {/* Cell Toolbar */}
-      <div className="flex items-center gap-1 px-2 py-1 bg-slate-100 border-b border-slate-200 opacity-0 group-hover:opacity-100 transition-opacity rounded-t-lg">
+      <div className={cn(
+        "flex items-center gap-1 px-2 py-1 bg-slate-100 border-b border-slate-200 transition-opacity rounded-t-lg",
+        isRunning || cell.executionState === "cancelling" ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+      )}>
         <div className="flex items-center gap-1 text-xs text-muted-foreground mr-2">
           {cell.type === "code" ? (
             <>
@@ -155,17 +161,26 @@ export function NotebookCell({
 
         {cell.type === "code" && (
           <>
-            {isRunning ? (
+            {isRunning || cell.executionState === "cancelling" ? (
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
-                className="h-6 px-2"
+                className={cn(
+                  "h-6 px-3 gap-1.5",
+                  cell.executionState === "cancelling"
+                    ? "border-orange-200 bg-orange-50 hover:bg-orange-100 text-orange-700 hover:text-orange-800"
+                    : "border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700 hover:text-blue-800"
+                )}
                 onClick={(e) => {
                   e.stopPropagation();
                   onStop?.();
                 }}
+                disabled={cell.executionState === "cancelling"}
               >
-                <Square className="h-3 w-3" />
+                <Loader2 className="h-3 w-3 animate-spin" />
+                <span className="text-xs font-medium">
+                  {cell.executionState === "cancelling" ? "Cancelling" : "Interrupt"}
+                </span>
               </Button>
             ) : (
               <Button
@@ -373,12 +388,6 @@ export function NotebookCell({
       ) : (
         // Expanded view - show full content
         <div className="relative">
-          {isRunning && (
-            <div className="absolute top-2 right-2 z-10">
-              <Spinner className="h-4 w-4 text-purple-600" />
-            </div>
-          )}
-
           {cell.type === "markdown" && !isEditingMarkdown && cell.source.trim() ? (
             <div
               className="px-4 py-3 markdown-content cursor-pointer hover:bg-accent/5"
@@ -430,14 +439,30 @@ export function NotebookCell({
       )}
 
       {/* Output */}
-      {!isCollapsed && cell.outputs && cell.outputs.length > 0 && (
+      {!isCollapsed && cell.executionState === "cancelled" && (
+        <div className="px-4 py-3 bg-gray-50 border-t border-gray-200">
+          <div className="flex items-start gap-2 text-gray-600">
+            <div className="text-sm">
+              <span className="font-medium">Execution cancelled</span>
+              {cell.executionTime !== undefined && (
+                <span className="ml-2 text-xs text-gray-500">
+                  (after {cell.executionTime}ms)
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Normal output - only show if not cancelled and has meaningful content */}
+      {!isCollapsed && cell.executionState !== "cancelled" && cell.outputs && cell.outputs.length > 0 && (
         <div className="px-4 py-3 bg-slate-50 border-t border-slate-200">
           <CellOutput outputs={cell.outputs} />
         </div>
       )}
 
       {/* Execution time */}
-      {cell.executionTime !== undefined && (
+      {cell.executionTime !== undefined && cell.executionState !== "cancelled" && (
         <div className="px-2 py-1 text-xs text-muted-foreground">
           Execution time: {cell.executionTime}ms
         </div>

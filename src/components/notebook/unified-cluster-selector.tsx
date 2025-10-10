@@ -63,6 +63,9 @@ export function UnifiedClusterSelector({
   const [open, setOpen] = React.useState(false);
   const queryClient = useQueryClient();
 
+  // Dynamic refetch interval based on cluster state
+  const [refetchInterval, setRefetchInterval] = React.useState(30000);
+
   const { data: clustersData, isLoading: isLoadingClusters } = useQuery<ClustersResponse>({
     queryKey: ["clusters"],
     queryFn: async () => {
@@ -72,7 +75,7 @@ export function UnifiedClusterSelector({
       }
       return response.json();
     },
-    refetchInterval: 30000,
+    refetchInterval,
     refetchOnWindowFocus: true,
     staleTime: 0,
   });
@@ -175,6 +178,21 @@ export function UnifiedClusterSelector({
   const selectedCluster = clusters.find((c) => c.cluster_id === value);
   const otherClusters = clusters.filter((c) => c.cluster_id !== value);
   const isLoading = isLoadingClusters || isLoadingWarehouses;
+
+  // Adjust refetch interval based on cluster states
+  React.useEffect(() => {
+    const hasTransitioningCluster = clusters.some(
+      (c) =>
+        c.state === "PENDING" ||
+        c.state === "RESTARTING" ||
+        c.state === "RESIZING" ||
+        c.state === "TERMINATING"
+    );
+
+    // Poll every 3 seconds if any cluster is transitioning, otherwise every 30 seconds
+    const newInterval = hasTransitioningCluster ? 3000 : 30000;
+    setRefetchInterval((current) => (current !== newInterval ? newInterval : current));
+  }, [clusters]);
 
   const getStateBadgeColor = (state: Cluster["state"] | Warehouse["state"]) => {
     switch (state) {
@@ -323,7 +341,11 @@ export function UnifiedClusterSelector({
             {/* Connected cluster with submenu */}
             <DropdownMenuSub>
               <DropdownMenuSubTrigger className="gap-2">
-                <div className={cn("w-2 h-2 rounded-full shrink-0", getButtonDotColor())} />
+                {isTransitioning ? (
+                  <Spinner className="h-3 w-3 text-purple-600 shrink-0" />
+                ) : (
+                  <div className={cn("w-2 h-2 rounded-full shrink-0", getButtonDotColor())} />
+                )}
                 <Server className="h-4 w-4 shrink-0" />
                 <div className="flex-1 min-w-0">
                   <div className="truncate font-medium">{selectedCluster.cluster_name}</div>
@@ -401,33 +423,45 @@ export function UnifiedClusterSelector({
             <DropdownMenuLabel className="text-xs text-muted-foreground">
               Clusters
             </DropdownMenuLabel>
-            {otherClusters.map((cluster) => (
-              <DropdownMenuItem
-                key={cluster.cluster_id}
-                onClick={() => handleSelectCluster(cluster.cluster_id)}
-                className="gap-2"
-              >
-                <div className={cn(
-                  "w-2 h-2 rounded-full shrink-0",
-                  cluster.state === "RUNNING" ? "bg-green-500" : "bg-gray-500"
-                )} />
-                <Server className="h-4 w-4 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <div className="truncate font-medium">{cluster.cluster_name}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {cluster.spark_version}
-                  </div>
-                </div>
-                <span
-                  className={cn(
-                    "ml-auto px-2 py-0.5 rounded-full text-xs font-medium shrink-0",
-                    getStateBadgeColor(cluster.state)
-                  )}
+            {otherClusters.map((cluster) => {
+              const isClusterTransitioning =
+                cluster.state === "PENDING" ||
+                cluster.state === "RESTARTING" ||
+                cluster.state === "RESIZING" ||
+                cluster.state === "TERMINATING";
+
+              return (
+                <DropdownMenuItem
+                  key={cluster.cluster_id}
+                  onClick={() => handleSelectCluster(cluster.cluster_id)}
+                  className="gap-2"
                 >
-                  {cluster.state}
-                </span>
-              </DropdownMenuItem>
-            ))}
+                  {isClusterTransitioning ? (
+                    <Spinner className="h-3 w-3 text-purple-600 shrink-0" />
+                  ) : (
+                    <div className={cn(
+                      "w-2 h-2 rounded-full shrink-0",
+                      cluster.state === "RUNNING" ? "bg-green-500" : "bg-gray-500"
+                    )} />
+                  )}
+                  <Server className="h-4 w-4 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="truncate font-medium">{cluster.cluster_name}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {cluster.spark_version}
+                    </div>
+                  </div>
+                  <span
+                    className={cn(
+                      "ml-auto px-2 py-0.5 rounded-full text-xs font-medium shrink-0",
+                      getStateBadgeColor(cluster.state)
+                    )}
+                  >
+                    {cluster.state}
+                  </span>
+                </DropdownMenuItem>
+              );
+            })}
             <DropdownMenuSeparator />
           </>
         )}
