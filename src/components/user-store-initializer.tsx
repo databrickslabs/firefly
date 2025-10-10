@@ -1,22 +1,44 @@
 'use client'
 
-import { type ReactNode } from 'react'
+import { type ReactNode, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { UserStoreProvider } from '@/providers/user-store-provider'
 import type { DatabricksWorkspaceTokenInfo } from '@/lib/databricks-workspace-token'
 import { Spinner } from '@/components/ui/spinner'
+import { useSession, signOut } from '@/lib/auth-client'
+import { useRouter } from 'next/navigation'
 
 interface UserDataResponse {
   data: DatabricksWorkspaceTokenInfo
 }
 
 export function UserStoreInitializer({ children }: { children: ReactNode }) {
+  const router = useRouter()
+  const { data: session } = useSession()
+
   // Fetch user data once on mount
   const { data: userData, isLoading, error } = useQuery<UserDataResponse>({
     queryKey: ['user-data'],
     queryFn: async () => {
       const response = await fetch('/api/databricks/user-data')
       if (!response.ok) {
+        // Try to parse error details
+        let errorData
+        try {
+          errorData = await response.json()
+        } catch (parseError) {
+          // If JSON parsing fails, throw generic error
+          throw new Error('Failed to fetch user data')
+        }
+
+        // Check if it's an "Account not found" error
+        if (errorData.details?.includes('Account not found')) {
+          const error = new Error('Account not found')
+          ;(error as any).accountNotFound = true
+          console.log('Account not found', error)
+          throw error
+        }
+
         throw new Error('Failed to fetch user data')
       }
       return response.json()
@@ -24,6 +46,29 @@ export function UserStoreInitializer({ children }: { children: ReactNode }) {
     staleTime: Infinity, // User data doesn't change during session
     retry: 1,
   })
+
+  // Handle "Account not found" error - sign out and redirect to login
+  useEffect(() => {
+    console.log('useEffect check:', {
+      hasError: !!error,
+      accountNotFound: (error as any)?.accountNotFound,
+      hasSession: !!session,
+      email: session?.user?.email
+    })
+
+    if (error && (error as any).accountNotFound) {
+      // Sign out the user and redirect to org selector
+      console.log('Signing out user due to account not found')
+      signOut({
+        fetchOptions: {
+          onSuccess: () => {
+            console.log('Sign out successful, redirecting to /databricks-idp')
+            router.push('/databricks-idp')
+          },
+        },
+      })
+    }
+  }, [error, session, router])
 
   // Show loading state while fetching initial data
   if (isLoading) {
