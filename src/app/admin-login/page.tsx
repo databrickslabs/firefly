@@ -26,15 +26,35 @@ export default function AdminLoginPage() {
 
     addDebug(`[Admin Login] Session loaded: ${JSON.stringify(session)}`);
 
-    // If already logged in as admin, redirect to admin dashboard
-    if (session?.user?.email?.toLowerCase().endsWith("@databricks.com")) {
-      addDebug("[Admin Login] Admin session detected, redirecting to /admin");
-      router.push("/admin");
-      return;
-    }
+    // Check if already logged in with valid admin token
+    const checkAdminToken = async () => {
+      if (session?.user?.email?.toLowerCase().endsWith("@databricks.com")) {
+        addDebug("[Admin Login] Admin session detected, checking for databricks-account token");
+
+        // Check if user has databricks-account OAuth token
+        try {
+          const response = await fetch("/api/admin/verify-token");
+          const data = await response.json();
+
+          if (data.valid) {
+            addDebug("[Admin Login] Valid databricks-account token found, redirecting to /admin");
+            router.push("/admin");
+            return true;
+          } else {
+            addDebug("[Admin Login] No valid databricks-account token, will initiate OAuth");
+          }
+        } catch (error) {
+          addDebug(`[Admin Login] Error checking token: ${error}`);
+        }
+      }
+      return false;
+    };
 
     // Automatically redirect to Databricks account-level OAuth
     const initiateLogin = async () => {
+      // First check if already have valid token
+      const hasValidToken = await checkAdminToken();
+      if (hasValidToken) return;
       if (hasInitiated) return;
       setHasInitiated(true);
 

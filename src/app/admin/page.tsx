@@ -18,8 +18,37 @@ export default function AdminPage() {
     { label: "Total Users", value: 0, icon: Users, href: "/admin/users" },
   ]);
   const [loading, setLoading] = useState(true);
+  const [verifyingToken, setVerifyingToken] = useState(true);
+
+  // Verify admin token on mount
+  useEffect(() => {
+    async function verifyAdminToken() {
+      try {
+        const response = await fetch("/api/admin/verify-token");
+        const data = await response.json();
+
+        if (!data.valid) {
+          // Token is invalid or missing, redirect to admin login
+          console.log("Admin token invalid, redirecting to login");
+          window.location.href = "/admin-login";
+          return;
+        }
+
+        console.log("Admin token verified successfully");
+        setVerifyingToken(false);
+      } catch (error) {
+        console.error("Error verifying admin token:", error);
+        window.location.href = "/admin-login";
+      }
+    }
+
+    verifyAdminToken();
+  }, []);
 
   useEffect(() => {
+    // Don't fetch stats until token is verified
+    if (verifyingToken) return;
+
     async function fetchStats() {
       try {
         const [orgsRes, orphanedRes] = await Promise.all([
@@ -53,7 +82,19 @@ export default function AdminPage() {
     }
 
     fetchStats();
-  }, []);
+  }, [verifyingToken]);
+
+  // Show loading state while verifying token
+  if (verifyingToken) {
+    return (
+      <div className="p-8 flex items-center justify-center min-h-[400px]">
+        <div className="text-center space-y-4">
+          <div className="animate-spin w-12 h-12 border-4 border-primary border-t-transparent rounded-full mx-auto"></div>
+          <p className="text-muted-foreground">Verifying admin access...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-8 space-y-8">
