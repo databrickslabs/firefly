@@ -1,0 +1,57 @@
+sequenceDiagram
+    participant User
+    participant NextJS as Next.js App
+    participant BetterAuth as Better-Auth
+    participant Databricks as Databricks Account
+    participant Postgres as Postgres Database
+
+    User->>NextJS: Click "Login with Databricks Account"
+    NextJS->>BetterAuth: Initiate OAuth Flow
+
+    Note over BetterAuth: Generate state & code_verifier<br/>(PKCE flow)
+
+    BetterAuth->>NextJS: Store state in cookie
+    NextJS->>User: Redirect to Databricks
+
+    User->>Databricks: Databricks Login Page
+    User->>Databricks: Enter Credentials
+    Databricks->>Databricks: Authenticate User
+
+    Databricks->>User: Redirect with auth code
+    User->>NextJS: Callback with code & state
+
+    NextJS->>BetterAuth: Handle callback
+    BetterAuth->>BetterAuth: Verify state matches
+
+    BetterAuth->>Databricks: Exchange code for tokens<br/>(with code_verifier)
+    Databricks->>BetterAuth: Return access_token,<br/>refresh_token, expires_in
+
+    BetterAuth->>Databricks: Fetch user profile<br/>(using access_token)
+    Databricks->>BetterAuth: Return user data<br/>(email, name, account_id)
+
+    BetterAuth->>Postgres: Upsert User record
+    Postgres-->>BetterAuth: User ID
+
+    BetterAuth->>Postgres: Create/Update Account record<br/>(provider: databricks-account)
+    Postgres-->>BetterAuth: Account ID
+
+    BetterAuth->>Postgres: Store encrypted tokens<br/>in OAuth_Token table
+    Note over Postgres: Tokens encrypted at rest<br/>using AES-256-GCM
+
+    BetterAuth->>Postgres: Create Session record
+    Note over Postgres: Session contains:<br/>- userId<br/>- sessionToken (random)<br/>- expiresAt<br/>- ipAddress & userAgent
+
+    Postgres-->>BetterAuth: Session created
+
+    BetterAuth->>NextJS: Set session cookie<br/>(better-auth.session_token)
+    Note over NextJS: Cookie is:<br/>- HttpOnly<br/>- Secure<br/>- SameSite=Lax<br/>- 30 day expiry
+
+    NextJS->>User: Redirect to dashboard
+
+    User->>NextJS: Access Dashboard
+    NextJS->>BetterAuth: Verify session token
+    BetterAuth->>Postgres: Query session by token
+    Postgres-->>BetterAuth: Session data + User data
+
+    BetterAuth->>NextJS: User authenticated<br/>(has Account Admin access)
+    NextJS->>User: Show Dashboard

@@ -1,0 +1,57 @@
+flowchart TD
+    Start([User Visits Application]) --> CheckSession{Session Exists?}
+
+    CheckSession -->|No| ShowLogin[Show Login Page]
+    CheckSession -->|Yes| ValidateSession{Valid Session?}
+
+    ValidateSession -->|Yes| CheckOrg{Organization Selected?}
+    ValidateSession -->|No| ShowLogin
+
+    ShowLogin --> UserChoice{Choose Auth Type}
+
+    UserChoice -->|Admin Access| AccountOAuth[Account OAuth Flow]
+    UserChoice -->|Workspace Access| WorkspaceOAuth[Workspace OAuth Flow]
+
+    AccountOAuth --> DatabricksAccountAuth[Databricks Account Login]
+    DatabricksAccountAuth --> AccountTokens[Receive Account Tokens]
+    AccountTokens --> CreateUser[Create/Update User in DB]
+    CreateUser --> CreateSession[Create Better-Auth Session]
+    CreateSession --> Dashboard[Redirect to Dashboard]
+
+    WorkspaceOAuth --> SelectWorkspace[Select Workspace]
+    SelectWorkspace --> DatabricksWorkspaceAuth[Databricks Workspace OAuth]
+    DatabricksWorkspaceAuth --> WorkspaceTokens[Receive Workspace Tokens]
+    WorkspaceTokens --> LinkToOrg[Link to Organization]
+    LinkToOrg --> CreateUser
+
+    CheckOrg -->|Yes| LoadOrgContext[Load Organization Context]
+    CheckOrg -->|No| SelectOrg[Show Organization Selector]
+
+    SelectOrg --> LoadOrgContext
+    LoadOrgContext --> Dashboard
+
+    Dashboard --> UserActions{User Action}
+
+    UserActions -->|Switch Org| SwitchOrgFlow[Organization Switch Flow]
+    UserActions -->|API Call| ValidateToken{Valid Token?}
+    UserActions -->|Logout| ClearSession[Clear Session & Tokens]
+
+    ValidateToken -->|Yes| ExecuteAPI[Execute API Call]
+    ValidateToken -->|No| RefreshToken[Refresh Token Flow]
+
+    RefreshToken --> CheckRefresh{Refresh Success?}
+    CheckRefresh -->|Yes| ExecuteAPI
+    CheckRefresh -->|No| ForceReauth[Force Re-authentication]
+
+    SwitchOrgFlow --> UpdateSession[Update Session Context]
+    UpdateSession --> LoadNewOrg[Load New Organization Data]
+    LoadNewOrg --> Dashboard
+
+    ClearSession --> Start
+
+    style Start fill:#e1f5e1
+    style Dashboard fill:#e1f5e1
+    style AccountOAuth fill:#ffe1e1
+    style WorkspaceOAuth fill:#e1e5ff
+    style CreateSession fill:#fff4e1
+    style ClearSession fill:#ffe1e1

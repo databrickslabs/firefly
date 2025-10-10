@@ -1,0 +1,64 @@
+flowchart TB
+    subgraph Client["Client Browser"]
+        Cookie["Session Cookie<br/>(HttpOnly, Secure)<br/>better-auth.session_token=xyz123"]
+    end
+
+    subgraph NextJS["Next.js Server"]
+        API["API Route<br/>/api/auth/*"]
+        Middleware["Better-Auth Middleware"]
+        Session["Session Verification"]
+    end
+
+    subgraph BetterAuth["Better-Auth Layer"]
+        SessionMgr["Session Manager"]
+        TokenMgr["Token Manager"]
+        Crypto["Encryption Service<br/>(AES-256-GCM)"]
+    end
+
+    subgraph Neon["Neon Postgres Database"]
+        direction TB
+
+        SessionTable["SESSION Table<br/>┌─────────────────┐<br/>│ id<br/>│ userId<br/>│ token (indexed)<br/>│ expiresAt<br/>│ activeOrgId<br/>│ ipAddress<br/>│ userAgent<br/>└─────────────────┘"]
+
+        TokenTable["OAUTH_TOKEN Table<br/>┌──────────────────┐<br/>│ id<br/>│ accountId<br/>│ accessToken (encrypted)<br/>│ refreshToken (encrypted)<br/>│ expiresAt<br/>│ scope<br/>│ tokenType<br/>└──────────────────┘"]
+
+        AccountTable["ACCOUNT Table<br/>┌─────────────────┐<br/>│ id<br/>│ userId<br/>│ provider<br/>│ accountId<br/>│ workspaceId<br/>│ workspaceUrl<br/>└─────────────────┘"]
+
+        UserTable["USER Table<br/>┌─────────────┐<br/>│ id<br/>│ email<br/>│ name<br/>│ createdAt<br/>└─────────────┘"]
+    end
+
+    Cookie -->|1. Request with cookie| API
+    API -->|2. Extract session token| Middleware
+    Middleware -->|3. Verify session| SessionMgr
+
+    SessionMgr -->|4. Query by token| SessionTable
+    SessionTable -->|5. Return session data| SessionMgr
+
+    SessionTable -.->|Foreign Key| UserTable
+    SessionTable -.->|activeOrgId FK| OrgTable["ORGANIZATION Table"]
+
+    SessionMgr -->|6. Validate expiry| Session
+    Session -->|7. Authenticated request| TokenMgr
+
+    TokenMgr -->|8. Query tokens| AccountTable
+    AccountTable -->|9. Get accountId| TokenTable
+
+    TokenTable -->|10. Return encrypted tokens| TokenMgr
+    TokenMgr -->|11. Decrypt tokens| Crypto
+
+    Crypto -->|12. Plain-text tokens| TokenMgr
+    TokenMgr -->|13. Check expiry| TokenMgr
+
+    TokenMgr -->|14. Valid token| API
+    API -->|15. Use token for API call| DatabricksAPI["Databricks API"]
+
+    style Cookie fill:#e1f5e1
+    style SessionTable fill:#ffe1e1
+    style TokenTable fill:#fff4e1
+    style Crypto fill:#e1e5ff
+
+    Note1["Token Encryption:<br/>- Algorithm: AES-256-GCM<br/>- Unique IV per token<br/>- Key from environment<br/>- Encrypted at rest"]
+    Note2["Session Security:<br/>- Random 32-byte token<br/>- HttpOnly cookie<br/>- 30-day expiry<br/>- IP & User-Agent tracking"]
+
+    style Note1 fill:#fff9e6
+    style Note2 fill:#fff9e6

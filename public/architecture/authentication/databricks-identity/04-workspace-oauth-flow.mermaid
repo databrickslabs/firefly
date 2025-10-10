@@ -1,0 +1,76 @@
+sequenceDiagram
+    participant User
+    participant NextJS as Next.js App
+    participant BetterAuth as Better-Auth
+    participant Databricks as Databricks Workspace
+    participant Postgres as Postgres Database
+
+    User->>NextJS: Click "Login with Workspace"
+    NextJS->>User: Show Workspace Selector
+    User->>NextJS: Enter workspace URL
+
+    NextJS->>BetterAuth: Initiate workspace OAuth<br/>(workspace_url provided)
+
+    Note over BetterAuth: Generate state & PKCE params<br/>Store workspace_url in state
+
+    BetterAuth->>User: Redirect to Workspace OAuth
+    Note over User,Databricks: URL: {workspace_url}/oidc/v1/authorize
+
+    User->>Databricks: Workspace Login Page
+    User->>Databricks: Authenticate
+    Databricks->>Databricks: Verify user permissions<br/>in workspace
+
+    Databricks->>User: Redirect with auth code
+    User->>NextJS: Callback with code
+
+    NextJS->>BetterAuth: Handle callback
+    BetterAuth->>BetterAuth: Verify state
+    BetterAuth->>BetterAuth: Extract workspace_url
+
+    BetterAuth->>Databricks: Exchange code for tokens<br/>at {workspace_url}/oidc/v1/token
+    Databricks->>BetterAuth: access_token, refresh_token,<br/>id_token, expires_in
+
+    BetterAuth->>BetterAuth: Decode id_token JWT
+    Note over BetterAuth: Extract claims:<br/>- sub (user ID)<br/>- email<br/>- name<br/>- workspace_id
+
+    BetterAuth->>Postgres: Upsert User record
+    Postgres-->>BetterAuth: User ID
+
+    BetterAuth->>Postgres: Query or create Organization<br/>(mapped to workspace)
+    Note over Postgres: Organization can map to<br/>multiple workspaces
+    Postgres-->>BetterAuth: Organization ID
+
+    BetterAuth->>Postgres: Create Workspace record<br/>if not exists
+    Note over Postgres: Store workspace_id,<br/>workspace_url, org mapping
+
+    BetterAuth->>Postgres: Create/Update Account<br/>(provider: databricks-workspace)
+    Note over Postgres: Account linked to:<br/>- User<br/>- Workspace<br/>- Organization
+    Postgres-->>BetterAuth: Account ID
+
+    BetterAuth->>Postgres: Store encrypted tokens<br/>in OAuth_Token
+    Note over Postgres: Separate tokens per workspace<br/>Each token scoped to workspace
+
+    BetterAuth->>Postgres: Add user to OrganizationMember<br/>if not exists
+    Note over Postgres: Default role: member<br/>Can be promoted by admin
+
+    BetterAuth->>Postgres: Create Session<br/>with activeOrganizationId
+    Note over Postgres: Session context:<br/>- Current user<br/>- Active organization<br/>- Available workspaces
+
+    Postgres-->>BetterAuth: Session created
+
+    BetterAuth->>NextJS: Set session cookie
+    NextJS->>User: Redirect to dashboard
+
+    User->>NextJS: Make API call to workspace
+    NextJS->>BetterAuth: Get session
+    BetterAuth->>Postgres: Query session + active org
+    Postgres-->>BetterAuth: Session with org context
+
+    BetterAuth->>Postgres: Get workspace OAuth token<br/>for active org
+    Note over Postgres: Retrieve correct token<br/>for target workspace
+    Postgres-->>BetterAuth: Decrypted access_token
+
+    BetterAuth->>NextJS: Return token for API call
+    NextJS->>Databricks: API call with token
+    Databricks-->>NextJS: API response
+    NextJS->>User: Show data

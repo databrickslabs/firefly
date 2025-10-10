@@ -1,0 +1,84 @@
+flowchart TD
+    Start([Request Arrives]) --> ExtractCookie{Session Cookie<br/>Present?}
+
+    ExtractCookie -->|No| Unauthorized[Return 401 Unauthorized]
+    ExtractCookie -->|Yes| QuerySession[Query Session by Token]
+
+    QuerySession --> SessionExists{Session<br/>Found?}
+
+    SessionExists -->|No| Unauthorized
+    SessionExists -->|Yes| CheckExpiry{Session<br/>Expired?}
+
+    CheckExpiry -->|Yes| CleanupSession[Delete Expired Session]
+    CleanupSession --> Unauthorized
+
+    CheckExpiry -->|No| LoadUser[Load User Data]
+    LoadUser --> LoadOrg{Active Org<br/>Set?}
+
+    LoadOrg -->|No| RequireOrg[Require Org Selection]
+    LoadOrg -->|Yes| ValidateOrgMember{User Member<br/>of Org?}
+
+    ValidateOrgMember -->|No| ClearActiveOrg[Clear Active Org from Session]
+    ClearActiveOrg --> RequireOrg
+
+    ValidateOrgMember -->|Yes| BuildContext[Build Session Context]
+
+    BuildContext --> SessionContext["Session Context Object<br/>───────────────<br/>• userId<br/>• email<br/>• name<br/>• organizationId<br/>• organizationSlug<br/>• role in organization<br/>• available workspaces<br/>• session metadata"]
+
+    SessionContext --> TokenNeeded{API Call Needs<br/>OAuth Token?}
+
+    TokenNeeded -->|No| AuthorizedRequest[Process Request]
+    TokenNeeded -->|Yes| DetermineTokenType{Token Type?}
+
+    DetermineTokenType -->|Account Token| LoadAccountToken[Load Account OAuth Token]
+    DetermineTokenType -->|Workspace Token| LoadWorkspaceToken[Load Workspace OAuth Token]
+
+    LoadAccountToken --> CheckAccountToken{Account<br/>Exists?}
+    LoadWorkspaceToken --> CheckWorkspaceToken{Workspace Account<br/>for Org Exists?}
+
+    CheckAccountToken -->|No| NoAccountError[Error: No Account OAuth]
+    CheckWorkspaceToken -->|No| NoWorkspaceError[Error: No Workspace OAuth]
+
+    CheckAccountToken -->|Yes| DecryptAccountToken[Decrypt Account Token]
+    CheckWorkspaceToken -->|Yes| DecryptWorkspaceToken[Decrypt Workspace Token]
+
+    DecryptAccountToken --> ValidateAccountToken{Token<br/>Expired?}
+    DecryptWorkspaceToken --> ValidateWorkspaceToken{Token<br/>Expired?}
+
+    ValidateAccountToken -->|Yes| RefreshAccountToken[Refresh Account Token]
+    ValidateWorkspaceToken -->|Yes| RefreshWorkspaceToken[Refresh Workspace Token]
+
+    RefreshAccountToken --> RefreshAccountSuccess{Refresh<br/>Success?}
+    RefreshWorkspaceToken --> RefreshWorkspaceSuccess{Refresh<br/>Success?}
+
+    RefreshAccountSuccess -->|No| ReauthRequired[Require Re-authentication]
+    RefreshWorkspaceSuccess -->|No| ReauthRequired
+
+    RefreshAccountSuccess -->|Yes| UpdateAccountToken[Update Encrypted Token in DB]
+    RefreshWorkspaceSuccess -->|Yes| UpdateWorkspaceToken[Update Encrypted Token in DB]
+
+    ValidateAccountToken -->|No| UseAccountToken[Use Access Token]
+    ValidateWorkspaceToken -->|No| UseWorkspaceToken[Use Access Token]
+
+    UpdateAccountToken --> UseAccountToken
+    UpdateWorkspaceToken --> UseWorkspaceToken
+
+    UseAccountToken --> AuthorizedRequest
+    UseWorkspaceToken --> AuthorizedRequest
+
+    AuthorizedRequest --> UpdateActivity[Update Session Activity]
+    UpdateActivity --> Success([Return Response])
+
+    RequireOrg --> OrgSelectionRequired([Redirect to Org Selector])
+    NoAccountError --> ErrorResponse([Error Response])
+    NoWorkspaceError --> ErrorResponse
+    ReauthRequired --> Unauthorized
+    Unauthorized --> UnauthorizedResponse([401 Response])
+
+    style Start fill:#e1f5e1
+    style Success fill:#e1f5e1
+    style SessionContext fill:#fff4e1
+    style Unauthorized fill:#ffe1e1
+    style ReauthRequired fill:#ffe1e1
+    style DecryptAccountToken fill:#e1e5ff
+    style DecryptWorkspaceToken fill:#e1e5ff

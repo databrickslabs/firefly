@@ -1,8 +1,10 @@
 import Link from "next/link";
+import { MarketingNav } from "@/components/marketing-nav";
 
 export default function Home() {
   return (
     <div className="h-full overflow-auto flex flex-col">
+      <MarketingNav />
       {/* Hero Banner with Gradient Background */}
       <section className="relative bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-700 text-white py-24 px-8">
         <div className="absolute inset-0 bg-black/10"></div>
@@ -38,6 +40,18 @@ export default function Home() {
 
           {/* CTA Buttons */}
           <div className="flex flex-col sm:flex-row gap-6 items-center justify-center">
+            <Link
+              href="/sso-spn"
+              className="group relative inline-flex items-center justify-center px-10 py-6 text-lg font-medium text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 rounded-xl transition-all duration-200 shadow-xl hover:shadow-2xl hover:scale-105 w-full sm:w-auto"
+            >
+              <div className="flex flex-col items-start">
+                <span className="font-semibold text-xl">SSO Mapped to SPN</span>
+                <span className="text-sm text-white/90">
+                  Tenant IDP with shared SPN
+                </span>
+              </div>
+            </Link>
+
             <Link
               href="/federation"
               className="group relative inline-flex items-center justify-center px-10 py-6 text-lg font-medium text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 rounded-xl transition-all duration-200 shadow-xl hover:shadow-2xl hover:scale-105 w-full sm:w-auto"

@@ -1,0 +1,34 @@
+sequenceDiagram
+    participant User
+    participant App as FireFly Analytics
+    participant Databricks
+    participant Postgres as Database
+
+    Note over User,Postgres: Authentication Flow
+
+    User->>App: Login Request
+    App->>Databricks: OAuth Redirect
+    Databricks->>User: Login Page
+    User->>Databricks: Credentials
+    Databricks->>App: Auth Code
+    App->>Databricks: Exchange Code for Tokens
+    Databricks->>App: Access & Refresh Tokens
+    App->>Postgres: Store Encrypted Tokens
+    App->>Postgres: Create Session
+    App->>User: Set Session Cookie
+
+    Note over User,Postgres: API Request Flow
+
+    User->>App: Request Data
+    App->>Postgres: Validate Session
+    App->>Postgres: Retrieve OAuth Token
+    App->>Databricks: API Call with Token
+    Databricks->>App: Data Response
+    App->>User: Display Data
+
+    Note over User,Postgres: Token Refresh (if expired)
+
+    App->>Postgres: Get Refresh Token
+    App->>Databricks: Refresh Request
+    Databricks->>App: New Access Token
+    App->>Postgres: Update Token

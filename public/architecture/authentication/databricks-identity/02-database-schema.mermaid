@@ -1,0 +1,86 @@
+erDiagram
+    USER ||--o{ SESSION : has
+    USER ||--o{ ACCOUNT : has
+    USER }o--o{ ORGANIZATION : "belongs to"
+    ORGANIZATION ||--o{ WORKSPACE : contains
+    ORGANIZATION ||--o{ ORGANIZATION_MEMBER : has
+    USER ||--o{ ORGANIZATION_MEMBER : through
+    WORKSPACE ||--o{ ACCOUNT : "has workspace accounts"
+    SESSION ||--|| ORGANIZATION : "active org"
+    ACCOUNT ||--o{ OAUTH_TOKEN : stores
+
+    USER {
+        string id PK
+        string email
+        string name
+        timestamp createdAt
+        timestamp updatedAt
+        boolean emailVerified
+        string image
+    }
+
+    SESSION {
+        string id PK
+        string userId FK
+        string token UK
+        timestamp expiresAt
+        timestamp createdAt
+        timestamp updatedAt
+        string ipAddress
+        string userAgent
+        string activeOrganizationId FK
+    }
+
+    ACCOUNT {
+        string id PK
+        string userId FK
+        string accountId "Databricks Account ID"
+        string provider "databricks-account or databricks-workspace"
+        string providerAccountId
+        string workspaceId "For workspace OAuth"
+        string workspaceUrl "For workspace OAuth"
+        timestamp createdAt
+        timestamp updatedAt
+    }
+
+    OAUTH_TOKEN {
+        string id PK
+        string accountId FK
+        string accessToken "Encrypted"
+        string refreshToken "Encrypted"
+        timestamp expiresAt
+        string scope
+        string tokenType
+        timestamp createdAt
+        timestamp updatedAt
+    }
+
+    ORGANIZATION {
+        string id PK
+        string name
+        string slug UK
+        timestamp createdAt
+        timestamp updatedAt
+        json metadata
+    }
+
+    ORGANIZATION_MEMBER {
+        string id PK
+        string userId FK
+        string organizationId FK
+        string role "admin, member, viewer"
+        timestamp createdAt
+        timestamp updatedAt
+    }
+
+    WORKSPACE {
+        string id PK
+        string organizationId FK
+        string workspaceId "Databricks Workspace ID"
+        string workspaceUrl
+        string workspaceName
+        string accountId "Parent Databricks Account"
+        boolean isActive
+        timestamp createdAt
+        timestamp updatedAt
+    }

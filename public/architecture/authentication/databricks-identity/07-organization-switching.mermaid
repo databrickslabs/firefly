@@ -1,0 +1,93 @@
+sequenceDiagram
+    participant User
+    participant UI as React UI
+    participant API as Next.js API
+    participant BetterAuth as Better-Auth
+    participant Postgres as Postgres Database
+    participant Cache as Next.js Cache
+
+    User->>UI: Click Organization Switcher
+    UI->>API: GET /api/user/organizations
+
+    API->>BetterAuth: Get current session
+    BetterAuth->>Postgres: Query session + user
+    Postgres-->>BetterAuth: User data
+
+    BetterAuth->>Postgres: Query all organizations<br/>user is member of
+    Note over Postgres: JOIN organization_member<br/>WHERE userId = current user
+
+    Postgres-->>BetterAuth: List of organizations<br/>with roles
+    BetterAuth-->>API: Organizations data
+    API-->>UI: Return org list
+
+    UI->>User: Show organization dropdown
+    Note over User,UI: Display:<br/>- Current org (highlighted)<br/>- Available orgs<br/>- User's role in each
+
+    User->>UI: Select different organization
+    UI->>UI: Show loading state
+
+    UI->>API: POST /api/user/switch-organization<br/>{ organizationId: "new-org-123" }
+
+    API->>BetterAuth: Get current session
+    BetterAuth->>Postgres: Query session
+    Postgres-->>BetterAuth: Session data
+
+    API->>BetterAuth: Verify user membership
+    BetterAuth->>Postgres: Check organization_member<br/>WHERE userId AND organizationId
+    Postgres-->>BetterAuth: Membership record + role
+
+    alt User is not a member
+        BetterAuth-->>API: Error: Not a member
+        API-->>UI: 403 Forbidden
+        UI->>User: Show error message
+    else User is a member
+        BetterAuth->>Postgres: UPDATE session<br/>SET activeOrganizationId = new-org-123
+        Postgres-->>BetterAuth: Session updated
+
+        Note over BetterAuth: Session now points to new org<br/>All subsequent requests use new context
+
+        BetterAuth->>Postgres: Query new organization data
+        Postgres-->>BetterAuth: Org details, workspaces
+
+        BetterAuth-->>API: Switch successful
+
+        API->>Cache: Invalidate user cache tags
+        Note over Cache: revalidateTag('user-data')<br/>revalidateTag('org-data')
+
+        API-->>UI: 200 OK<br/>{ organization: {...}, workspaces: [...] }
+
+        UI->>UI: Update React Query cache
+        Note over UI: Invalidate queries:<br/>- current user<br/>- organization data<br/>- workspace list
+
+        UI->>UI: Update local state
+        Note over UI: Set active organization<br/>in client state
+
+        UI->>User: Show success message
+        UI->>UI: Refresh dashboard data
+
+        par Parallel Data Fetching
+            UI->>API: Fetch org-specific data
+            UI->>API: Fetch workspace list
+            UI->>API: Fetch user permissions
+        end
+
+        API-->>UI: New organization context data
+        UI->>User: Render updated dashboard
+    end
+
+    Note over User,Postgres: All subsequent API calls<br/>automatically use new organization context<br/>from session.activeOrganizationId
+
+    User->>UI: Make API call to workspace
+    UI->>API: POST /api/databricks/query<br/>(no org specified in request)
+
+    API->>BetterAuth: Get session
+    BetterAuth->>Postgres: Query session
+    Postgres-->>BetterAuth: Session with activeOrganizationId
+
+    API->>Postgres: Get workspace OAuth token<br/>for active organization
+    Note over Postgres: Query workspace accounts<br/>WHERE org = session.activeOrganizationId
+
+    Postgres-->>API: Correct workspace token
+    API->>API: Execute query with token
+    API-->>UI: Query results
+    UI->>User: Display data
