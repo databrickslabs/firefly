@@ -60,10 +60,14 @@ function DatabricksLoginContent() {
         console.log("Set oauth_org_id cookie for organization:", orgId);
 
         // Initiate OAuth sign-in using Better Auth generic OAuth
+        // Use dynamic provider ID format: databricks-workspace-{orgId}
         // The proxy will read the orgId from the httpOnly cookie
         try {
+          const providerId = `databricks-workspace-${orgId}`;
+          console.log("Using provider ID:", providerId);
+
           const result = await authClient.signIn.oauth2({
-            providerId: "databricks-workspace",
+            providerId,
             callbackURL: "/databricks-idp/dashboard",
           });
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { getAuthInstance } from "@/lib/auth-dynamic";
 import { db } from "@/db";
 import { user } from "@/db/schema/auth";
 import { ilike, or } from "drizzle-orm";
@@ -7,6 +7,7 @@ import { ilike, or } from "drizzle-orm";
 export async function GET(request: NextRequest) {
   try {
     // Check authentication
+    const auth = await getAuthInstance();
     const session = await auth.api.getSession({
       headers: request.headers,
     });

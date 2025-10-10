@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { getAuthInstance } from "@/lib/auth-dynamic";
 import { db } from "@/db";
 import { user, member } from "@/db/schema/auth";
 import { unstable_cache } from "next/cache";
@@ -29,6 +29,7 @@ const getOrphanedUsers = unstable_cache(
 export async function GET(request: NextRequest) {
   try {
     // Check authentication
+    const auth = await getAuthInstance();
     const session = await auth.api.getSession({
       headers: request.headers,
     });

@@ -1,4 +1,4 @@
-import { auth } from "@/lib/auth";
+import { getAuthInstance } from "@/lib/auth-dynamic";
 import { headers } from "next/headers";
 import { db } from "@/db";
 import { organization } from "@/db/schema";
@@ -27,6 +27,7 @@ export async function getDatabricksToken(): Promise<
 > {
   try {
     // Get the session from Better Auth
+    const auth = await getAuthInstance();
     const session = await auth.api.getSession({
       headers: await headers(),
     });
@@ -41,12 +42,23 @@ export async function getDatabricksToken(): Promise<
       };
     }
 
+    // Get workspace URL from active organization
+    if (!session.session.activeOrganizationId) {
+      return {
+        success: false,
+        error: {
+          error: "No active organization set in session",
+          status: 400,
+        },
+      };
+    }
+
     // Use Better Auth's getAccessToken to retrieve the Databricks access token
     // This will automatically refresh the token if it's expired
     const tokenResponse = await auth.api.getAccessToken({
       headers: await headers(),
       body: {
-        providerId: "databricks-workspace",
+        providerId: `databricks-workspace-${session.session.activeOrganizationId}`,
       },
     });
 
@@ -56,17 +68,6 @@ export async function getDatabricksToken(): Promise<
         error: {
           error: "No Databricks access token found. Please sign in with Databricks.",
           status: 401,
-        },
-      };
-    }
-
-    // Get workspace URL from active organization
-    if (!session.session.activeOrganizationId) {
-      return {
-        success: false,
-        error: {
-          error: "No active organization set in session",
-          status: 400,
         },
       };
     }

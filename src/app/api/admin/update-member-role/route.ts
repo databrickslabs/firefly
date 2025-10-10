@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { getAuthInstance } from "@/lib/auth-dynamic";
 import { db } from "@/db";
 import { member } from "@/db/schema/auth";
 import { eq } from "drizzle-orm";
@@ -9,6 +9,7 @@ import { ORGANIZATIONS_CACHE_TAG } from "../organizations/route";
 export async function POST(request: NextRequest) {
   try {
     // Check authentication
+    const auth = await getAuthInstance();
     const session = await auth.api.getSession({
       headers: request.headers,
     });

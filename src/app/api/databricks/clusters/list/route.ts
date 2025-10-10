@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { getAuthInstance } from "@/lib/auth-dynamic";
 import { headers } from "next/headers";
 import { db } from "@/db";
 import { organization } from "@/db/schema";
@@ -13,6 +13,7 @@ const CLUSTERS_CACHE_TAG = "databricks-clusters";
 export async function GET() {
   try {
     // Get the session from Better Auth
+    const auth = await getAuthInstance();
     const session = await auth.api.getSession({
       headers: await headers(),
     });
@@ -24,11 +25,19 @@ export async function GET() {
       );
     }
 
+    // Get workspace URL from active organization
+    if (!session.session.activeOrganizationId) {
+      return NextResponse.json(
+        { error: "No active organization set in session" },
+        { status: 400 }
+      );
+    }
+
     // Use Better Auth's getAccessToken to retrieve the Databricks access token
     const tokenResponse = await auth.api.getAccessToken({
       headers: await headers(),
       body: {
-        providerId: "databricks-workspace",
+        providerId: `databricks-workspace-${session.session.activeOrganizationId}`,
       },
     });
 
@@ -36,14 +45,6 @@ export async function GET() {
       return NextResponse.json(
         { error: "No Databricks access token found. Please sign in with Databricks." },
         { status: 401 }
-      );
-    }
-
-    // Get workspace URL from active organization
-    if (!session.session.activeOrganizationId) {
-      return NextResponse.json(
-        { error: "No active organization set in session" },
-        { status: 400 }
       );
     }
 

@@ -25,12 +25,30 @@ function SelectOrgContent() {
 
   const handleSelectOrg = useCallback(async (orgId: string) => {
     try {
-      // Navigate to login page with the org ID
-      // The login page will use SSO sign-in with the registered provider
+      // First, try to switch using existing OAuth token
+      const response = await fetch("/api/oauth/switch-org", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ organizationId: orgId }),
+      });
+
+      const data = await response.json();
+
+      if (data.hasToken && data.success) {
+        // Token exists, redirect to dashboard
+        console.log("Switched to organization using existing token");
+        router.push("/databricks-idp/dashboard");
+        return;
+      }
+
+      // No token found, need to authenticate via login page
+      console.log("No token found for org, redirecting to login");
       router.push(`/databricks-idp/login?email=${encodeURIComponent(email!)}&org=${orgId}`);
     } catch (err) {
-      console.error("Failed to navigate to login:", err);
-      setError(err instanceof Error ? err.message : "Failed to prepare login");
+      console.error("Failed to select organization:", err);
+      setError(err instanceof Error ? err.message : "Failed to select organization");
     }
   }, [email, router]);
 

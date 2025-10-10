@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { auth } from "@/lib/auth";
+import { middlewareAuth } from "@/lib/auth";
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -19,7 +19,7 @@ export async function middleware(request: NextRequest) {
 
     try {
       // Check if user has a session
-      const session = await auth.api.getSession({
+      const session = await middlewareAuth.api.getSession({
         headers: request.headers,
       });
 
@@ -46,7 +46,7 @@ export async function middleware(request: NextRequest) {
   if (pathname.startsWith("/admin")) {
 
     try {
-      const session = await auth.api.getSession({
+      const session = await middlewareAuth.api.getSession({
         headers: request.headers,
       });
 

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { getAuthInstance } from "@/lib/auth-dynamic";
 import { headers } from "next/headers";
 import { db } from "@/db";
 import { organization } from "@/db/schema";
@@ -12,6 +12,7 @@ export async function GET(
   { params }: { params: Promise<{ commandId: string }> }
 ) {
   try {
+    const auth = await getAuthInstance();
     const session = await auth.api.getSession({
       headers: await headers(),
     });
@@ -23,10 +24,17 @@ export async function GET(
       );
     }
 
+    if (!session.session.activeOrganizationId) {
+      return NextResponse.json(
+        { error: "No active organization set in session" },
+        { status: 400 }
+      );
+    }
+
     const tokenResponse = await auth.api.getAccessToken({
       headers: await headers(),
       body: {
-        providerId: "databricks-workspace",
+        providerId: `databricks-workspace-${session.session.activeOrganizationId}`,
       },
     });
 
@@ -34,13 +42,6 @@ export async function GET(
       return NextResponse.json(
         { error: "No Databricks access token found" },
         { status: 401 }
-      );
-    }
-
-    if (!session.session.activeOrganizationId) {
-      return NextResponse.json(
-        { error: "No active organization set in session" },
-        { status: 400 }
       );
     }
 

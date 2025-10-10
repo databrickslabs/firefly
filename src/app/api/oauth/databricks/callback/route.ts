@@ -77,7 +77,7 @@ export async function GET(request: NextRequest) {
 
     // Forward to Better Auth's OAuth callback with UNCHANGED state
     const betterAuthCallback = new URL(
-      "/api/auth/oauth2/callback/databricks-workspace",
+      `/api/auth/oauth2/callback/databricks-workspace-${flowMapping.organizationId}`,
       request.url
     );
     betterAuthCallback.searchParams.set("code", code);
