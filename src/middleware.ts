@@ -25,9 +25,21 @@ export async function middleware(request: NextRequest) {
 
       if (session) {
         // Redirect to dashboard if logged in
-        const dashboardUrl = pathname === "/databricks-idp"
-          ? "/databricks-idp/dashboard"
-          : "/federation/dashboard";
+        let dashboardUrl: string;
+
+        if (pathname === "/databricks-idp") {
+          // Get active organization ID from session
+          const activeOrgId = session.session.activeOrganizationId;
+
+          if (activeOrgId) {
+            dashboardUrl = `/databricks-idp/${activeOrgId}/dashboard`;
+          } else {
+            // No active org, redirect to org selection
+            dashboardUrl = "/databricks-idp/select-org";
+          }
+        } else {
+          dashboardUrl = "/federation/dashboard";
+        }
 
         return NextResponse.redirect(new URL(dashboardUrl, request.url));
       }
@@ -77,7 +89,7 @@ export async function middleware(request: NextRequest) {
   const response = NextResponse.next();
 
   // Apply COOP/COEP headers for notebooks page for SharedArrayBuffer support
-  if (pathname.startsWith("/databricks-idp/notebooks")) {
+  if (pathname.includes("/notebooks")) {
     response.headers.set("Cross-Origin-Embedder-Policy", "credentialless");
     response.headers.set("Cross-Origin-Opener-Policy", "same-origin");
     response.headers.set("Cross-Origin-Resource-Policy", "cross-origin");

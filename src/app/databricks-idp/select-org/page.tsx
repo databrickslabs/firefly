@@ -40,7 +40,7 @@ function SelectOrgContent() {
       if (data.hasToken && data.success) {
         // Token exists, redirect to dashboard
         console.log("Switched to organization using existing token");
-        router.push("/databricks-idp/dashboard");
+        router.push(`/databricks-idp/${orgId}/dashboard`);
         return;
       }
 

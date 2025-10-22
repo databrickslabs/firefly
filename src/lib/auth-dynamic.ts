@@ -137,39 +137,49 @@ export async function createAuthInstance() {
             console.log("=== SESSION CREATE HOOK ===");
             console.log("User ID:", session.userId);
 
-            const memberships = await db
+            // First, try to get the org from the account that was just used for this session
+            // The account's providerId is in format: databricks-workspace-{orgId}
+            const accounts = await db
               .select()
-              .from(schema.member)
-              .where(eq(schema.member.userId, session.userId));
+              .from(schema.account)
+              .where(eq(schema.account.userId, session.userId));
 
-            if (memberships.length === 0) {
-              console.log("User has no memberships, creating session without active org");
-              return { data: session };
-            }
-
-            const memberOrgIds = memberships.map(m => m.organizationId);
-            console.log("User belongs to orgs:", memberOrgIds);
-
-            const recentFlows = await db
-              .select()
-              .from(schema.oauthFlowMapping)
-              .orderBy(schema.oauthFlowMapping.createdAt)
-              .limit(50);
-
-            console.log("Total recent OAuth flows:", recentFlows.length);
+            console.log("User has", accounts.length, "account(s)");
 
             let targetOrgId: string | null = null;
-            for (const flow of recentFlows.reverse()) {
-              if (memberOrgIds.includes(flow.organizationId)) {
-                targetOrgId = flow.organizationId;
-                console.log("Found matching OAuth flow for org:", targetOrgId, "created:", flow.createdAt);
-                break;
+
+            // Try to extract org from the most recently created account (the one just used for OAuth)
+            if (accounts.length > 0) {
+              // Sort by createdAt descending to get most recent
+              const sortedAccounts = accounts.sort((a, b) =>
+                new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+              );
+
+              for (const account of sortedAccounts) {
+                // providerId format: databricks-workspace-{orgId}
+                if (account.providerId.startsWith("databricks-workspace-")) {
+                  const orgIdFromProvider = account.providerId.replace("databricks-workspace-", "");
+                  console.log("Found org from account providerId:", orgIdFromProvider);
+                  targetOrgId = orgIdFromProvider;
+                  break;
+                }
               }
             }
 
+            // Fallback: check memberships
             if (!targetOrgId) {
-              targetOrgId = memberships[0].organizationId;
-              console.log("No matching OAuth flow, using first membership:", targetOrgId);
+              const memberships = await db
+                .select()
+                .from(schema.member)
+                .where(eq(schema.member.userId, session.userId));
+
+              if (memberships.length > 0) {
+                targetOrgId = memberships[0].organizationId;
+                console.log("Using first membership as fallback:", targetOrgId);
+              } else {
+                console.log("User has no memberships, creating session without active org");
+                return { data: session };
+              }
             }
 
             console.log("Setting active org to:", targetOrgId);

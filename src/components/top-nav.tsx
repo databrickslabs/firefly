@@ -30,7 +30,8 @@ export function TopNav({ user, title, basePath }: TopNavProps) {
 
   const handleSignOut = async () => {
     await authClient.signOut();
-    router.push(basePath.replace("/dashboard", ""));
+    // Redirect to main login page, not org-specific page
+    router.push("/databricks-idp");
   };
 
   return (

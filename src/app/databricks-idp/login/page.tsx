@@ -69,7 +69,7 @@ function DatabricksLoginContent() {
 
           const result = await authClient.signIn.oauth2({
             providerId,
-            callbackURL: "/databricks-idp/dashboard",
+            callbackURL: `/databricks-idp/${orgId}/dashboard`,
           });
 
           console.log("OAuth sign-in initiated:", result);

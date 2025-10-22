@@ -23,15 +23,16 @@ interface AccountNotFoundError extends Error {
   requireReauth?: boolean
 }
 
-export function UserStoreInitializer({ children }: { children: ReactNode }) {
+export function UserStoreInitializer({ children, orgId }: { children: ReactNode; orgId?: string }) {
   const router = useRouter()
   const { data: session } = useSession()
 
   // Fetch user data once on mount
   const { data: userData, isLoading, error } = useQuery<UserDataResponse>({
-    queryKey: ['user-data'],
+    queryKey: ['user-data', orgId],
     queryFn: async () => {
-      const response = await fetch('/api/databricks/user-data')
+      const apiUrl = orgId ? `/api/databricks/${orgId}/user-data` : '/api/databricks/user-data';
+      const response = await fetch(apiUrl)
       if (!response.ok) {
         // Try to parse error details
         let errorData: UserDataError | undefined
@@ -40,6 +41,14 @@ export function UserStoreInitializer({ children }: { children: ReactNode }) {
         } catch {
           // If JSON parsing fails, throw generic error
           throw new Error('Failed to fetch user data')
+        }
+
+        // Check if it's a 401 Unauthorized (no session or expired session)
+        if (response.status === 401) {
+          const error: AccountNotFoundError = new Error('Session expired or not found')
+          error.requireReauth = true
+          console.log('401 Unauthorized - redirecting to login')
+          throw error
         }
 
         // Check if org selection is required (user has session but no active org)
@@ -88,10 +97,16 @@ export function UserStoreInitializer({ children }: { children: ReactNode }) {
     // Handle re-authentication required (invalid token)
     if (error && accountError?.requireReauth) {
       console.log('Signing out user due to invalid token, requiring re-authentication')
+      // Session is already revoked on server, just clear client state and redirect
       signOut({
         fetchOptions: {
           onSuccess: () => {
             console.log('Sign out successful, redirecting to /databricks-idp for re-authentication')
+            router.push('/databricks-idp')
+          },
+          onError: () => {
+            // Session already revoked on server, just redirect anyway
+            console.log('Sign out failed (session already revoked), redirecting to /databricks-idp')
             router.push('/databricks-idp')
           },
         },
@@ -106,6 +121,11 @@ export function UserStoreInitializer({ children }: { children: ReactNode }) {
         fetchOptions: {
           onSuccess: () => {
             console.log('Sign out successful, redirecting to /databricks-idp')
+            router.push('/databricks-idp')
+          },
+          onError: () => {
+            // If sign out fails, still redirect to login
+            console.log('Sign out failed, redirecting to /databricks-idp anyway')
             router.push('/databricks-idp')
           },
         },

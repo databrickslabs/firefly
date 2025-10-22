@@ -3,11 +3,7 @@
 import { ReactNode, useEffect } from "react";
 import { useSession } from "@/lib/auth-client";
 import { useRouter, usePathname } from "next/navigation";
-import { TopNav } from "@/components/top-nav";
-import { Sidebar } from "@/components/sidebar";
-import { UserStoreInitializer } from "@/components/user-store-initializer";
 import { Spinner } from "@/components/ui/spinner";
-import { Toaster } from "@/components/ui/sonner";
 
 export default function DatabricksIdpLayout({
   children,
@@ -50,28 +46,6 @@ export default function DatabricksIdpLayout({
     return null;
   }
 
-  // Authenticated layout with sidebar
-  return (
-    <UserStoreInitializer>
-      <div className="h-full flex flex-col overflow-hidden">
-        {/* Top Navigation */}
-        <TopNav
-          user={session.user}
-          title="FireFly Analytics"
-          basePath="/databricks-idp"
-        />
-
-        {/* Main Layout with Sidebar */}
-        <div className="flex-1 flex overflow-hidden min-h-0">
-          <Sidebar basePath="/databricks-idp" userEmail={session.user.email} />
-
-          {/* Main Content */}
-          <main className="flex-1 overflow-auto bg-background">
-            {children}
-          </main>
-        </div>
-      </div>
-      <Toaster />
-    </UserStoreInitializer>
-  );
+  // Child routes (like [orgId]) handle their own layout
+  return <>{children}</>;
 }

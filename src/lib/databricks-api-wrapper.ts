@@ -3,6 +3,9 @@ import { getDatabricksWorkspaceToken } from "@/lib/databricks-workspace-token";
 import { getAuthInstance } from "@/lib/auth-dynamic";
 import { headers } from "next/headers";
 import { revalidateTag } from "next/cache";
+import { db } from "@/db";
+import { account } from "@/db/schema";
+import { eq, and } from "drizzle-orm";
 
 export interface DatabricksApiOptions {
   endpoint: string;
@@ -57,8 +60,22 @@ function isExpiredTokenError(status: number, errorBody?: string): boolean {
 /**
  * Revokes the current session to trigger re-authentication and invalidates all caches
  */
-async function revokeSession(sessionToken: string): Promise<void> {
+async function revokeSession(sessionToken: string, userId: string, activeOrganizationId: string): Promise<void> {
   try {
+    // Delete the account with invalid OAuth tokens first
+    try {
+      const providerId = `databricks-workspace-${activeOrganizationId}`;
+      await db.delete(account).where(
+        and(
+          eq(account.userId, userId),
+          eq(account.providerId, providerId)
+        )
+      );
+      console.log("Deleted account with invalid OAuth tokens for provider:", providerId);
+    } catch (deleteError) {
+      console.error("Error deleting account with invalid tokens:", deleteError);
+    }
+
     const auth = await getAuthInstance();
     await auth.api.revokeSession({
       headers: await headers(),
@@ -176,8 +193,8 @@ export async function callDatabricksApi<T = unknown>(
         headers: await headers(),
       });
 
-      if (session) {
-        await revokeSession(session.session.token);
+      if (session && session.session.activeOrganizationId) {
+        await revokeSession(session.session.token, session.user.id, session.session.activeOrganizationId);
       }
 
       return {

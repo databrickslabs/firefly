@@ -89,6 +89,11 @@ export function WarehouseSelector({ value, onValueChange, refreshTrigger, onWare
           onSuccess: () => {
             router.push("/databricks-idp");
           },
+          onError: () => {
+            // Session already revoked on server, just redirect anyway
+            console.log("Sign out failed (session already revoked), redirecting to /databricks-idp");
+            router.push("/databricks-idp");
+          },
         },
       });
     }

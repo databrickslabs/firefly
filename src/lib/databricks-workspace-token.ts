@@ -1,8 +1,8 @@
 import { getAuthInstance } from "@/lib/auth-dynamic";
 import { headers } from "next/headers";
 import { db } from "@/db";
-import { organization } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { organization, account } from "@/db/schema";
+import { eq, and } from "drizzle-orm";
 import { decodeJwt } from "jose";
 import { revalidateTag } from "next/cache";
 
@@ -23,8 +23,10 @@ export interface TokenError {
  * Gets Databricks workspace-level OAuth access token and workspace URL for the current session.
  * This is for workspace APIs only, not account-level APIs.
  * Returns either token info or error with status code.
+ *
+ * @param orgIdOverride - Optional organization ID to use instead of session's activeOrganizationId
  */
-export async function getDatabricksWorkspaceToken(): Promise<
+export async function getDatabricksWorkspaceToken(orgIdOverride?: string): Promise<
   { success: true; data: DatabricksWorkspaceTokenInfo } | { success: false; error: TokenError }
 > {
   try {
@@ -44,8 +46,11 @@ export async function getDatabricksWorkspaceToken(): Promise<
       };
     }
 
+    // Use orgIdOverride if provided, otherwise use session's activeOrganizationId
+    const targetOrgId = orgIdOverride || session.session.activeOrganizationId;
+
     // Get workspace URL from active organization
-    if (!session.session.activeOrganizationId) {
+    if (!targetOrgId) {
       return {
         success: false,
         error: {
@@ -63,7 +68,7 @@ export async function getDatabricksWorkspaceToken(): Promise<
       tokenResponse = await auth.api.getAccessToken({
         headers: await headers(),
         body: {
-          providerId: `databricks-workspace-${session.session.activeOrganizationId}`,
+          providerId: `databricks-workspace-${targetOrgId}`,
         },
       });
     } catch (tokenError: unknown) {
@@ -79,7 +84,21 @@ export async function getDatabricksWorkspaceToken(): Promise<
           tokenError?.message?.includes("Failed to get a valid access token") ||
           tokenError?.status === 400 ||
           tokenError?.statusCode === 400)) {
-        console.log("Invalid token detected, revoking session and requiring re-authentication");
+        console.log("Invalid token detected, revoking session and deleting account to force re-authentication");
+
+        // Delete the account with invalid OAuth tokens first
+        try {
+          const providerId = `databricks-workspace-${targetOrgId}`;
+          await db.delete(account).where(
+            and(
+              eq(account.userId, session.user.id),
+              eq(account.providerId, providerId)
+            )
+          );
+          console.log("Deleted account with invalid OAuth tokens for provider:", providerId);
+        } catch (deleteError) {
+          console.error("Error deleting account with invalid tokens:", deleteError);
+        }
 
         // Revoke the current session
         try {
@@ -130,7 +149,7 @@ export async function getDatabricksWorkspaceToken(): Promise<
     const [org] = await db
       .select()
       .from(organization)
-      .where(eq(organization.id, session.session.activeOrganizationId))
+      .where(eq(organization.id, targetOrgId))
       .limit(1);
 
     if (!org) {
@@ -168,7 +187,7 @@ export async function getDatabricksWorkspaceToken(): Promise<
       data: {
         accessToken: tokenResponse.accessToken,
         workspaceUrl,
-        activeOrganizationId: session.session.activeOrganizationId,
+        activeOrganizationId: targetOrgId,
         userEmail,
       },
     };

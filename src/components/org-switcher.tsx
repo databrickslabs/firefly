@@ -11,16 +11,20 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
-import { useRouter } from "next/navigation";
+import { useRouter, useParams, usePathname } from "next/navigation";
 
 export function OrgSwitcher() {
   // Use the built-in better-auth hook to list organizations
   const { data: organizations, isPending: loading } = authClient.useListOrganizations();
-  const { data: activeOrg } = authClient.useActiveOrganization();
   const { data: session } = useSession();
   const router = useRouter();
+  const params = useParams();
+  const pathname = usePathname();
   const [switching, setSwitching] = useState(false);
   const [switchingToOrgId, setSwitchingToOrgId] = useState<string | null>(null);
+
+  // Get the active org from URL params instead of session
+  const activeOrgId = params.orgId as string | undefined;
 
   const handleOrgSwitch = async (orgId: string) => {
     if (!session?.user?.email) {
@@ -29,7 +33,7 @@ export function OrgSwitcher() {
     }
 
     // Don't switch if already on this org
-    if (activeOrg?.id === orgId) {
+    if (activeOrgId === orgId) {
       console.log("Already on this organization");
       return;
     }
@@ -51,9 +55,11 @@ export function OrgSwitcher() {
       const data = await response.json();
 
       if (data.hasToken && data.success) {
-        // Token exists, just reload the page to use the new active org
+        // Token exists, navigate to the new org's URL
         console.log("Switched to organization using existing token");
-        window.location.reload();
+        // Get the current page (dashboard, sql, notebooks, etc) from pathname
+        const currentPage = pathname?.split('/').pop() || 'dashboard';
+        router.push(`/databricks-idp/${orgId}/${currentPage}`);
         return;
       }
 
@@ -84,6 +90,9 @@ export function OrgSwitcher() {
       </Button>
     );
   }
+
+  // Find the active org by ID from URL
+  const activeOrg = organizations?.find(org => org.id === activeOrgId);
 
   return (
     <DropdownMenu>
@@ -123,7 +132,7 @@ export function OrgSwitcher() {
                 )}
               </div>
             </div>
-            {activeOrg?.id === org.id && !switching && (
+            {activeOrgId === org.id && !switching && (
               <Check className="h-4 w-4 text-primary" />
             )}
           </DropdownMenuItem>
