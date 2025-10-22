@@ -12,8 +12,15 @@ interface UserDataResponse {
   data: DatabricksWorkspaceTokenInfo
 }
 
+interface UserDataError {
+  error: string
+  details?: string
+  requireReauth?: boolean
+}
+
 interface AccountNotFoundError extends Error {
   accountNotFound?: boolean
+  requireReauth?: boolean
 }
 
 export function UserStoreInitializer({ children }: { children: ReactNode }) {
@@ -27,7 +34,7 @@ export function UserStoreInitializer({ children }: { children: ReactNode }) {
       const response = await fetch('/api/databricks/user-data')
       if (!response.ok) {
         // Try to parse error details
-        let errorData
+        let errorData: UserDataError | undefined
         try {
           errorData = await response.json()
         } catch {
@@ -35,8 +42,24 @@ export function UserStoreInitializer({ children }: { children: ReactNode }) {
           throw new Error('Failed to fetch user data')
         }
 
+        // Check if org selection is required (user has session but no active org)
+        if (errorData?.details === 'REQUIRE_ORG_SELECTION') {
+          const error: AccountNotFoundError = new Error('Organization selection required')
+          error.accountNotFound = true // Reuse this flag to redirect to org selection
+          console.log('User needs to select an organization')
+          throw error
+        }
+
+        // Check if it's a re-authentication required error
+        if (errorData?.requireReauth) {
+          const error: AccountNotFoundError = new Error('Re-authentication required')
+          error.requireReauth = true
+          console.log('Re-authentication required due to invalid token')
+          throw error
+        }
+
         // Check if it's an "Account not found" error
-        if (errorData.details?.includes('Account not found')) {
+        if (errorData?.details?.includes('Account not found')) {
           const error: AccountNotFoundError = new Error('Account not found')
           error.accountNotFound = true
           console.log('Account not found', error)
@@ -51,18 +74,33 @@ export function UserStoreInitializer({ children }: { children: ReactNode }) {
     retry: 1,
   })
 
-  // Handle "Account not found" error - sign out and redirect to login
+  // Handle errors requiring sign-out and re-authentication
   useEffect(() => {
     const accountError = error as AccountNotFoundError | null
     console.log('useEffect check:', {
       hasError: !!error,
       accountNotFound: accountError?.accountNotFound,
+      requireReauth: accountError?.requireReauth,
       hasSession: !!session,
       email: session?.user?.email
     })
 
+    // Handle re-authentication required (invalid token)
+    if (error && accountError?.requireReauth) {
+      console.log('Signing out user due to invalid token, requiring re-authentication')
+      signOut({
+        fetchOptions: {
+          onSuccess: () => {
+            console.log('Sign out successful, redirecting to /databricks-idp for re-authentication')
+            router.push('/databricks-idp')
+          },
+        },
+      })
+      return
+    }
+
+    // Handle account not found error
     if (error && accountError?.accountNotFound) {
-      // Sign out the user and redirect to org selector
       console.log('Signing out user due to account not found')
       signOut({
         fetchOptions: {

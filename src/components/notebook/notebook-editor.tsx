@@ -747,6 +747,10 @@ export function NotebookEditor({
                 onInsertAbove={() => handleInsertAbove(index)}
                 onInsertBelow={() => handleInsertBelow(index)}
                 onChangeType={(type) => onNotebookChange(updateCellAt(notebook, index, { type }))}
+                onAiEdit={async ({ cell: _cell, prompt }) => {
+                  // TODO: Implement AI edit functionality
+                  console.log("AI edit requested:", { cellIndex: index, prompt });
+                }}
                 readOnly={readOnly}
               />
 

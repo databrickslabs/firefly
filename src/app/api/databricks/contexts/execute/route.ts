@@ -1,21 +1,25 @@
 import { NextResponse } from "next/server";
-import { getDatabricksWorkspaceToken } from "@/lib/databricks-workspace-token";
+import {
+  callDatabricksApi,
+  createErrorResponse,
+} from "@/lib/databricks-api-wrapper";
 
 export const dynamic = "force-dynamic";
 
+interface ExecuteCommandRequest {
+  cluster_id: string;
+  context_id: string;
+  command: string;
+  language?: string;
+}
+
+interface ExecuteCommandResponse {
+  id: string;
+}
+
 export async function POST(request: Request) {
   try {
-    const tokenResult = await getDatabricksWorkspaceToken();
-
-    if (!tokenResult.success) {
-      return NextResponse.json(
-        { error: tokenResult.error.error, details: tokenResult.error.details },
-        { status: tokenResult.error.status }
-      );
-    }
-
-    const { accessToken, workspaceUrl } = tokenResult.data;
-    const body = await request.json();
+    const body: ExecuteCommandRequest = await request.json();
     const { cluster_id, context_id, command, language = "python" } = body;
 
     if (!cluster_id || !context_id || !command) {
@@ -25,43 +29,29 @@ export async function POST(request: Request) {
       );
     }
 
-    // Execute command in context
-    const apiUrl = `${workspaceUrl}/api/1.2/commands/execute`;
-
     console.log("=== EXECUTING COMMAND ===");
-    console.log("API URL:", apiUrl);
     console.log("Cluster ID:", cluster_id);
     console.log("Context ID:", context_id);
     console.log("Language:", language);
     console.log("Command:", command.substring(0, 100) + "...");
 
-    const databricksResponse = await fetch(apiUrl, {
+    const result = await callDatabricksApi<ExecuteCommandResponse>({
+      endpoint: "/api/1.2/commands/execute",
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
+      body: {
         clusterId: cluster_id,
         contextId: context_id,
         language: language,
         command: command,
-      }),
+      },
     });
 
-    console.log("Response Status:", databricksResponse.status);
-
-    if (!databricksResponse.ok) {
-      const errorText = await databricksResponse.text();
-      console.error("Databricks API error:", errorText);
-      return NextResponse.json(
-        { error: "Failed to execute command", details: errorText },
-        { status: databricksResponse.status }
-      );
+    if (!result.success) {
+      return createErrorResponse(result);
     }
 
-    const data = await databricksResponse.json();
-    return NextResponse.json(data);
+    console.log("Response Status:", result.response.status);
+    return NextResponse.json(result.data);
   } catch (error) {
     console.error("Error executing command:", error);
     return NextResponse.json(

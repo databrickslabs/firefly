@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
-import { getDatabricksWorkspaceToken } from "@/lib/databricks-workspace-token";
+import { callDatabricksApi } from "@/lib/databricks-api-wrapper";
 
 export const dynamic = "force-dynamic";
+
+interface ClusterGetResponse {
+  state: string;
+}
 
 /**
  * Check if an execution context is still valid and the cluster is running
@@ -9,16 +13,6 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request: Request) {
   try {
-    const tokenResult = await getDatabricksWorkspaceToken();
-
-    if (!tokenResult.success) {
-      return NextResponse.json(
-        { error: tokenResult.error.error, details: tokenResult.error.details },
-        { status: tokenResult.error.status }
-      );
-    }
-
-    const { accessToken, workspaceUrl } = tokenResult.data;
     const { searchParams } = new URL(request.url);
     const clusterId = searchParams.get("cluster_id");
     const contextId = searchParams.get("context_id");
@@ -31,19 +25,15 @@ export async function GET(request: Request) {
     }
 
     // Check cluster status
-    const clusterApiUrl = `${workspaceUrl}/api/2.0/clusters/get`;
-    const clusterResponse = await fetch(clusterApiUrl, {
+    const result = await callDatabricksApi<ClusterGetResponse>({
+      endpoint: "/api/2.0/clusters/get",
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
+      body: {
         cluster_id: clusterId,
-      }),
+      },
     });
 
-    if (!clusterResponse.ok) {
+    if (!result.success) {
       return NextResponse.json(
         {
           healthy: false,
@@ -55,8 +45,7 @@ export async function GET(request: Request) {
       );
     }
 
-    const clusterData = await clusterResponse.json();
-    const clusterState = clusterData.state;
+    const clusterState = result.data.state;
 
     // Context is healthy if cluster is running
     const isHealthy = clusterState === "RUNNING";

@@ -12,6 +12,18 @@ export async function GET() {
     const tokenResult = await getDatabricksWorkspaceToken();
 
     if (!tokenResult.success) {
+      // Check if this is a re-authentication required scenario
+      if (tokenResult.error.details === "REQUIRE_REAUTHENTICATION") {
+        return NextResponse.json(
+          {
+            error: tokenResult.error.error,
+            details: tokenResult.error.details,
+            requireReauth: true,
+          },
+          { status: 401 }
+        );
+      }
+
       return NextResponse.json(
         { error: tokenResult.error.error, details: tokenResult.error.details },
         { status: tokenResult.error.status }

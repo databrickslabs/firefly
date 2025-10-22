@@ -17,6 +17,8 @@ import {
   DropdownMenuSubContent,
   DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu";
+import { signOut } from "@/lib/auth-client";
+import { useRouter } from "next/navigation";
 
 interface Cluster {
   cluster_id: string;
@@ -43,6 +45,12 @@ interface WarehousesResponse {
   warehouses: Warehouse[];
 }
 
+interface ApiError {
+  error: string;
+  details?: string;
+  requireReauth?: boolean;
+}
+
 interface UnifiedClusterSelectorProps {
   value?: string;
   onValueChange: (clusterId: string) => void;
@@ -62,16 +70,30 @@ export function UnifiedClusterSelector({
 }: UnifiedClusterSelectorProps) {
   const [open, setOpen] = React.useState(false);
   const queryClient = useQueryClient();
+  const router = useRouter();
 
   // Dynamic refetch interval based on cluster state
   const [refetchInterval, setRefetchInterval] = React.useState(30000);
 
-  const { data: clustersData, isLoading: isLoadingClusters } = useQuery<ClustersResponse>({
+  const { data: clustersData, isLoading: isLoadingClusters, error: clustersError } = useQuery<ClustersResponse>({
     queryKey: ["clusters"],
     queryFn: async () => {
       const response = await fetch("/api/databricks/clusters/list");
       if (!response.ok) {
-        throw new Error("Failed to fetch clusters");
+        let errorData: ApiError | undefined;
+        try {
+          errorData = await response.json();
+        } catch {
+          throw new Error("Failed to fetch clusters");
+        }
+
+        if (errorData?.requireReauth) {
+          const error = new Error("Re-authentication required");
+          (error as Error & { requireReauth: boolean }).requireReauth = true;
+          throw error;
+        }
+
+        throw new Error(errorData?.error || "Failed to fetch clusters");
       }
       return response.json();
     },
@@ -80,12 +102,25 @@ export function UnifiedClusterSelector({
     staleTime: 0,
   });
 
-  const { data: warehousesData, isLoading: isLoadingWarehouses } = useQuery<WarehousesResponse>({
+  const { data: warehousesData, isLoading: isLoadingWarehouses, error: warehousesError } = useQuery<WarehousesResponse>({
     queryKey: ["warehouses"],
     queryFn: async () => {
       const response = await fetch("/api/databricks/warehouses");
       if (!response.ok) {
-        throw new Error("Failed to fetch warehouses");
+        let errorData: ApiError | undefined;
+        try {
+          errorData = await response.json();
+        } catch {
+          throw new Error("Failed to fetch warehouses");
+        }
+
+        if (errorData?.requireReauth) {
+          const error = new Error("Re-authentication required");
+          (error as Error & { requireReauth: boolean }).requireReauth = true;
+          throw error;
+        }
+
+        throw new Error(errorData?.error || "Failed to fetch warehouses");
       }
       return response.json();
     },
@@ -93,6 +128,24 @@ export function UnifiedClusterSelector({
     refetchOnWindowFocus: true,
     staleTime: 0,
   });
+
+  // Handle re-authentication required
+  React.useEffect(() => {
+    const needsReauth =
+      (clustersError && (clustersError as Error & { requireReauth?: boolean }).requireReauth) ||
+      (warehousesError && (warehousesError as Error & { requireReauth?: boolean }).requireReauth);
+
+    if (needsReauth) {
+      console.log("Cluster/Warehouse API requires re-authentication, signing out");
+      signOut({
+        fetchOptions: {
+          onSuccess: () => {
+            router.push("/databricks-idp");
+          },
+        },
+      });
+    }
+  }, [clustersError, warehousesError, router]);
 
   const startClusterMutation = useMutation({
     mutationFn: async (clusterId: string) => {

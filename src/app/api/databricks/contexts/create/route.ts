@@ -1,21 +1,23 @@
 import { NextResponse } from "next/server";
-import { getDatabricksWorkspaceToken } from "@/lib/databricks-workspace-token";
+import {
+  callDatabricksApi,
+  createErrorResponse,
+} from "@/lib/databricks-api-wrapper";
 
 export const dynamic = "force-dynamic";
 
+interface CreateContextRequest {
+  cluster_id: string;
+  language?: string;
+}
+
+interface CreateContextResponse {
+  id: string;
+}
+
 export async function POST(request: Request) {
   try {
-    const tokenResult = await getDatabricksWorkspaceToken();
-
-    if (!tokenResult.success) {
-      return NextResponse.json(
-        { error: tokenResult.error.error, details: tokenResult.error.details },
-        { status: tokenResult.error.status }
-      );
-    }
-
-    const { accessToken, workspaceUrl } = tokenResult.data;
-    const body = await request.json();
+    const body: CreateContextRequest = await request.json();
     const { cluster_id, language = "python" } = body;
 
     if (!cluster_id) {
@@ -25,39 +27,25 @@ export async function POST(request: Request) {
       );
     }
 
-    // Create execution context
-    const apiUrl = `${workspaceUrl}/api/1.2/contexts/create`;
-
     console.log("=== CREATING EXECUTION CONTEXT ===");
-    console.log("API URL:", apiUrl);
     console.log("Cluster ID:", cluster_id);
     console.log("Language:", language);
 
-    const databricksResponse = await fetch(apiUrl, {
+    const result = await callDatabricksApi<CreateContextResponse>({
+      endpoint: "/api/1.2/contexts/create",
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
+      body: {
         clusterId: cluster_id,
         language: language,
-      }),
+      },
     });
 
-    console.log("Response Status:", databricksResponse.status);
-
-    if (!databricksResponse.ok) {
-      const errorText = await databricksResponse.text();
-      console.error("Databricks API error:", errorText);
-      return NextResponse.json(
-        { error: "Failed to create execution context", details: errorText },
-        { status: databricksResponse.status }
-      );
+    if (!result.success) {
+      return createErrorResponse(result);
     }
 
-    const data = await databricksResponse.json();
-    return NextResponse.json(data);
+    console.log("Response Status:", result.response.status);
+    return NextResponse.json(result.data);
   } catch (error) {
     console.error("Error creating execution context:", error);
     return NextResponse.json(

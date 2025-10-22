@@ -1,21 +1,20 @@
 import { NextResponse } from "next/server";
-import { getDatabricksWorkspaceToken } from "@/lib/databricks-workspace-token";
+import {
+  callDatabricksApi,
+  createErrorResponse,
+} from "@/lib/databricks-api-wrapper";
 
 export const dynamic = "force-dynamic";
 
+interface CancelCommandRequest {
+  cluster_id: string;
+  context_id: string;
+  command_id: string;
+}
+
 export async function POST(request: Request) {
   try {
-    const tokenResult = await getDatabricksWorkspaceToken();
-
-    if (!tokenResult.success) {
-      return NextResponse.json(
-        { error: tokenResult.error.error, details: tokenResult.error.details },
-        { status: tokenResult.error.status }
-      );
-    }
-
-    const { accessToken, workspaceUrl } = tokenResult.data;
-    const body = await request.json();
+    const body: CancelCommandRequest = await request.json();
     const { cluster_id, context_id, command_id } = body;
 
     if (!cluster_id || !context_id || !command_id) {
@@ -25,43 +24,29 @@ export async function POST(request: Request) {
       );
     }
 
-    // Cancel command
-    const apiUrl = `${workspaceUrl}/api/1.2/commands/cancel`;
-
     console.log("=== CANCELLING COMMAND ===");
-    console.log("API URL:", apiUrl);
     console.log("Cluster ID:", cluster_id);
     console.log("Context ID:", context_id);
     console.log("Command ID:", command_id);
 
-    const databricksResponse = await fetch(apiUrl, {
+    const result = await callDatabricksApi({
+      endpoint: "/api/1.2/commands/cancel",
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
+      body: {
         clusterId: cluster_id,
         contextId: context_id,
         commandId: command_id,
-      }),
+      },
     });
 
-    console.log("Response Status:", databricksResponse.status);
-
-    if (!databricksResponse.ok) {
-      const errorText = await databricksResponse.text();
-      console.error("Databricks API error:", errorText);
-      return NextResponse.json(
-        { error: "Failed to cancel command", details: errorText },
-        { status: databricksResponse.status }
-      );
+    if (!result.success) {
+      return createErrorResponse(result);
     }
 
-    const data = await databricksResponse.json();
-    console.log("Cancel command response:", data);
+    console.log("Response Status:", result.response.status);
+    console.log("Cancel command response:", result.data);
 
-    return NextResponse.json(data);
+    return NextResponse.json(result.data);
   } catch (error) {
     console.error("Error cancelling command:", error);
     return NextResponse.json(

@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { organization } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { decodeJwt } from "jose";
+import { revalidateTag } from "next/cache";
 
 export interface DatabricksWorkspaceTokenInfo {
   accessToken: string;
@@ -50,18 +51,71 @@ export async function getDatabricksWorkspaceToken(): Promise<
         error: {
           error: "No active organization set in session",
           status: 400,
+          details: "REQUIRE_ORG_SELECTION",
         },
       };
     }
 
     // Use Better Auth's getAccessToken to retrieve the Databricks access token
     // This will automatically refresh the token if it's expired
-    const tokenResponse = await auth.api.getAccessToken({
-      headers: await headers(),
-      body: {
-        providerId: `databricks-workspace-${session.session.activeOrganizationId}`,
-      },
-    });
+    let tokenResponse;
+    try {
+      tokenResponse = await auth.api.getAccessToken({
+        headers: await headers(),
+        body: {
+          providerId: `databricks-workspace-${session.session.activeOrganizationId}`,
+        },
+      });
+    } catch (tokenError: unknown) {
+      console.error("Error getting access token:", tokenError);
+
+      // Type guard for error object
+      const isTokenError = (error: unknown): error is { message?: string; status?: number; statusCode?: number } => {
+        return typeof error === 'object' && error !== null;
+      };
+
+      // If we get a token error, invalidate the session and require re-authentication
+      if (isTokenError(tokenError) && (
+          tokenError?.message?.includes("Failed to get a valid access token") ||
+          tokenError?.status === 400 ||
+          tokenError?.statusCode === 400)) {
+        console.log("Invalid token detected, revoking session and requiring re-authentication");
+
+        // Revoke the current session
+        try {
+          await auth.api.revokeSession({
+            headers: await headers(),
+            body: {
+              token: session.session.token,
+            },
+          });
+          console.log("Session revoked successfully");
+
+          // Invalidate all Databricks-related caches
+          try {
+            revalidateTag("databricks-clusters");
+            revalidateTag("databricks-unity-catalog");
+            revalidateTag("databricks-api");
+            console.log("Cache tags invalidated after session revocation");
+          } catch (cacheError) {
+            console.error("Error invalidating cache tags:", cacheError);
+          }
+        } catch (revokeError) {
+          console.error("Error revoking session:", revokeError);
+        }
+
+        return {
+          success: false,
+          error: {
+            error: "Authentication session invalid. Please sign in again.",
+            status: 401,
+            details: "REQUIRE_REAUTHENTICATION",
+          },
+        };
+      }
+
+      throw tokenError;
+    }
 
     if (!tokenResponse || !tokenResponse.accessToken) {
       return {

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getDatabricksWorkspaceToken } from "@/lib/databricks-workspace-token";
+import { callDatabricksApi, createErrorResponse } from "@/lib/databricks-api-wrapper";
 
 export const dynamic = "force-dynamic";
 
@@ -9,65 +9,27 @@ export const dynamic = "force-dynamic";
  * Body: { clusterId: string }
  */
 export async function POST(request: Request) {
-  try {
-    const tokenResult = await getDatabricksWorkspaceToken();
+  const body = await request.json();
+  const { clusterId } = body;
 
-    if (!tokenResult.success) {
-      return NextResponse.json(
-        { error: tokenResult.error.error, details: tokenResult.error.details },
-        { status: tokenResult.error.status }
-      );
-    }
-
-    const { accessToken, workspaceUrl } = tokenResult.data;
-    const body = await request.json();
-    const { clusterId } = body;
-
-    if (!clusterId) {
-      return NextResponse.json(
-        { error: "Missing required parameter: clusterId" },
-        { status: 400 }
-      );
-    }
-
-    console.log("=== DATABRICKS CLUSTER START ===");
-    console.log("Cluster ID:", clusterId);
-
-    const apiUrl = `${workspaceUrl}/api/2.0/clusters/start`;
-
-    const databricksResponse = await fetch(apiUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        cluster_id: clusterId,
-      }),
-    });
-
-    console.log("Response Status:", databricksResponse.status);
-
-    if (!databricksResponse.ok) {
-      const errorText = await databricksResponse.text();
-      console.error("Databricks API error:", errorText);
-      return NextResponse.json(
-        {
-          error: "Failed to start cluster",
-          details: errorText,
-          status: databricksResponse.status,
-        },
-        { status: databricksResponse.status }
-      );
-    }
-
-    const data = await databricksResponse.json();
-    return NextResponse.json(data);
-  } catch (error) {
-    console.error("Error starting cluster:", error);
+  if (!clusterId) {
     return NextResponse.json(
-      { error: "Internal server error", details: String(error) },
-      { status: 500 }
+      { error: "Missing required parameter: clusterId" },
+      { status: 400 }
     );
   }
+
+  const result = await callDatabricksApi({
+    endpoint: "/api/2.0/clusters/start",
+    method: "POST",
+    body: {
+      cluster_id: clusterId,
+    },
+  });
+
+  if (!result.success) {
+    return createErrorResponse(result);
+  }
+
+  return NextResponse.json(result.data);
 }

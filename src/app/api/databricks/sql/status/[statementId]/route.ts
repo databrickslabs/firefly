@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { getDatabricksWorkspaceToken } from "@/lib/databricks-workspace-token";
+import {
+  callDatabricksApi,
+  createErrorResponse,
+} from "@/lib/databricks-api-wrapper";
 
 export const dynamic = "force-dynamic";
 
@@ -51,48 +54,20 @@ export async function GET(
   try {
     const { statementId } = await params;
 
-    const tokenResult = await getDatabricksWorkspaceToken();
-
-    if (!tokenResult.success) {
-      return NextResponse.json(
-        { error: tokenResult.error.error, details: tokenResult.error.details },
-        { status: tokenResult.error.status }
-      );
-    }
-
-    const { accessToken, workspaceUrl } = tokenResult.data;
-
-    const apiUrl = `${workspaceUrl}/api/2.0/sql/statements/${statementId}`;
-
     console.log("=== DATABRICKS SQL STATUS DEBUG ===");
-    console.log("API URL:", apiUrl);
     console.log("Statement ID:", statementId);
 
-    const databricksResponse = await fetch(apiUrl, {
+    const result = await callDatabricksApi<StatementStatusResponse>({
+      endpoint: `/api/2.0/sql/statements/${statementId}`,
       method: "GET",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
     });
 
-    console.log("Response Status:", databricksResponse.status);
-
-    if (!databricksResponse.ok) {
-      const errorText = await databricksResponse.text();
-      console.error("Databricks API error:", errorText);
-      return NextResponse.json(
-        {
-          error: "Failed to get statement status",
-          details: errorText,
-          status: databricksResponse.status,
-        },
-        { status: databricksResponse.status }
-      );
+    if (!result.success) {
+      return createErrorResponse(result);
     }
 
-    const data: StatementStatusResponse = await databricksResponse.json();
-    return NextResponse.json(data);
+    console.log("Response Status:", result.response.status);
+    return NextResponse.json(result.data);
   } catch (error) {
     console.error("Error getting statement status:", error);
     return NextResponse.json(

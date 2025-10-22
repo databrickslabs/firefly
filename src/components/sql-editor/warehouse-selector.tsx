@@ -18,6 +18,8 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { signOut } from "@/lib/auth-client";
+import { useRouter } from "next/navigation";
 
 interface Warehouse {
   id: string;
@@ -32,6 +34,12 @@ interface WarehousesResponse {
   warehouses: Warehouse[];
 }
 
+interface WarehouseError {
+  error: string;
+  details?: string;
+  requireReauth?: boolean;
+}
+
 interface WarehouseSelectorProps {
   value?: string;
   onValueChange: (warehouseId: string) => void;
@@ -41,13 +49,29 @@ interface WarehouseSelectorProps {
 
 export function WarehouseSelector({ value, onValueChange, refreshTrigger, onWarehouseStateChange }: WarehouseSelectorProps) {
   const [open, setOpen] = React.useState(false);
+  const router = useRouter();
 
-  const { data: warehousesData, isLoading, refetch } = useQuery<WarehousesResponse>({
+  const { data: warehousesData, isLoading, refetch, error } = useQuery<WarehousesResponse>({
     queryKey: ["warehouses"],
     queryFn: async () => {
       const response = await fetch("/api/databricks/warehouses");
       if (!response.ok) {
-        throw new Error("Failed to fetch warehouses");
+        // Try to parse error details
+        let errorData: WarehouseError | undefined;
+        try {
+          errorData = await response.json();
+        } catch {
+          throw new Error("Failed to fetch warehouses");
+        }
+
+        // Check if it's a re-authentication required error
+        if (errorData?.requireReauth) {
+          const error = new Error("Re-authentication required");
+          (error as Error & { requireReauth: boolean }).requireReauth = true;
+          throw error;
+        }
+
+        throw new Error(errorData?.error || "Failed to fetch warehouses");
       }
       return response.json();
     },
@@ -55,6 +79,20 @@ export function WarehouseSelector({ value, onValueChange, refreshTrigger, onWare
     refetchOnWindowFocus: true,
     staleTime: 0,
   });
+
+  // Handle re-authentication required
+  React.useEffect(() => {
+    if (error && (error as Error & { requireReauth?: boolean }).requireReauth) {
+      console.log("Warehouse API requires re-authentication, signing out");
+      signOut({
+        fetchOptions: {
+          onSuccess: () => {
+            router.push("/databricks-idp");
+          },
+        },
+      });
+    }
+  }, [error, router]);
 
   // Refresh warehouses whenever refreshTrigger changes (when a query is executed)
   React.useEffect(() => {

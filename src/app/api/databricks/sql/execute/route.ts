@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { getDatabricksWorkspaceToken } from "@/lib/databricks-workspace-token";
+import {
+  callDatabricksApi,
+  createErrorResponse,
+} from "@/lib/databricks-api-wrapper";
 
 export const dynamic = "force-dynamic";
 
@@ -41,32 +44,16 @@ export interface ExecuteStatementResponse {
 
 export async function POST(request: Request) {
   try {
-    const tokenResult = await getDatabricksWorkspaceToken();
-
-    if (!tokenResult.success) {
-      return NextResponse.json(
-        { error: tokenResult.error.error, details: tokenResult.error.details },
-        { status: tokenResult.error.status }
-      );
-    }
-
-    const { accessToken, workspaceUrl } = tokenResult.data;
     const body: ExecuteStatementRequest = await request.json();
 
-    const apiUrl = `${workspaceUrl}/api/2.0/sql/statements`;
-
     console.log("=== DATABRICKS SQL EXECUTE DEBUG ===");
-    console.log("API URL:", apiUrl);
     console.log("Warehouse ID:", body.warehouse_id);
     console.log("Statement:", body.statement.substring(0, 100) + "...");
 
-    const databricksResponse = await fetch(apiUrl, {
+    const result = await callDatabricksApi<ExecuteStatementResponse>({
+      endpoint: "/api/2.0/sql/statements",
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
+      body: {
         warehouse_id: body.warehouse_id,
         statement: body.statement,
         catalog: body.catalog,
@@ -75,26 +62,15 @@ export async function POST(request: Request) {
         on_wait_timeout: body.on_wait_timeout || "CONTINUE",
         format: "JSON_ARRAY",
         disposition: "INLINE",
-      }),
+      },
     });
 
-    console.log("Response Status:", databricksResponse.status);
-
-    if (!databricksResponse.ok) {
-      const errorText = await databricksResponse.text();
-      console.error("Databricks API error:", errorText);
-      return NextResponse.json(
-        {
-          error: "Failed to execute SQL statement",
-          details: errorText,
-          status: databricksResponse.status,
-        },
-        { status: databricksResponse.status }
-      );
+    if (!result.success) {
+      return createErrorResponse(result);
     }
 
-    const data: ExecuteStatementResponse = await databricksResponse.json();
-    return NextResponse.json(data);
+    console.log("Response Status:", result.response.status);
+    return NextResponse.json(result.data);
   } catch (error) {
     console.error("Error executing SQL statement:", error);
     return NextResponse.json(
