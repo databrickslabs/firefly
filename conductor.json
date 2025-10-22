@@ -1,0 +1,7 @@
+{
+    "scripts": {
+        "setup": "./scripts/conductor-setup.sh",
+        "dev": "pnpm run dev"
+    },
+    "runScriptMode": "nonconcurrent"
+}
