@@ -3,6 +3,8 @@
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Database, Calendar, User, FileType, HardDrive, Folder } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   Table,
   TableBody,
@@ -165,7 +167,7 @@ function CatalogDetailsView({ catalog, className }: { catalog: string; className
             )}
           </div>
           {catalogDetails.comment && (
-            <p className="text-sm text-muted-foreground pl-9">{catalogDetails.comment}</p>
+            <MarkdownDescription content={catalogDetails.comment} />
           )}
         </div>
 
@@ -263,7 +265,7 @@ function SchemaDetailsView({
             </div>
           </div>
           {schemaDetails.comment && (
-            <p className="text-sm text-muted-foreground pl-9">{schemaDetails.comment}</p>
+            <MarkdownDescription content={schemaDetails.comment} />
           )}
         </div>
 
@@ -387,7 +389,7 @@ function TableDetailsView({
             )}
           </div>
           {tableDetails.comment && (
-            <p className="text-sm text-muted-foreground pl-9">{tableDetails.comment}</p>
+            <MarkdownDescription content={tableDetails.comment} />
           )}
         </div>
 
@@ -580,6 +582,14 @@ function TableDetailsView({
 }
 
 // Helper components
+function MarkdownDescription({ content }: { content: string }) {
+  return (
+    <div className="prose prose-sm dark:prose-invert max-w-none text-muted-foreground pl-9">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+    </div>
+  );
+}
+
 function LoadingView() {
   return (
     <div className="flex items-center justify-center h-full p-8">
