@@ -1,16 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { unstable_cache } from "next/cache";
 import {
   callDatabricksApi,
   createErrorResponse,
-  DatabricksApiError,
 } from "@/lib/databricks-api-wrapper";
 
 export const dynamic = "force-dynamic";
-
-// Cache tag factory for table data
-export const getTablesCacheTag = (catalogName: string, schemaName: string) =>
-  `UNITY_CATALOG_TABLES_${catalogName}_${schemaName}`;
 
 export interface Table {
   name: string;
@@ -47,49 +41,18 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // Use unstable_cache for server-side caching
-  const getTables = unstable_cache(
-    async (catalog: string, schema: string) => {
-      const result = await callDatabricksApi<TablesResponse>({
-        endpoint: "/api/2.1/unity-catalog/tables",
-        method: "GET",
-        queryParams: {
-          catalog_name: catalog,
-          schema_name: schema,
-        },
-      });
-
-      if (!result.success) {
-        throw result;
-      }
-
-      return result.data;
+  const result = await callDatabricksApi<TablesResponse>({
+    endpoint: "/api/2.1/unity-catalog/tables",
+    method: "GET",
+    queryParams: {
+      catalog_name: catalogName,
+      schema_name: schemaName,
     },
-    [`unity-catalog-tables-${catalogName}-${schemaName}`],
-    {
-      tags: [getTablesCacheTag(catalogName, schemaName)],
-      revalidate: false,
-    }
-  );
+  });
 
-  try {
-    const data = await getTables(catalogName, schemaName);
-    return NextResponse.json(data);
-  } catch (error) {
-    // Check if it's a DatabricksApiError
-    if (
-      error &&
-      typeof error === "object" &&
-      "success" in error &&
-      error.success === false
-    ) {
-      return createErrorResponse(error as DatabricksApiError);
-    }
-
-    console.error("Error fetching tables:", error);
-    return NextResponse.json(
-      { error: "Internal server error", details: String(error) },
-      { status: 500 }
-    );
+  if (!result.success) {
+    return createErrorResponse(result);
   }
+
+  return NextResponse.json(result.data);
 }

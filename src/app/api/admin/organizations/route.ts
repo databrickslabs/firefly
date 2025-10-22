@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { organization, member, user } from "@/db/schema/auth";
 import { eq } from "drizzle-orm";
-import { unstable_cache } from "next/cache";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +11,7 @@ export const ORGANIZATIONS_CACHE_TAG = "admin-organizations";
  * GET /api/admin/organizations
  * Fetch all organizations with their members
  */
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     // Fetch all organizations
     const orgs = await db.select().from(organization);

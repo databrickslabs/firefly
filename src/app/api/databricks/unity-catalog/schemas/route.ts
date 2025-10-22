@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { unstable_cache } from "next/cache";
 import {
   callDatabricksApi,
   createErrorResponse,
@@ -7,10 +6,6 @@ import {
 } from "@/lib/databricks-api-wrapper";
 
 export const dynamic = "force-dynamic";
-
-// Cache tag factory for schema data
-export const getSchemasCacheTag = (catalogName: string) =>
-  `UNITY_CATALOG_SCHEMAS_${catalogName}`;
 
 export interface Schema {
   name: string;
@@ -36,48 +31,17 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // Use unstable_cache for server-side caching
-  const getSchemas = unstable_cache(
-    async (catalog: string) => {
-      const result = await callDatabricksApi<SchemasResponse>({
-        endpoint: "/api/2.1/unity-catalog/schemas",
-        method: "GET",
-        queryParams: {
-          catalog_name: catalog,
-        },
-      });
-
-      if (!result.success) {
-        throw result;
-      }
-
-      return result.data;
+  const result = await callDatabricksApi<SchemasResponse>({
+    endpoint: "/api/2.1/unity-catalog/schemas",
+    method: "GET",
+    queryParams: {
+      catalog_name: catalogName,
     },
-    [`unity-catalog-schemas-${catalogName}`],
-    {
-      tags: [getSchemasCacheTag(catalogName)],
-      revalidate: false,
-    }
-  );
+  });
 
-  try {
-    const data = await getSchemas(catalogName);
-    return NextResponse.json(data);
-  } catch (error) {
-    // Check if it's a DatabricksApiError
-    if (
-      error &&
-      typeof error === "object" &&
-      "success" in error &&
-      error.success === false
-    ) {
-      return createErrorResponse(error as DatabricksApiError);
-    }
-
-    console.error("Error fetching schemas:", error);
-    return NextResponse.json(
-      { error: "Internal server error", details: String(error) },
-      { status: 500 }
-    );
+  if (!result.success) {
+    return createErrorResponse(result);
   }
+
+  return NextResponse.json(result.data);
 }
