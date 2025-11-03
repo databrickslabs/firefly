@@ -1,8 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { X, Plus } from "lucide-react";
+import { X, Plus, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 export interface NotebookTab {
@@ -10,6 +11,7 @@ export interface NotebookTab {
   path: string | null;
   name: string;
   isDirty?: boolean;
+  isReadOnly?: boolean;
 }
 
 interface NotebookTabsProps {
@@ -33,7 +35,7 @@ export const NotebookTabs = React.memo(function NotebookTabs({
         <div
           key={tab.id}
           className={cn(
-            "group relative flex items-center gap-2 py-2 border-r cursor-pointer transition-colors min-w-[120px] max-w-[200px]",
+            "group relative flex items-center gap-2 py-2 border-r cursor-pointer transition-colors min-w-[120px] max-w-[250px]",
             index === 0 ? "pl-2 pr-4" : "px-4",
             activeTabId === tab.id
               ? "bg-background border-b-2 border-b-primary"
@@ -45,6 +47,12 @@ export const NotebookTabs = React.memo(function NotebookTabs({
             {tab.name}
             {tab.isDirty && <span className="ml-1 text-orange-500">•</span>}
           </span>
+          {tab.isReadOnly && (
+            <Badge variant="secondary" className="text-xs shrink-0 gap-1 px-1.5 py-0">
+              <Eye className="h-3 w-3" />
+              Read Only
+            </Badge>
+          )}
           <Button
             variant="ghost"
             size="sm"

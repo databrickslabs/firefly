@@ -15,6 +15,20 @@
       "when": 1760073215462,
       "tag": "0001_smooth_frog_thor",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1761934655155,
+      "tag": "0002_silky_hawkeye",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1761937423460,
+      "tag": "0003_fluffy_tombstone",
+      "breakpoints": true
     }
   ]
 }

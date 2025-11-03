@@ -151,6 +151,26 @@ export async function callDatabricksApi<T = unknown>(
       apiUrl = `${apiUrl}?${urlParams}`;
     }
 
+    // Log request details with token information
+    const maskedToken = accessToken.length > 20
+      ? `${accessToken.substring(0, 8)}...${accessToken.substring(accessToken.length - 8)}`
+      : '***masked***';
+
+    console.log('Databricks API Request:', {
+      endpoint,
+      method,
+      url: apiUrl,
+      hasBody: !!body,
+      tokenPreview: maskedToken,
+      tokenLength: accessToken.length,
+    });
+
+    // Log full token only if DEBUG_TOKENS environment variable is set (for debugging only)
+    if (process.env.DEBUG_TOKENS === 'true') {
+      console.warn('⚠️  DEBUG MODE - Full Token:', accessToken);
+      console.warn('⚠️  DO NOT USE IN PRODUCTION - This exposes sensitive credentials');
+    }
+
     // Prepare fetch options
     const fetchOptions: RequestInit = {
       method,
@@ -170,6 +190,11 @@ export async function callDatabricksApi<T = unknown>(
     // If response is OK, return the data
     if (response.ok) {
       const data = await response.json();
+      console.log('Databricks API Success:', {
+        endpoint,
+        method,
+        status: response.status,
+      });
       return {
         success: true,
         data: data as T,
@@ -180,6 +205,24 @@ export async function callDatabricksApi<T = unknown>(
     // Handle error responses
     const errorText = await response.text();
     const status = response.status;
+
+    // Log detailed error information
+    console.error('Databricks API Error:', {
+      endpoint,
+      method,
+      status,
+      statusText: response.statusText,
+      errorBody: errorText,
+      url: apiUrl,
+    });
+
+    // Try to parse error as JSON for better readability
+    try {
+      const errorJson = JSON.parse(errorText);
+      console.error('Parsed error response:', JSON.stringify(errorJson, null, 2));
+    } catch {
+      // Not JSON, already logged as text
+    }
 
     // Check if this is an expired token error
     if (isExpiredTokenError(status, errorText)) {

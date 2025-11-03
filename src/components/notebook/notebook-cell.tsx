@@ -760,6 +760,7 @@ export function NotebookCell({
               e.stopPropagation();
               onMoveUp();
             }}
+            disabled={readOnly}
             title="Move Up"
           >
             <ChevronUp className="h-3 w-3" />
@@ -775,6 +776,7 @@ export function NotebookCell({
               e.stopPropagation();
               onMoveDown();
             }}
+            disabled={readOnly}
             title="Move Down"
           >
             <ChevronDown className="h-3 w-3" />
@@ -795,19 +797,25 @@ export function NotebookCell({
           <DropdownMenuContent align="end" className="w-56">
             {/* Add cells section */}
             {onInsertAbove && (
-              <DropdownMenuItem onClick={(e) => {
-                e.stopPropagation();
-                onInsertAbove();
-              }}>
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onInsertAbove();
+                }}
+                disabled={readOnly}
+              >
                 <span className="text-xs text-muted-foreground mr-3 w-4">A</span>
                 <span>Add cell above</span>
               </DropdownMenuItem>
             )}
             {onInsertBelow && (
-              <DropdownMenuItem onClick={(e) => {
-                e.stopPropagation();
-                onInsertBelow();
-              }}>
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onInsertBelow();
+                }}
+                disabled={readOnly}
+              >
                 <span className="text-xs text-muted-foreground mr-3 w-4">B</span>
                 <span>Add cell below</span>
               </DropdownMenuItem>
@@ -822,7 +830,7 @@ export function NotebookCell({
                   e.stopPropagation();
                   onMoveUp();
                 }}
-                disabled={!onMoveUp}
+                disabled={readOnly}
               >
                 <ChevronUp className="h-4 w-4 mr-2" />
                 Move up
@@ -836,7 +844,7 @@ export function NotebookCell({
                   e.stopPropagation();
                   onMoveDown();
                 }}
-                disabled={!onMoveDown}
+                disabled={readOnly}
               >
                 <ChevronDown className="h-4 w-4 mr-2" />
                 Move down
@@ -853,6 +861,7 @@ export function NotebookCell({
                     e.stopPropagation();
                     onChangeType(cell.type === "code" ? "markdown" : "code");
                   }}
+                  disabled={readOnly}
                 >
                   <span className="text-xs text-muted-foreground mr-3 w-4">T</span>
                   <span>{cell.type === "code" ? "Convert to markdown" : "Convert to code"}</span>
@@ -882,6 +891,7 @@ export function NotebookCell({
                 e.stopPropagation();
                 onDelete();
               }}
+              disabled={readOnly}
               className="text-red-600 focus:text-red-700 focus:bg-red-100 dark:focus:bg-red-900/20"
             >
               Delete cell

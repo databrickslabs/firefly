@@ -8,10 +8,12 @@ import {
   File,
   Folder,
   FolderOpen,
-  FilePlus,
   FolderPlus,
   Trash2,
   RefreshCw,
+  Share2,
+  FileCode2,
+  BookOpen,
 } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 import { Button } from "@/components/ui/button";
@@ -38,11 +40,12 @@ import {
   buildFileTree,
   flattenFileTree,
   sortFileTreeNodes,
-  isSqlFile,
   isValidFileName,
   createUniqueFilePath,
 } from "@/lib/workspace-file-manager";
 import { useMonacoRootPath } from "@/providers/user-store-provider";
+import { ShareNotebookModal } from "@/components/notebook/share-notebook-modal";
+import { useQueryStates, parseAsStringLiteral, parseAsBoolean } from "nuqs";
 
 interface FileTreeProps {
   onFileSelect: (filePath: string) => void;
@@ -59,6 +62,18 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
   // Get Monaco root path from Zustand store (always available, no loading state)
   const monacoRootPath = useMonacoRootPath();
 
+  // Use nuqs for sidebar navigation
+  const [, setSidebarState] = useQueryStates(
+    {
+      sidebarView: parseAsStringLiteral(["files", "catalog", "shared"] as const).withDefault("files"),
+      sidebarExpanded: parseAsBoolean.withDefault(true),
+    },
+    {
+      history: "replace",
+      shallow: true,
+    }
+  );
+
   const [expandedPaths, setExpandedPaths] = React.useState<Set<string>>(
     new Set([monacoRootPath])
   );
@@ -68,6 +83,12 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
   const [createFolderDialogOpen, setCreateFolderDialogOpen] = React.useState(false);
   const [newItemName, setNewItemName] = React.useState("");
   const [targetParentPath, setTargetParentPath] = React.useState<string>(monacoRootPath);
+  const [newFileType, setNewFileType] = React.useState<"sql" | "notebook">("sql");
+
+  // Share notebook state
+  const [shareDialogOpen, setShareDialogOpen] = React.useState(false);
+  const [shareNotebookPath, setShareNotebookPath] = React.useState<string>("");
+  const [shareNotebookName, setShareNotebookName] = React.useState<string>("");
 
   // Track items being created that should show loading indicator in tree
   const [pendingCreations, setPendingCreations] = React.useState<Map<string, { type: 'file' | 'folder'; name: string }>>(new Map());
@@ -182,18 +203,19 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
 
   // Create file mutation
   const createFileMutation = useMutation({
-    mutationFn: async ({ path, content }: { path: string; content: string }) => {
+    mutationFn: async ({ path, content, format }: { path: string; content: string; format?: string }) => {
       const parentPath = path.substring(0, path.lastIndexOf('/'));
       setPendingOperations((prev) => new Map(prev).set(parentPath, 'creating'));
 
+      const isNotebook = path.endsWith('.ipynb');
       const response = await fetch("/api/databricks/workspace/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           path,
           content,
-          format: "AUTO",
-          isNotebook: false, // Create as file, not notebook
+          format: format || (isNotebook ? "JUPYTER" : "AUTO"),
+          isNotebook,
           overwrite: false,
         }),
       });
@@ -408,14 +430,16 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
   const handleFileClick = (node: FileTreeNode) => {
     if (node.isDirectory) {
       toggleExpanded(node.path);
-    } else if (isSqlFile(node.path) || node.path.endsWith(".ipynb")) {
+    } else {
+      // Allow opening any file type
       onFileSelect(node.path);
     }
   };
 
-  const handleNewFile = (parentPath: string) => {
+  const handleNewFile = (parentPath: string, fileType: "sql" | "notebook") => {
     setTargetParentPath(parentPath);
-    setNewItemName("untitled.sql");
+    setNewFileType(fileType);
+    setNewItemName(fileType === "sql" ? "untitled.sql" : "untitled.ipynb");
     setCreateFileDialogOpen(true);
   };
 
@@ -428,6 +452,17 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
   const handleDelete = (path: string) => {
     setContextMenuPath(path);
     setDeleteDialogOpen(true);
+  };
+
+  const handleShare = (path: string) => {
+    const fileName = path.split("/").pop() || "Notebook";
+    setShareNotebookPath(path);
+    setShareNotebookName(fileName);
+    setShareDialogOpen(true);
+  };
+
+  const handleNavigateToShared = () => {
+    setSidebarState({ sidebarView: "shared", sidebarExpanded: true });
   };
 
   const confirmCreateFile = () => {
@@ -455,9 +490,29 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
     setCreateFileDialogOpen(false);
     setNewItemName("");
 
+    // Create appropriate content based on file type
+    const content = newFileType === "notebook"
+      ? JSON.stringify({
+          cells: [],
+          metadata: {
+            kernelspec: {
+              display_name: "Python 3",
+              language: "python",
+              name: "python3"
+            },
+            language_info: {
+              name: "python",
+              version: "3.9.0"
+            }
+          },
+          nbformat: 4,
+          nbformat_minor: 4
+        }, null, 2)
+      : "-- New SQL query\n";
+
     createFileMutation.mutate({
       path: filePath,
-      content: "-- New SQL query\n",
+      content,
     });
   };
 
@@ -522,11 +577,20 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => handleNewFile(monacoRootPath)}
+            onClick={() => handleNewFile(monacoRootPath, "sql")}
             className="h-6 w-6 p-0"
-            title="New File"
+            title="New SQL File"
           >
-            <FilePlus className="h-3 w-3" />
+            <FileCode2 className="h-3 w-3" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => handleNewFile(monacoRootPath, "notebook")}
+            className="h-6 w-6 p-0"
+            title="New Notebook"
+          >
+            <BookOpen className="h-3 w-3" />
           </Button>
           <Button
             variant="ghost"
@@ -547,6 +611,19 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
             <RefreshCw className="h-3 w-3" />
           </Button>
         </div>
+      </div>
+
+      {/* Shared with Me link */}
+      <div className="px-2 py-1.5 border-b bg-slate-50/50">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleNavigateToShared}
+          className="h-7 w-full justify-start text-xs gap-2 hover:bg-purple-50 hover:text-purple-700"
+        >
+          <Share2 className="h-3.5 w-3.5" />
+          View Shared with Me
+        </Button>
       </div>
 
       {/* File Tree */}
@@ -576,9 +653,10 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
                   isExpanded={expandedPaths.has(node.path)}
                   isSelected={selectedFilePath === node.path}
                   onClick={() => handleFileClick(node)}
-                  onNewFile={() => handleNewFile(node.path)}
+                  onNewFile={(fileType) => handleNewFile(node.path, fileType)}
                   onNewFolder={() => handleNewFolder(node.path)}
                   onDelete={() => handleDelete(node.path)}
+                  onShare={() => handleShare(node.path)}
                   isDeleting={pendingOperations.get(node.path) === 'deleting'}
                 />
                 {/* Show loading indicator right after the expanded folder when loading children */}
@@ -621,15 +699,19 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Create New File</AlertDialogTitle>
+            <AlertDialogTitle>
+              {newFileType === "sql" ? "Create New SQL File" : "Create New Notebook"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              Enter a name for the new SQL file
+              {newFileType === "sql"
+                ? "Enter a name for the new SQL file"
+                : "Enter a name for the new notebook"}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <Input
             value={newItemName}
             onChange={(e) => setNewItemName(e.target.value)}
-            placeholder="filename.sql"
+            placeholder={newFileType === "sql" ? "filename.sql" : "filename.ipynb"}
             disabled={createFileMutation.isPending}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !createFileMutation.isPending) {
@@ -711,6 +793,14 @@ export function FileTree({ onFileSelect, selectedFilePath }: FileTreeProps) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Share Notebook Dialog */}
+      <ShareNotebookModal
+        open={shareDialogOpen}
+        onOpenChange={setShareDialogOpen}
+        notebookPath={shareNotebookPath}
+        notebookName={shareNotebookName}
+      />
     </div>
   );
 }
@@ -720,9 +810,10 @@ interface FileTreeItemProps {
   isExpanded: boolean;
   isSelected: boolean;
   onClick: () => void;
-  onNewFile: () => void;
+  onNewFile: (fileType: "sql" | "notebook") => void;
   onNewFolder: () => void;
   onDelete: () => void;
+  onShare: () => void;
   isDeleting?: boolean;
 }
 
@@ -734,6 +825,7 @@ function FileTreeItem({
   onNewFile,
   onNewFolder,
   onDelete,
+  onShare,
   isDeleting = false,
 }: FileTreeItemProps) {
   // Calculate padding: base 4px + 12px per level for proper indentation
@@ -758,6 +850,10 @@ function FileTreeItem({
               <Spinner className="h-3 w-3 text-red-600 shrink-0" />
               {node.isDirectory ? (
                 <Folder className="h-4 w-4 shrink-0 text-yellow-600" />
+              ) : node.path.endsWith('.ipynb') ? (
+                <BookOpen className="h-4 w-4 shrink-0 text-purple-600" />
+              ) : node.path.endsWith('.sql') ? (
+                <FileCode2 className="h-4 w-4 shrink-0 text-blue-600" />
               ) : (
                 <File className="h-4 w-4 shrink-0 text-blue-600" />
               )}
@@ -779,6 +875,16 @@ function FileTreeItem({
                     <Folder className="h-4 w-4 shrink-0 text-yellow-600" />
                   )}
                 </>
+              ) : node.path.endsWith('.ipynb') ? (
+                <>
+                  <ChevronRight className="h-3 w-3 shrink-0 opacity-0" />
+                  <BookOpen className="h-4 w-4 shrink-0 text-purple-600" />
+                </>
+              ) : node.path.endsWith('.sql') ? (
+                <>
+                  <ChevronRight className="h-3 w-3 shrink-0 opacity-0" />
+                  <FileCode2 className="h-4 w-4 shrink-0 text-blue-600" />
+                </>
               ) : (
                 <>
                   <ChevronRight className="h-3 w-3 shrink-0 opacity-0" />
@@ -793,15 +899,25 @@ function FileTreeItem({
       <ContextMenuContent>
         {node.isDirectory && (
           <>
-            <ContextMenuItem onClick={onNewFile}>
-              <FilePlus className="h-4 w-4 mr-2" />
-              New File
+            <ContextMenuItem onClick={() => onNewFile("sql")}>
+              <FileCode2 className="h-4 w-4 mr-2" />
+              New SQL File
+            </ContextMenuItem>
+            <ContextMenuItem onClick={() => onNewFile("notebook")}>
+              <BookOpen className="h-4 w-4 mr-2" />
+              New Notebook
             </ContextMenuItem>
             <ContextMenuItem onClick={onNewFolder}>
               <FolderPlus className="h-4 w-4 mr-2" />
               New Folder
             </ContextMenuItem>
           </>
+        )}
+        {!node.isDirectory && node.path.endsWith('.ipynb') && (
+          <ContextMenuItem onClick={onShare}>
+            <Share2 className="h-4 w-4 mr-2" />
+            Share
+          </ContextMenuItem>
         )}
         <ContextMenuItem onClick={onDelete} className="text-red-600">
           <Trash2 className="h-4 w-4 mr-2" />

@@ -1,18 +1,19 @@
 "use client";
 
 import * as React from "react";
-import { Database, FileText, ChevronLeft, ChevronRight } from "lucide-react";
+import { Database, FileText, ChevronLeft, ChevronRight, Share2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ImperativePanelHandle } from "react-resizable-panels";
 import { useQueryStates, parseAsStringLiteral, parseAsBoolean } from "nuqs";
 
-type SidebarView = "files" | "catalog" | null;
+type SidebarView = "files" | "catalog" | "shared" | null;
 
 interface CollapsibleSidebarProps {
   filesContent: React.ReactNode;
   catalogContent: React.ReactNode;
+  sharedContent?: React.ReactNode;
   className?: string;
   panelRef?: React.RefObject<ImperativePanelHandle | null>;
   onExpandedChange?: (isExpanded: boolean) => void;
@@ -21,6 +22,7 @@ interface CollapsibleSidebarProps {
 export const CollapsibleSidebar = React.memo(function CollapsibleSidebar({
   filesContent,
   catalogContent,
+  sharedContent,
   className,
   panelRef,
   onExpandedChange,
@@ -28,7 +30,7 @@ export const CollapsibleSidebar = React.memo(function CollapsibleSidebar({
   // Use nuqs for URL state management
   const [urlState, setUrlState] = useQueryStates(
     {
-      sidebarView: parseAsStringLiteral(["files", "catalog"] as const).withDefault("files"),
+      sidebarView: parseAsStringLiteral(["files", "catalog", "shared"] as const).withDefault("files"),
       sidebarExpanded: parseAsBoolean.withDefault(true),
     },
     {
@@ -61,7 +63,7 @@ export const CollapsibleSidebar = React.memo(function CollapsibleSidebar({
       }
     } else {
       // Switching to different view
-      setUrlState({ sidebarView: view as "files" | "catalog", sidebarExpanded: true });
+      setUrlState({ sidebarView: view as "files" | "catalog" | "shared", sidebarExpanded: true });
 
       // Ensure panel is expanded
       if (panelRef?.current) {
@@ -129,6 +131,28 @@ export const CollapsibleSidebar = React.memo(function CollapsibleSidebar({
             </TooltipContent>
           </Tooltip>
 
+          {sharedContent && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant={activeView === "shared" ? "secondary" : "ghost"}
+                  size="icon"
+                  className={cn(
+                    "h-10 w-10",
+                    activeView === "shared" && isExpanded && "bg-slate-200 border border-slate-300 text-slate-700 hover:bg-slate-300 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300",
+                    activeView === "shared" && !isExpanded && "bg-accent text-foreground"
+                  )}
+                  onClick={() => handleViewToggle("shared")}
+                >
+                  <Share2 className="h-5 w-5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="right">
+                <p>Shared with Me</p>
+              </TooltipContent>
+            </Tooltip>
+          )}
+
           <div className="flex-1" />
 
           {activeView && isExpanded && (
@@ -171,6 +195,16 @@ export const CollapsibleSidebar = React.memo(function CollapsibleSidebar({
               </div>
               <div className="flex-1 min-h-0">
                 {catalogContent}
+              </div>
+            </div>
+          )}
+          {activeView === "shared" && sharedContent && (
+            <div className="h-full flex flex-col">
+              <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/80">
+                <h2 className="text-sm font-semibold">Shared with Me</h2>
+              </div>
+              <div className="flex-1 min-h-0">
+                {sharedContent}
               </div>
             </div>
           )}

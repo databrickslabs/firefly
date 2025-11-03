@@ -20,8 +20,9 @@ import {
 } from "@/lib/notebook-manager";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
-import { Plus, Play, Trash2, Save, RotateCcw, Square } from "lucide-react";
+import { Plus, Play, Trash2, Save, RotateCcw, Square, Eye } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
+import { Badge } from "@/components/ui/badge";
 import type { ContextStatusResponse } from "@/hooks/use-notebook-context";
 import {
   Select,
@@ -636,7 +637,7 @@ export function NotebookEditor({
               size="sm"
               className="h-7 text-xs px-2"
               onClick={onSave}
-              disabled={isSaving}
+              disabled={isSaving || readOnly}
             >
               {isSaving ? (
                 <>
@@ -652,6 +653,13 @@ export function NotebookEditor({
             </Button>
           )}
         </ButtonGroup>
+
+        {readOnly && (
+          <Badge variant="secondary" className="text-xs gap-1 px-2 py-1">
+            <Eye className="h-3 w-3" />
+            Read Only
+          </Badge>
+        )}
 
         <div className="flex-1" />
 

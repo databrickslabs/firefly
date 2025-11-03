@@ -31,9 +31,15 @@ export async function POST(request: Request) {
   const isNotebook = body.isNotebook ?? false;
   const format = body.format || (isNotebook ? "SOURCE" : "AUTO");
 
+  // Ensure .ipynb extension for JUPYTER format
+  let finalPath = body.path;
+  if (format === "JUPYTER" && !finalPath.endsWith(".ipynb")) {
+    finalPath += ".ipynb";
+  }
+
   // Build request payload
   const payload: Record<string, unknown> = {
-    path: body.path,
+    path: finalPath,
     content: base64Content,
     format,
     overwrite: body.overwrite !== undefined ? body.overwrite : true,

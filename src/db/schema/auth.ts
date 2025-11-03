@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, boolean, index } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, boolean, index, uniqueIndex } from 'drizzle-orm/pg-core';
 
 // User table - core authentication
 export const user = pgTable('user', {
@@ -144,3 +144,43 @@ export type InsertSsoProvider = typeof ssoProvider.$inferInsert;
 
 export type OauthFlowMapping = typeof oauthFlowMapping.$inferSelect;
 export type InsertOauthFlowMapping = typeof oauthFlowMapping.$inferInsert;
+
+// Notebook metadata table - stores workspace paths and object IDs for notebooks
+export const notebookMetadata = pgTable('notebookMetadata', {
+  id: text('id').primaryKey(),
+  organizationId: text('organizationId').notNull().references(() => organization.id, { onDelete: 'cascade' }),
+  workspacePath: text('workspacePath').notNull(),
+  objectId: text('objectId').notNull(),
+  notebookName: text('notebookName').notNull(),
+  createdAt: timestamp('createdAt').notNull().defaultNow(),
+  updatedAt: timestamp('updatedAt').notNull().defaultNow().$onUpdate(() => new Date()),
+}, (table) => ({
+  // Unique constraint on organization + object ID (objectId is unique per workspace/org)
+  uniqueOrgObjectId: uniqueIndex('notebook_unique_org_object_id').on(table.organizationId, table.objectId),
+  // Unique constraint on organization + workspace path (path is unique per workspace/org)
+  uniqueOrgPath: uniqueIndex('notebook_unique_org_path').on(table.organizationId, table.workspacePath),
+}));
+
+// Notebook shares table - tracks which users have access to which notebooks
+export const notebookShare = pgTable('notebookShare', {
+  id: text('id').primaryKey(),
+  notebookMetadataId: text('notebookMetadataId').notNull().references(() => notebookMetadata.id, { onDelete: 'cascade' }),
+  sharedByUserId: text('sharedByUserId').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  sharedWithUserId: text('sharedWithUserId').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  permissionLevel: text('permissionLevel').notNull(), // 'CAN_READ' or 'CAN_EDIT'
+  createdAt: timestamp('createdAt').notNull().defaultNow(),
+  updatedAt: timestamp('updatedAt').notNull().defaultNow().$onUpdate(() => new Date()),
+}, (table) => ({
+  // Unique constraint: can't share same notebook with same user twice
+  uniqueNotebookUser: uniqueIndex('notebook_share_unique_notebook_user').on(table.notebookMetadataId, table.sharedWithUserId),
+  // Index for querying notebooks shared with a user
+  sharedWithIdx: index('notebook_share_shared_with_idx').on(table.sharedWithUserId),
+  // Index for querying who a notebook is shared with
+  notebookIdx: index('notebook_share_notebook_idx').on(table.notebookMetadataId),
+}));
+
+export type NotebookMetadata = typeof notebookMetadata.$inferSelect;
+export type InsertNotebookMetadata = typeof notebookMetadata.$inferInsert;
+
+export type NotebookShare = typeof notebookShare.$inferSelect;
+export type InsertNotebookShare = typeof notebookShare.$inferInsert;

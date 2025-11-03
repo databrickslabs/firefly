@@ -8,6 +8,7 @@ import { CollapsibleSidebar } from "@/components/sql-editor/collapsible-sidebar"
 import { CatalogTreeView } from "@/components/unity-catalog/catalog-tree-view";
 import { NotebookEditor } from "@/components/notebook/notebook-editor";
 import { NotebookTabs, type NotebookTab } from "@/components/notebook/notebook-tabs";
+import { SharedNotebooksTree } from "@/components/notebook/shared-notebooks-tree";
 import type { Notebook } from "@/lib/notebook-manager";
 import {
   createEmptyNotebook,
@@ -40,6 +41,7 @@ interface NotebookState {
   notebook: Notebook;
   filePath: string | null;
   isDirty: boolean;
+  permissionLevel?: string; // CAN_READ or CAN_EDIT, undefined for owned notebooks
 }
 
 export default function NotebookPage() {
@@ -185,7 +187,7 @@ export default function NotebookPage() {
     },
   });
 
-  const handleFileSelect = async (filePath: string) => {
+  const handleFileSelect = async (filePath: string, permissionLevel?: string) => {
     // Only load .ipynb files
     if (!filePath.endsWith(".ipynb")) {
       toast.error("Please select a .ipynb notebook file");
@@ -232,6 +234,7 @@ export default function NotebookPage() {
           notebook: notebookData,
           filePath,
           isDirty: false,
+          permissionLevel, // Store permission level for shared notebooks
         },
       ]);
       setActiveTabId(newTabId);
@@ -350,6 +353,7 @@ export default function NotebookPage() {
       path: ns.filePath,
       name,
       isDirty: ns.isDirty,
+      isReadOnly: ns.permissionLevel === "CAN_READ",
     };
   });
 
@@ -377,6 +381,7 @@ export default function NotebookPage() {
                 />
               }
               catalogContent={<CatalogTreeView showColumns={true} />}
+              sharedContent={<SharedNotebooksTree onNotebookClick={handleFileSelect} selectedFilePath={currentFilePath} />}
             />
           </Panel>
           {isSidebarExpanded && (
@@ -433,7 +438,7 @@ export default function NotebookPage() {
                     onContextChange={handleContextChange}
                     onSave={handleSave}
                     isSaving={saveNotebookMutation.isPending}
-                    readOnly={false}
+                    readOnly={activeNotebookState?.permissionLevel === "CAN_READ"}
                     onClusterChange={handleClusterChange}
                     onLanguageChange={setLanguage}
                   />
