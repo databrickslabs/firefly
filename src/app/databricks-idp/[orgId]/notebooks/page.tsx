@@ -15,7 +15,8 @@ import {
   parseNotebookFile,
   notebookToJson,
 } from "@/lib/notebook-manager";
-import { useMonacoRootPath } from "@/providers/user-store-provider";
+import { useMonacoRootPath, useActiveOrganizationId } from "@/providers/user-store-provider";
+import { useWorkspaceTabs } from "@/hooks/use-workspace-tabs";
 import { Button } from "@/components/ui/button";
 import { FileJson } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
@@ -48,8 +49,12 @@ export default function NotebookPage() {
   const queryClient = useQueryClient();
   const sidebarPanelRef = React.useRef<React.ElementRef<typeof Panel>>(null);
 
-  // Get Monaco root path from Zustand store (always available, no loading state)
+  // Get Monaco root path and orgId from Zustand store (always available, no loading state)
   const monacoRootPath = useMonacoRootPath();
+  const orgId = useActiveOrganizationId();
+
+  // Use workspace tabs hook for persistence (read-only on mount)
+  const workspaceTabs = useWorkspaceTabs({ orgId, workspace: "notebooks" });
 
   const [clusterId, setClusterId] = React.useState<string>("");
   const [contextId, setContextId] = React.useState<string | null>(null);
@@ -61,6 +66,7 @@ export default function NotebookPage() {
   const [activeTabId, setActiveTabId] = React.useState<string>("");
 
   const [isLoadingFile, setIsLoadingFile] = React.useState(false);
+  const [isRestoringFromStorage, setIsRestoringFromStorage] = React.useState(true);
   const [saveAsDialogOpen, setSaveAsDialogOpen] = React.useState(false);
   const [notebookName, setNotebookName] = React.useState("");
 
@@ -121,6 +127,77 @@ export default function NotebookPage() {
       setContextId(null); // This will trigger context recreation
     }
   }, [contextStatus, clusterId, contextId, createContextMutation.isPending]);
+
+  // Load notebooks from storage on mount (only once)
+  const hasLoadedFromStorageRef = React.useRef(false);
+
+  React.useEffect(() => {
+    // Wait for the hook to finish loading from localStorage first
+    if (!workspaceTabs.hasLoaded) {
+      return;
+    }
+
+    // Only load once, after the hook has loaded data
+    if (hasLoadedFromStorageRef.current) {
+      return;
+    }
+
+    const storedPaths = workspaceTabs.openedPaths;
+    const storedActive = workspaceTabs.activePath;
+
+    if (storedPaths.length === 0) {
+      // No notebooks to restore
+      setIsRestoringFromStorage(false);
+      return;
+    }
+
+    // Mark as loading to prevent duplicate loads
+    hasLoadedFromStorageRef.current = true;
+
+    const loadNotebooksFromStorage = async () => {
+      const loadedStates: NotebookState[] = [];
+
+      for (const filePath of storedPaths) {
+        try {
+          const response = await fetch(
+            `/api/databricks/workspace/export?path=${encodeURIComponent(filePath)}&format=JUPYTER`
+          );
+
+          if (response.ok) {
+            const data = await response.json();
+            if (data.content) {
+              const notebookData = parseNotebookFile(data.content);
+              loadedStates.push({
+                id: `notebook-${Date.now()}-${Math.random()}`,
+                notebook: notebookData,
+                filePath,
+                isDirty: false,
+              });
+            }
+          }
+        } catch (err) {
+          console.error(`Failed to load notebook from storage: ${filePath}`, err);
+        }
+      }
+
+      if (loadedStates.length > 0) {
+        setNotebookStates(loadedStates);
+        // Set active tab from storage
+        const activeState = loadedStates.find(ns => ns.filePath === storedActive);
+        setActiveTabId(activeState?.id || loadedStates[0].id);
+
+        // Wait for next tick to ensure state has updated before hiding loader
+        setTimeout(() => {
+          setIsRestoringFromStorage(false);
+        }, 0);
+      } else {
+        // No notebooks were loaded
+        setIsRestoringFromStorage(false);
+      }
+    };
+
+    loadNotebooksFromStorage();
+  }, [workspaceTabs.hasLoaded, workspaceTabs.openedPaths, workspaceTabs.activePath]); // Wait for hook to load data
 
   // Handle cluster selection change
   const handleClusterChange = (newClusterId: string) => {
@@ -227,16 +304,23 @@ export default function NotebookPage() {
 
       // Create new tab for this notebook
       const newTabId = `notebook-${Date.now()}`;
-      setNotebookStates((prev) => [
-        ...prev,
-        {
-          id: newTabId,
-          notebook: notebookData,
-          filePath,
-          isDirty: false,
-          permissionLevel, // Store permission level for shared notebooks
-        },
-      ]);
+      const newState = {
+        id: newTabId,
+        notebook: notebookData,
+        filePath,
+        isDirty: false,
+        permissionLevel, // Store permission level for shared notebooks
+      };
+
+      setNotebookStates((prev) => {
+        const updated = [...prev, newState];
+
+        // Save to localStorage immediately
+        const paths = updated.map(ns => ns.filePath).filter((p): p is string => p !== null);
+        workspaceTabs.setAllTabs(paths, filePath);
+
+        return updated;
+      });
       setActiveTabId(newTabId);
 
       // Set language from notebook metadata
@@ -310,11 +394,22 @@ export default function NotebookPage() {
   // Tab handlers - wrapped in useCallback to prevent re-renders
   const handleTabClick = React.useCallback((tabId: string) => {
     setActiveTabId(tabId);
-  }, []);
+
+    // Update active tab in storage
+    const notebook = notebookStates.find(ns => ns.id === tabId);
+    if (notebook?.filePath) {
+      workspaceTabs.setActiveTab(notebook.filePath);
+    }
+  }, [notebookStates, workspaceTabs]);
 
   const handleTabClose = React.useCallback((tabId: string) => {
     setNotebookStates((prev) => {
       const filtered = prev.filter((ns) => ns.id !== tabId);
+
+      // Save to localStorage immediately
+      const paths = filtered.map(ns => ns.filePath).filter((p): p is string => p !== null);
+      const newActive = filtered.length > 0 ? filtered[0].filePath || "" : "";
+      workspaceTabs.setAllTabs(paths, newActive);
 
       // Switch to another tab if closing active tab
       if (tabId === activeTabId) {
@@ -327,7 +422,7 @@ export default function NotebookPage() {
 
       return filtered;
     });
-  }, [activeTabId]);
+  }, [activeTabId, workspaceTabs]);
 
   // Update active notebook when it changes
   const handleNotebookChange = (updatedNotebook: Notebook) => {
@@ -401,11 +496,13 @@ export default function NotebookPage() {
               />
 
               {/* Loading State */}
-              {isLoadingFile ? (
+              {isLoadingFile || isRestoringFromStorage ? (
                 <div className="flex-1 flex items-center justify-center">
                   <div className="flex flex-col items-center gap-2">
                     <Spinner className="h-8 w-8 text-purple-600" />
-                    <p className="text-sm text-muted-foreground">Loading notebook...</p>
+                    <p className="text-sm text-muted-foreground">
+                      {isRestoringFromStorage ? "Restoring session..." : "Loading notebook..."}
+                    </p>
                   </div>
                 </div>
               ) : notebookStates.length === 0 ? (

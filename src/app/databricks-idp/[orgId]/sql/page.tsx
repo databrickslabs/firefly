@@ -30,6 +30,8 @@ import {
   loadWarehouse,
   saveWarehouse,
 } from "@/lib/warehouse-storage";
+import { useActiveOrganizationId } from "@/providers/user-store-provider";
+import { useWorkspaceTabs } from "@/hooks/use-workspace-tabs";
 
 interface ExecuteResponse {
   statement_id: string;
@@ -79,6 +81,13 @@ interface StatusResponse {
 export default function SQLPage() {
   const queryClient = useQueryClient();
   const sidebarPanelRef = React.useRef<React.ElementRef<typeof Panel>>(null);
+
+  // Get orgId from Zustand store
+  const orgId = useActiveOrganizationId();
+
+  // Use workspace tabs hook for persistence (read-only on mount)
+  const workspaceTabs = useWorkspaceTabs({ orgId, workspace: "sql" });
+
   const [warehouseId, setWarehouseId] = React.useState<string>("");
   const [warehouseState, setWarehouseState] = React.useState<"RUNNING" | "STOPPED" | "STARTING" | "STOPPING" | "DELETED" | undefined>();
   const [statementId, setStatementId] = React.useState<string | null>(null);
@@ -102,6 +111,7 @@ export default function SQLPage() {
   const [openFiles, setOpenFiles] = React.useState<OpenFile[]>([]);
   const [activeFilePath, setActiveFilePath] = React.useState<string | null>(null);
   const [fileToClose, setFileToClose] = React.useState<string | null>(null);
+  const [isRestoringFromStorage, setIsRestoringFromStorage] = React.useState(true);
 
   // Load persisted warehouse selection on mount
   React.useEffect(() => {
@@ -110,6 +120,85 @@ export default function SQLPage() {
       setWarehouseId(stored.warehouseId);
     }
   }, []);
+
+  // Load files from storage on mount (only once)
+  const hasLoadedFromStorageRef = React.useRef(false);
+
+  React.useEffect(() => {
+    // Wait for the hook to finish loading from localStorage first
+    if (!workspaceTabs.hasLoaded) {
+      return;
+    }
+
+    // Only load once, after the hook has loaded data
+    if (hasLoadedFromStorageRef.current) {
+      return;
+    }
+
+    const storedPaths = workspaceTabs.openedPaths;
+    const storedActive = workspaceTabs.activePath;
+
+    if (storedPaths.length === 0) {
+      // No files to restore
+      setIsRestoringFromStorage(false);
+      return;
+    }
+
+    // Mark as loading to prevent duplicate loads
+    hasLoadedFromStorageRef.current = true;
+
+    const loadFilesFromStorage = async () => {
+      const loadedFiles: OpenFile[] = [];
+
+      console.log('[SQL Restore] Loading files from storage:', storedPaths);
+
+      for (const filePath of storedPaths) {
+        try {
+          console.log('[SQL Restore] Fetching file:', filePath);
+          const response = await fetch(
+            `/api/databricks/workspace/export?path=${encodeURIComponent(filePath)}`
+          );
+
+          if (response.ok) {
+            const data = await response.json();
+            console.log('[SQL Restore] API response for', filePath, ':', data);
+            console.log('[SQL Restore] Content length:', data.content?.length || 0);
+
+            loadedFiles.push({
+              path: filePath,
+              name: filePath.split("/").pop() || "",
+              content: data.content || "",
+              isDirty: false,
+              language: "sql",
+            });
+          } else {
+            console.error('[SQL Restore] API error:', response.status, response.statusText);
+          }
+        } catch (err) {
+          console.error(`Failed to load file from storage: ${filePath}`, err);
+        }
+      }
+
+      console.log('[SQL Restore] Loaded files:', loadedFiles.length, loadedFiles);
+
+      if (loadedFiles.length > 0) {
+        // Set files and active path FIRST
+        setOpenFiles(loadedFiles);
+        const activeFile = loadedFiles.find(f => f.path === storedActive);
+        setActiveFilePath(activeFile?.path || loadedFiles[0].path);
+
+        // Wait a bit longer to ensure state updates have propagated
+        setTimeout(() => {
+          setIsRestoringFromStorage(false);
+        }, 100);
+      } else {
+        // No files were loaded
+        setIsRestoringFromStorage(false);
+      }
+    };
+
+    loadFilesFromStorage();
+  }, [workspaceTabs.hasLoaded, workspaceTabs.openedPaths, workspaceTabs.activePath]); // Wait for hook to load data
 
   // Execute SQL mutation
   const executeMutation = useMutation({
@@ -264,7 +353,15 @@ export default function SQLPage() {
         language: "sql",
       };
 
-      setOpenFiles((files) => [...files, newFile]);
+      setOpenFiles((files) => {
+        const updated = [...files, newFile];
+
+        // Save to localStorage immediately
+        const paths = updated.map(f => f.path);
+        workspaceTabs.setAllTabs(paths, filePath);
+
+        return updated;
+      });
       setActiveFilePath(filePath);
     } catch (err) {
       setError(`Failed to open file: ${err}`);
@@ -284,7 +381,16 @@ export default function SQLPage() {
   };
 
   const closeFile = (filePath: string) => {
-    setOpenFiles((files) => files.filter((f) => f.path !== filePath));
+    setOpenFiles((files) => {
+      const filtered = files.filter((f) => f.path !== filePath);
+
+      // Save to localStorage immediately
+      const paths = filtered.map(f => f.path);
+      const newActive = filtered.length > 0 ? filtered[0].path : "";
+      workspaceTabs.setAllTabs(paths, newActive);
+
+      return filtered;
+    });
 
     if (activeFilePath === filePath) {
       const remainingFiles = openFiles.filter((f) => f.path !== filePath);
@@ -756,15 +862,31 @@ export default function SQLPage() {
 
                     {/* Monaco Editor */}
                     <div className="flex-1 min-h-0">
-                      <MonacoMultiFileEditor
-                        openFiles={openFiles}
-                        activeFilePath={activeFilePath}
-                        onContentChange={handleContentChange}
-                        onSave={handleSave}
-                        onRun={handleRunQuery}
-                        readOnly={isExecuting}
-                        catalogItems={catalogItems}
-                      />
+                      {isRestoringFromStorage ? (
+                        <div className="flex h-full items-center justify-center">
+                          <div className="flex flex-col items-center gap-2">
+                            <Spinner className="h-8 w-8 text-blue-600" />
+                            <p className="text-sm text-muted-foreground">Restoring session...</p>
+                          </div>
+                        </div>
+                      ) : openFiles.length > 0 ? (
+                        <MonacoMultiFileEditor
+                          openFiles={openFiles}
+                          activeFilePath={activeFilePath}
+                          onContentChange={handleContentChange}
+                          onSave={handleSave}
+                          onRun={handleRunQuery}
+                          readOnly={isExecuting}
+                          catalogItems={catalogItems}
+                        />
+                      ) : (
+                        <div className="flex h-full items-center justify-center bg-slate-50/70">
+                          <div className="text-center text-muted-foreground">
+                            <p className="text-sm">No files open</p>
+                            <p className="text-xs mt-1">Select a file from the file tree to start editing</p>
+                          </div>
+                        </div>
+                      )}
                     </div>
                 </div>
               </Panel>

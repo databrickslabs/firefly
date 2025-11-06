@@ -70,7 +70,9 @@ export function MonacoMultiFileEditor({
   }, [catalogItems]);
 
   const activeFile = React.useMemo(() => {
-    return openFiles.find((f) => f.path === activeFilePath);
+    const file = openFiles.find((f) => f.path === activeFilePath);
+    console.log('[Monaco activeFile memo] activeFilePath:', activeFilePath, 'found file:', file?.path, 'content length:', file?.content?.length || 0);
+    return file;
   }, [openFiles, activeFilePath]);
 
   // Configure intelligent SQL autocomplete
@@ -272,10 +274,15 @@ export function MonacoMultiFileEditor({
     });
   }, []); // No dependencies - use ref to access latest catalogItems
 
+  // Track when editor is mounted
+  const [isEditorMounted, setIsEditorMounted] = React.useState(false);
+
   const handleEditorDidMount: OnMount = React.useCallback(
     (editor, monaco) => {
+      console.log('[Monaco] Editor mounted');
       editorRef.current = editor;
       monacoRef.current = monaco;
+      setIsEditorMounted(true);
 
       // Add keyboard shortcuts
       // Cmd/Ctrl + S to save
@@ -302,16 +309,24 @@ export function MonacoMultiFileEditor({
 
   // Update editor model when active file changes
   React.useEffect(() => {
-    if (!editorRef.current || !monacoRef.current || !activeFile) return;
+    console.log('[Monaco useEffect] Triggered. editorRef:', !!editorRef.current, 'monacoRef:', !!monacoRef.current, 'activeFile:', !!activeFile, 'path:', activeFile?.path);
+
+    if (!editorRef.current || !monacoRef.current || !activeFile) {
+      console.log('[Monaco useEffect] Early return - editor not ready');
+      return;
+    }
 
     const monaco = monacoRef.current;
     const editor = editorRef.current;
+
+    console.log('[Monaco] Active file changed:', activeFile.path, 'Content length:', activeFile.content?.length || 0);
 
     try {
       // Get or create model for this file
       let model = modelsRef.current.get(activeFile.path);
 
       if (!model) {
+        console.log('[Monaco] Creating new model for:', activeFile.path);
         // Create new model
         const uri = monaco.Uri.parse(activeFile.path);
         model = monaco.editor.getModel(uri) || monaco.editor.createModel(
@@ -328,12 +343,29 @@ export function MonacoMultiFileEditor({
           const content = model!.getValue();
           onContentChange(activeFile.path, content);
         });
+      } else {
+        // Model exists - update content if it's different (e.g., restored from storage)
+        const currentContent = model.getValue();
+        console.log('[Monaco] Model exists. Current content length:', currentContent.length, 'New content length:', activeFile.content.length);
+        if (currentContent !== activeFile.content) {
+          console.log('[Monaco] Content differs, updating model with setValue');
+          // Push edit to undo stack instead of setValue to preserve editor state
+          model.pushEditOperations(
+            [],
+            [{
+              range: model.getFullModelRange(),
+              text: activeFile.content,
+            }],
+            () => null
+          );
+        }
       }
 
       // Only set model if it's different from current model
       // This prevents disposing the editor's internal services
       const currentModel = editor.getModel();
       if (currentModel !== model) {
+        console.log('[Monaco] Switching editor model to:', activeFile.path);
         // Null out the model first to avoid disposal issues
         editor.setModel(null);
         // Then set the new model
@@ -345,7 +377,7 @@ export function MonacoMultiFileEditor({
     } catch (err) {
       console.error("Error updating Monaco model:", err);
     }
-  }, [activeFile, readOnly, onContentChange]);
+  }, [activeFile, readOnly, onContentChange, isEditorMounted]); // Add isEditorMounted to trigger when editor becomes ready
 
   // Clean up models when files are closed
   React.useEffect(() => {
