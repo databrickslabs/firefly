@@ -9,7 +9,9 @@ import { CatalogTreeView } from "@/components/unity-catalog/catalog-tree-view";
 import { NotebookEditor } from "@/components/notebook/notebook-editor";
 import { NotebookTabs, type NotebookTab } from "@/components/notebook/notebook-tabs";
 import { SharedNotebooksTree } from "@/components/notebook/shared-notebooks-tree";
+import { SqlFileEditor } from "@/components/workbench/sql-file-editor";
 import type { Notebook } from "@/lib/notebook-manager";
+import type { OpenFile } from "@/lib/workspace-file-manager";
 import {
   createEmptyNotebook,
   parseNotebookFile,
@@ -45,6 +47,17 @@ interface NotebookState {
   permissionLevel?: string; // CAN_READ or CAN_EDIT, undefined for owned notebooks
 }
 
+interface SqlFileState {
+  id: string;
+  file: OpenFile;
+  filePath: string;
+  isDirty: boolean;
+}
+
+type WorkbenchTabState =
+  | ({ type: "notebook" } & NotebookState)
+  | ({ type: "sql" } & SqlFileState);
+
 export default function NotebookPage() {
   const queryClient = useQueryClient();
   const sidebarPanelRef = React.useRef<React.ElementRef<typeof Panel>>(null);
@@ -61,8 +74,8 @@ export default function NotebookPage() {
   const [language, setLanguage] = React.useState<string>("python");
   const [isSidebarExpanded, setIsSidebarExpanded] = React.useState(true);
 
-  // Tab management - start with no notebooks
-  const [notebookStates, setNotebookStates] = React.useState<NotebookState[]>([]);
+  // Tab management - start with no files
+  const [tabStates, setTabStates] = React.useState<WorkbenchTabState[]>([]);
   const [activeTabId, setActiveTabId] = React.useState<string>("");
 
   const [isLoadingFile, setIsLoadingFile] = React.useState(false);
@@ -70,10 +83,9 @@ export default function NotebookPage() {
   const [saveAsDialogOpen, setSaveAsDialogOpen] = React.useState(false);
   const [notebookName, setNotebookName] = React.useState("");
 
-  // Get active notebook
-  const activeNotebookState = notebookStates.find((ns) => ns.id === activeTabId);
-  const notebook = activeNotebookState?.notebook || createEmptyNotebook();
-  const currentFilePath = activeNotebookState?.filePath || null;
+  // Get active tab
+  const activeTab = tabStates.find((tab) => tab.id === activeTabId);
+  const currentFilePath = activeTab?.filePath || null;
 
   // Load persisted cluster selection on mount
   React.useEffect(() => {
@@ -154,36 +166,62 @@ export default function NotebookPage() {
     // Mark as loading to prevent duplicate loads
     hasLoadedFromStorageRef.current = true;
 
-    const loadNotebooksFromStorage = async () => {
-      const loadedStates: NotebookState[] = [];
+    const loadFilesFromStorage = async () => {
+      const loadedStates: WorkbenchTabState[] = [];
 
       for (const filePath of storedPaths) {
         try {
-          const response = await fetch(
-            `/api/databricks/workspace/export?path=${encodeURIComponent(filePath)}&format=JUPYTER`
-          );
+          if (filePath.endsWith(".sql")) {
+            // Load SQL file
+            const response = await fetch(
+              `/api/databricks/workspace/export?path=${encodeURIComponent(filePath)}`
+            );
 
-          if (response.ok) {
-            const data = await response.json();
-            if (data.content) {
-              const notebookData = parseNotebookFile(data.content);
+            if (response.ok) {
+              const data = await response.json();
               loadedStates.push({
-                id: `notebook-${Date.now()}-${Math.random()}`,
-                notebook: notebookData,
+                type: "sql",
+                id: `sql-${Date.now()}-${Math.random()}`,
+                file: {
+                  path: filePath,
+                  name: filePath.split("/").pop() || "",
+                  content: data.content || "",
+                  isDirty: false,
+                  language: "sql",
+                },
                 filePath,
                 isDirty: false,
               });
             }
+          } else if (filePath.endsWith(".ipynb")) {
+            // Load notebook file
+            const response = await fetch(
+              `/api/databricks/workspace/export?path=${encodeURIComponent(filePath)}&format=JUPYTER`
+            );
+
+            if (response.ok) {
+              const data = await response.json();
+              if (data.content) {
+                const notebookData = parseNotebookFile(data.content);
+                loadedStates.push({
+                  type: "notebook",
+                  id: `notebook-${Date.now()}-${Math.random()}`,
+                  notebook: notebookData,
+                  filePath,
+                  isDirty: false,
+                });
+              }
+            }
           }
         } catch (err) {
-          console.error(`Failed to load notebook from storage: ${filePath}`, err);
+          console.error(`Failed to load file from storage: ${filePath}`, err);
         }
       }
 
       if (loadedStates.length > 0) {
-        setNotebookStates(loadedStates);
+        setTabStates(loadedStates);
         // Set active tab from storage
-        const activeState = loadedStates.find(ns => ns.filePath === storedActive);
+        const activeState = loadedStates.find(tab => tab.filePath === storedActive);
         setActiveTabId(activeState?.id || loadedStates[0].id);
 
         // Wait for next tick to ensure state has updated before hiding loader
@@ -191,12 +229,12 @@ export default function NotebookPage() {
           setIsRestoringFromStorage(false);
         }, 0);
       } else {
-        // No notebooks were loaded
+        // No files were loaded
         setIsRestoringFromStorage(false);
       }
     };
 
-    loadNotebooksFromStorage();
+    loadFilesFromStorage();
   }, [workspaceTabs.hasLoaded, workspaceTabs.openedPaths, workspaceTabs.activePath]); // Wait for hook to load data
 
   // Handle cluster selection change
@@ -251,9 +289,11 @@ export default function NotebookPage() {
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ["workspace-files"] });
       // Update the notebook state with the new path
-      setNotebookStates((prev) =>
-        prev.map((ns) =>
-          ns.id === activeTabId ? { ...ns, filePath: variables.path, isDirty: false } : ns
+      setTabStates((prev) =>
+        prev.map((tab) =>
+          tab.id === activeTabId && tab.type === "notebook"
+            ? { ...tab, filePath: variables.path, isDirty: false }
+            : tab
         )
       );
       setSaveAsDialogOpen(false);
@@ -264,15 +304,52 @@ export default function NotebookPage() {
     },
   });
 
+  // Save SQL file mutation
+  const saveSqlFileMutation = useMutation({
+    mutationFn: async ({ path, content }: { path: string; content: string }) => {
+      const response = await fetch("/api/databricks/workspace/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          path,
+          content,
+          format: "AUTO",
+          isNotebook: false,
+          overwrite: true,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to save SQL file");
+      }
+
+      return response.json();
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["workspace-files"] });
+      // Mark file as not dirty
+      setTabStates((prev) =>
+        prev.map((tab) =>
+          tab.id === activeTabId && tab.type === "sql"
+            ? { ...tab, file: { ...tab.file, isDirty: false }, isDirty: false }
+            : tab
+        )
+      );
+    },
+    onError: (err: Error) => {
+      toast.error(`Failed to save SQL file: ${err.message}`);
+    },
+  });
+
   const handleFileSelect = async (filePath: string, permissionLevel?: string) => {
-    // Only load .ipynb files
-    if (!filePath.endsWith(".ipynb")) {
-      toast.error("Please select a .ipynb notebook file");
+    // Support both .ipynb and .sql files
+    if (!filePath.endsWith(".ipynb") && !filePath.endsWith(".sql")) {
+      toast.error("Please select a .ipynb notebook or .sql file");
       return;
     }
 
     // Check if already open
-    const existingTab = notebookStates.find((ns) => ns.filePath === filePath);
+    const existingTab = tabStates.find((tab) => tab.filePath === filePath);
     if (existingTab) {
       setActiveTabId(existingTab.id);
       return;
@@ -281,76 +358,133 @@ export default function NotebookPage() {
     setIsLoadingFile(true);
 
     try {
-      console.log("Loading notebook from:", filePath);
-      const response = await fetch(
-        `/api/databricks/workspace/export?path=${encodeURIComponent(filePath)}&format=JUPYTER`
-      );
+      if (filePath.endsWith(".sql")) {
+        // Load SQL file
+        console.log("Loading SQL file from:", filePath);
+        const response = await fetch(
+          `/api/databricks/workspace/export?path=${encodeURIComponent(filePath)}`
+        );
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("Export API error:", errorText);
-        throw new Error(`Failed to fetch notebook file: ${response.status} ${response.statusText}`);
-      }
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error("Export API error:", errorText);
+          throw new Error(`Failed to fetch SQL file: ${response.status} ${response.statusText}`);
+        }
 
-      const data = await response.json();
-      console.log("Export API response:", data);
+        const data = await response.json();
 
-      if (!data.content) {
-        throw new Error("No content returned from export API");
-      }
+        // Create new tab for this SQL file
+        const newTabId = `sql-${Date.now()}`;
+        const newState: WorkbenchTabState = {
+          type: "sql",
+          id: newTabId,
+          file: {
+            path: filePath,
+            name: filePath.split("/").pop() || "",
+            content: data.content || "",
+            isDirty: false,
+            language: "sql",
+          },
+          filePath,
+          isDirty: false,
+        };
 
-      const notebookData = parseNotebookFile(data.content);
-      console.log("Parsed notebook:", notebookData);
+        setTabStates((prev) => {
+          const updated = [...prev, newState];
 
-      // Create new tab for this notebook
-      const newTabId = `notebook-${Date.now()}`;
-      const newState = {
-        id: newTabId,
-        notebook: notebookData,
-        filePath,
-        isDirty: false,
-        permissionLevel, // Store permission level for shared notebooks
-      };
+          // Save to localStorage immediately
+          const paths = updated.map(tab => tab.filePath).filter((p): p is string => p !== null);
+          workspaceTabs.setAllTabs(paths, filePath);
 
-      setNotebookStates((prev) => {
-        const updated = [...prev, newState];
+          return updated;
+        });
+        setActiveTabId(newTabId);
+      } else {
+        // Load notebook file
+        console.log("Loading notebook from:", filePath);
+        const response = await fetch(
+          `/api/databricks/workspace/export?path=${encodeURIComponent(filePath)}&format=JUPYTER`
+        );
 
-        // Save to localStorage immediately
-        const paths = updated.map(ns => ns.filePath).filter((p): p is string => p !== null);
-        workspaceTabs.setAllTabs(paths, filePath);
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error("Export API error:", errorText);
+          throw new Error(`Failed to fetch notebook file: ${response.status} ${response.statusText}`);
+        }
 
-        return updated;
-      });
-      setActiveTabId(newTabId);
+        const data = await response.json();
+        console.log("Export API response:", data);
 
-      // Set language from notebook metadata
-      if (notebookData.metadata.language_info?.name) {
-        setLanguage(notebookData.metadata.language_info.name);
+        if (!data.content) {
+          throw new Error("No content returned from export API");
+        }
+
+        const notebookData = parseNotebookFile(data.content);
+        console.log("Parsed notebook:", notebookData);
+
+        // Create new tab for this notebook
+        const newTabId = `notebook-${Date.now()}`;
+        const newState: WorkbenchTabState = {
+          type: "notebook",
+          id: newTabId,
+          notebook: notebookData,
+          filePath,
+          isDirty: false,
+          permissionLevel, // Store permission level for shared notebooks
+        };
+
+        setTabStates((prev) => {
+          const updated = [...prev, newState];
+
+          // Save to localStorage immediately
+          const paths = updated.map(tab => tab.filePath).filter((p): p is string => p !== null);
+          workspaceTabs.setAllTabs(paths, filePath);
+
+          return updated;
+        });
+        setActiveTabId(newTabId);
+
+        // Set language from notebook metadata
+        if (notebookData.metadata.language_info?.name) {
+          setLanguage(notebookData.metadata.language_info.name);
+        }
       }
     } catch (err) {
-      console.error("Failed to load notebook:", err);
-      toast.error(`Failed to load notebook: ${err instanceof Error ? err.message : String(err)}`);
+      console.error("Failed to load file:", err);
+      toast.error(`Failed to load file: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsLoadingFile(false);
     }
   };
 
   const handleSave = () => {
-    if (!currentFilePath) {
-      // Show "Save As" dialog for untitled notebooks
-      setSaveAsDialogOpen(true);
-      return;
-    }
+    if (!activeTab) return;
 
-    // Save to existing path
-    const notebookJson = notebookToJson(notebook);
-    saveNotebookMutation.mutate({
-      path: currentFilePath,
-      content: notebookJson,
-    });
+    if (activeTab.type === "sql") {
+      // Save SQL file
+      saveSqlFileMutation.mutate({
+        path: activeTab.filePath,
+        content: activeTab.file.content,
+      });
+    } else if (activeTab.type === "notebook") {
+      if (!currentFilePath) {
+        // Show "Save As" dialog for untitled notebooks
+        setSaveAsDialogOpen(true);
+        return;
+      }
+
+      // Save to existing path
+      const notebookJson = notebookToJson(activeTab.notebook);
+      saveNotebookMutation.mutate({
+        path: currentFilePath,
+        content: notebookJson,
+      });
+    }
   };
 
   const handleSaveAs = () => {
+    if (!activeTab || activeTab.type !== "notebook") return;
+
     if (!notebookName.trim()) {
       toast.error("Please enter a valid notebook name");
       return;
@@ -365,7 +499,7 @@ export default function NotebookPage() {
     // Prepend monacoRootPath
     const fullPath = `${monacoRootPath}/${fileName}`;
 
-    const notebookJson = notebookToJson(notebook);
+    const notebookJson = notebookToJson(activeTab.notebook);
     saveNotebookMutation.mutate({
       path: fullPath,
       content: notebookJson,
@@ -374,9 +508,10 @@ export default function NotebookPage() {
 
   const handleNewNotebook = React.useCallback(() => {
     const newTabId = `untitled-${Date.now()}`;
-    setNotebookStates((prev) => [
+    setTabStates((prev) => [
       ...prev,
       {
+        type: "notebook",
         id: newTabId,
         notebook: createEmptyNotebook(),
         filePath: null,
@@ -396,18 +531,18 @@ export default function NotebookPage() {
     setActiveTabId(tabId);
 
     // Update active tab in storage
-    const notebook = notebookStates.find(ns => ns.id === tabId);
-    if (notebook?.filePath) {
-      workspaceTabs.setActiveTab(notebook.filePath);
+    const tab = tabStates.find(t => t.id === tabId);
+    if (tab?.filePath) {
+      workspaceTabs.setActiveTab(tab.filePath);
     }
-  }, [notebookStates, workspaceTabs]);
+  }, [tabStates, workspaceTabs]);
 
   const handleTabClose = React.useCallback((tabId: string) => {
-    setNotebookStates((prev) => {
-      const filtered = prev.filter((ns) => ns.id !== tabId);
+    setTabStates((prev) => {
+      const filtered = prev.filter((tab) => tab.id !== tabId);
 
       // Save to localStorage immediately
-      const paths = filtered.map(ns => ns.filePath).filter((p): p is string => p !== null);
+      const paths = filtered.map(tab => tab.filePath).filter((p): p is string => p !== null);
       const newActive = filtered.length > 0 ? filtered[0].filePath || "" : "";
       workspaceTabs.setAllTabs(paths, newActive);
 
@@ -426,29 +561,40 @@ export default function NotebookPage() {
 
   // Update active notebook when it changes
   const handleNotebookChange = (updatedNotebook: Notebook) => {
-    setNotebookStates((prev) =>
-      prev.map((ns) =>
-        ns.id === activeTabId
-          ? { ...ns, notebook: updatedNotebook, isDirty: true }
-          : ns
+    setTabStates((prev) =>
+      prev.map((tab) =>
+        tab.id === activeTabId && tab.type === "notebook"
+          ? { ...tab, notebook: updatedNotebook, isDirty: true }
+          : tab
       )
     );
   };
 
-  // Convert notebook states to tabs
-  const tabs: NotebookTab[] = notebookStates.map((ns) => {
-    const name = ns.filePath
-      ? ns.filePath.startsWith(monacoRootPath)
-        ? ns.filePath.slice(monacoRootPath.length + 1)
-        : ns.filePath.split("/").pop() || "Untitled"
+  // Update SQL file content when it changes
+  const handleSqlContentChange = (content: string) => {
+    setTabStates((prev) =>
+      prev.map((tab) =>
+        tab.id === activeTabId && tab.type === "sql"
+          ? { ...tab, file: { ...tab.file, content, isDirty: true }, isDirty: true }
+          : tab
+      )
+    );
+  };
+
+  // Convert tab states to tabs for the UI
+  const tabs: NotebookTab[] = tabStates.map((tab) => {
+    const name = tab.filePath
+      ? tab.filePath.startsWith(monacoRootPath)
+        ? tab.filePath.slice(monacoRootPath.length + 1)
+        : tab.filePath.split("/").pop() || "Untitled"
       : "Untitled";
 
     return {
-      id: ns.id,
-      path: ns.filePath,
+      id: tab.id,
+      path: tab.filePath,
       name,
-      isDirty: ns.isDirty,
-      isReadOnly: ns.permissionLevel === "CAN_READ",
+      isDirty: tab.isDirty,
+      isReadOnly: tab.type === "notebook" && tab.permissionLevel === "CAN_READ",
     };
   });
 
@@ -501,19 +647,19 @@ export default function NotebookPage() {
                   <div className="flex flex-col items-center gap-2">
                     <Spinner className="h-8 w-8 text-purple-600" />
                     <p className="text-sm text-muted-foreground">
-                      {isRestoringFromStorage ? "Restoring session..." : "Loading notebook..."}
+                      {isRestoringFromStorage ? "Restoring session..." : "Loading file..."}
                     </p>
                   </div>
                 </div>
-              ) : notebookStates.length === 0 ? (
+              ) : tabStates.length === 0 ? (
                 /* Empty State */
                 <div className="flex-1 flex items-center justify-center">
                   <div className="flex flex-col items-center gap-4 text-center">
                     <FileJson className="h-16 w-16 text-muted-foreground/50" />
                     <div>
-                      <h3 className="text-lg font-semibold">No Notebooks Open</h3>
+                      <h3 className="text-lg font-semibold">No Files Open</h3>
                       <p className="text-sm text-muted-foreground mt-1">
-                        Create a new notebook or open one from the file tree
+                        Create a new notebook or open a file from the file tree
                       </p>
                     </div>
                     <Button onClick={handleNewNotebook} className="gap-2">
@@ -523,22 +669,31 @@ export default function NotebookPage() {
                   </div>
                 </div>
               ) : (
-                /* Custom Notebook Editor */
+                /* Render appropriate editor based on file type */
                 <div className="flex-1 overflow-hidden">
-                  <NotebookEditor
-                    notebook={notebook}
-                    clusterId={clusterId || null}
-                    contextId={contextId}
-                    contextStatus={contextStatus}
-                    language={language}
-                    onNotebookChange={handleNotebookChange}
-                    onContextChange={handleContextChange}
-                    onSave={handleSave}
-                    isSaving={saveNotebookMutation.isPending}
-                    readOnly={activeNotebookState?.permissionLevel === "CAN_READ"}
-                    onClusterChange={handleClusterChange}
-                    onLanguageChange={setLanguage}
-                  />
+                  {activeTab?.type === "sql" ? (
+                    <SqlFileEditor
+                      file={activeTab.file}
+                      onContentChange={handleSqlContentChange}
+                      onSave={handleSave}
+                      isSaving={saveSqlFileMutation.isPending}
+                    />
+                  ) : activeTab?.type === "notebook" ? (
+                    <NotebookEditor
+                      notebook={activeTab.notebook}
+                      clusterId={clusterId || null}
+                      contextId={contextId}
+                      contextStatus={contextStatus}
+                      language={language}
+                      onNotebookChange={handleNotebookChange}
+                      onContextChange={handleContextChange}
+                      onSave={handleSave}
+                      isSaving={saveNotebookMutation.isPending}
+                      readOnly={activeTab.permissionLevel === "CAN_READ"}
+                      onClusterChange={handleClusterChange}
+                      onLanguageChange={setLanguage}
+                    />
+                  ) : null}
                 </div>
               )}
             </div>
