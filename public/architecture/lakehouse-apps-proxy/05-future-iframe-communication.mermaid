@@ -1,0 +1,38 @@
+sequenceDiagram
+    participant Parent as Parent Page<br/>(React App)
+    participant Iframe as Iframe<br/>(Lakehouse App)
+    participant GoProxy as Go Proxy
+
+    Note over Parent,Iframe: Future: postMessage Communication
+
+    Parent->>Iframe: postMessage({<br/>  type: "EXECUTE_COMMAND",<br/>  payload: {...}<br/>}, targetOrigin)
+
+    Note over Iframe: App receives message via<br/>window.addEventListener("message")
+
+    Iframe->>Iframe: Validate message origin
+    Iframe->>Iframe: Process command
+    Iframe->>Parent: postMessage({<br/>  type: "COMMAND_RESULT",<br/>  payload: {...}<br/>}, parentOrigin)
+
+    Note over Parent,Iframe: Example Use Cases
+
+    Parent->>Iframe: Open specific notebook
+    Iframe->>Parent: Notebook loaded
+
+    Parent->>Iframe: Execute code cell
+    Iframe->>Parent: Execution complete
+
+    Parent->>Iframe: Save current state
+    Iframe->>Parent: State saved
+
+    Parent->>Iframe: Get current selection
+    Iframe->>Parent: Selection data
+
+    Note over Parent,GoProxy: Considerations
+
+    rect rgb(255, 240, 245)
+        Note over Parent,Iframe: Security:<br/>- Validate message origins<br/>- Whitelist allowed commands<br/>- Sanitize payload data
+    end
+
+    rect rgb(232, 245, 233)
+        Note over Parent,Iframe: Future Enhancements:<br/>- Theme synchronization<br/>- Custom keybindings<br/>- Plugin integration<br/>- Real-time collaboration signals
+    end

@@ -1,0 +1,43 @@
+sequenceDiagram
+    participant Browser
+    participant NextJS as Next.js API
+    participant GoProxy as Go Proxy Server
+    participant LakehouseApp as Databricks Lakehouse App
+
+    Note over Browser,LakehouseApp: User Initiates Code Editor Session
+
+    Browser->>NextJS: Request code editor page
+    NextJS->>NextJS: Fetch user's OAuth token from session
+    NextJS->>NextJS: Encrypt token with AES-256-GCM
+    NextJS->>NextJS: Generate proxy URL:<br/>/app-proxy/{encrypted}/{provider}/{domain}/{app}/
+    NextJS->>Browser: Return HTML with iframe src=proxy URL
+
+    Note over Browser,LakehouseApp: Iframe Loads Through Proxy
+
+    Browser->>GoProxy: GET /app-proxy/{encrypted}/aws/databricksapps/{app}/
+    GoProxy->>GoProxy: Parse URL to extract encrypted token
+    GoProxy->>GoProxy: Decrypt token using shared encryption key
+    GoProxy->>GoProxy: Construct target URL:<br/>https://{app}.aws.databricksapps.com/
+    GoProxy->>LakehouseApp: GET / with Authorization: Bearer {token}
+    LakehouseApp->>LakehouseApp: Validate OAuth token
+    LakehouseApp->>GoProxy: Return HTML/JS/CSS
+    GoProxy->>GoProxy: Add CORS headers
+    GoProxy->>Browser: Forward response
+    Browser->>Browser: Render app in iframe
+
+    Note over Browser,LakehouseApp: WebSocket Connection for Real-time Features
+
+    Browser->>GoProxy: WebSocket Upgrade Request
+    GoProxy->>GoProxy: Detect WebSocket upgrade
+    GoProxy->>GoProxy: Decrypt token from URL
+    GoProxy->>GoProxy: Convert https:// to wss://
+    GoProxy->>LakehouseApp: WebSocket Upgrade with Authorization header
+    LakehouseApp->>GoProxy: WebSocket connection established
+    GoProxy->>Browser: WebSocket connection established
+
+    loop Bidirectional Communication
+        Browser->>GoProxy: WebSocket message
+        GoProxy->>LakehouseApp: Forward message
+        LakehouseApp->>GoProxy: WebSocket message
+        GoProxy->>Browser: Forward message
+    end

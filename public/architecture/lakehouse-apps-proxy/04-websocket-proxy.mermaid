@@ -1,0 +1,42 @@
+sequenceDiagram
+    participant Browser
+    participant GoProxy as Go Proxy
+    participant LakehouseApp as Databricks App
+
+    Note over Browser,LakehouseApp: WebSocket Connection Initiation
+
+    Browser->>GoProxy: HTTP GET with Upgrade: websocket<br/>Connection: Upgrade
+    GoProxy->>GoProxy: Detect WebSocket upgrade request<br/>Check headers
+    GoProxy->>GoProxy: Parse URL & decrypt OAuth token
+    GoProxy->>GoProxy: Convert https:// to wss://
+    GoProxy->>GoProxy: Create Authorization header
+
+    Note over GoProxy,LakehouseApp: Establish Upstream WebSocket
+
+    GoProxy->>LakehouseApp: WebSocket Dial with Authorization header
+    LakehouseApp->>LakehouseApp: Validate OAuth token
+    LakehouseApp->>GoProxy: 101 Switching Protocols
+    GoProxy->>Browser: 101 Switching Protocols
+
+    Note over Browser,LakehouseApp: Bidirectional Message Proxying
+
+    par Client to Server
+        loop Message Flow
+            Browser->>GoProxy: WebSocket message (text/binary)
+            GoProxy->>LakehouseApp: Forward message
+            LakehouseApp->>LakehouseApp: Process message
+        end
+    and Server to Client
+        loop Message Flow
+            LakehouseApp->>GoProxy: WebSocket message (text/binary)
+            GoProxy->>Browser: Forward message
+            Browser->>Browser: Process message
+        end
+    end
+
+    Note over Browser,LakehouseApp: Connection Closure
+
+    Browser->>GoProxy: Close frame
+    GoProxy->>LakehouseApp: Close frame
+    LakehouseApp->>GoProxy: Close acknowledgment
+    GoProxy->>Browser: Close acknowledgment

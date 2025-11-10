@@ -42,6 +42,13 @@ const solutions: { title: string; href: string; description: string; comingSoon?
       "Explore your Unity Catalog with a modern, intuitive interface.",
     comingSoon: true,
   },
+  {
+    title: "Embedding Databricks Apps w/o SSO",
+    href: "/docs/architecture/lakehouse-apps-proxy",
+    description:
+      "Embed Databricks apps without exposing Databricks SSO login flows to end users.",
+    comingSoon: false,
+  },
 ];
 
 const authenticationOptions: { title: string; href: string; description: string; comingSoon?: boolean }[] = [

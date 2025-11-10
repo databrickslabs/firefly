@@ -1,0 +1,44 @@
+graph TB
+    subgraph "Next.js Token Encryption"
+        TOKEN[OAuth Access Token<br/>Bearer eyJraWQi...]
+        KEY1[Encryption Key<br/>32-byte shared secret]
+        NONCE[Random Nonce<br/>12 bytes]
+        CIPHER1[AES-256-GCM Cipher]
+        ENC[Encrypted Data<br/>nonce + ciphertext + authTag]
+        B64[URL-safe Base64<br/>Padding removed]
+        URL["Proxy URL<br/>/app-proxy/(encrypted)/..."]
+    end
+
+    subgraph "Go Proxy Token Decryption"
+        PARSE[Parse URL<br/>Extract encrypted token]
+        PAD[Add Base64 Padding<br/>If needed]
+        DEC64[Base64 Decode]
+        SPLIT[Split Components<br/>nonce, ciphertext, authTag]
+        KEY2[Encryption Key<br/>Same 32-byte secret]
+        DECIPHER[AES-256-GCM Decipher]
+        PLAIN[Plain OAuth Token<br/>Bearer eyJraWQi...]
+        AUTH["Authorization Header<br/>Bearer (token)"]
+    end
+
+    TOKEN --> CIPHER1
+    KEY1 --> CIPHER1
+    NONCE --> CIPHER1
+    CIPHER1 --> ENC
+    ENC --> B64
+    B64 --> URL
+
+    URL --> PARSE
+    PARSE --> PAD
+    PAD --> DEC64
+    DEC64 --> SPLIT
+    SPLIT --> DECIPHER
+    KEY2 --> DECIPHER
+    DECIPHER --> PLAIN
+    PLAIN --> AUTH
+
+    style TOKEN fill:#fff3e0
+    style KEY1 fill:#ffebee
+    style KEY2 fill:#ffebee
+    style URL fill:#e8f5e9
+    style PLAIN fill:#e3f2fd
+    style AUTH fill:#e8f5e9

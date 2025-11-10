@@ -1,0 +1,54 @@
+graph TB
+    subgraph "React Component"
+        COMP[CodeEditorIframe<br/>Server Component]
+        FETCH[Fetch OAuth Token<br/>from Session]
+        GEN[Generate Proxy URL<br/>with Encrypted Token]
+        IFRAME[Render Iframe<br/>src=proxy URL]
+    end
+
+    subgraph "Iframe Sandbox"
+        SB1[allow-scripts<br/>Execute JavaScript]
+        SB2[allow-same-origin<br/>Access localStorage]
+        SB3[allow-forms<br/>Submit forms]
+        SB4[allow-popups<br/>Open new windows]
+        SB5[allow-modals<br/>Display dialogs]
+        SB6[allow-downloads<br/>Download files]
+    end
+
+    subgraph "Iframe Permissions"
+        PERM1[clipboard-write<br/>Copy to clipboard]
+        PERM2[clipboard-read<br/>Paste from clipboard]
+    end
+
+    subgraph "Security Features"
+        SEC1[Cross-Origin Isolation<br/>Separate process]
+        SEC2[Encrypted Token<br/>No plain text in URL]
+        SEC3[CORS Headers<br/>Controlled access]
+        SEC4[Token Never Exposed<br/>to Browser JS]
+    end
+
+    COMP --> FETCH
+    FETCH --> GEN
+    GEN --> IFRAME
+
+    IFRAME --> SB1
+    IFRAME --> SB2
+    IFRAME --> SB3
+    IFRAME --> SB4
+    IFRAME --> SB5
+    IFRAME --> SB6
+
+    IFRAME --> PERM1
+    IFRAME --> PERM2
+
+    IFRAME --> SEC1
+    IFRAME --> SEC2
+    IFRAME --> SEC3
+    IFRAME --> SEC4
+
+    style COMP fill:#e3f2fd
+    style IFRAME fill:#fff3e0
+    style SEC1 fill:#e8f5e9
+    style SEC2 fill:#e8f5e9
+    style SEC3 fill:#e8f5e9
+    style SEC4 fill:#e8f5e9

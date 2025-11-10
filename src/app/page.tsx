@@ -24,7 +24,7 @@ export default function Home() {
           <div className="space-y-4 text-lg text-muted-foreground">
             <p>
               Experience the power of Databricks with a completely customized interface
-              tailored to your workflow. Same backend, revolutionary frontend.
+              tailored to your workflow. Same backend, any frontend you can imagine.
             </p>
             <p>
               Choose your authentication method and get started with your personalized
@@ -115,6 +115,116 @@ export default function Home() {
               <p className="text-muted-foreground">
                 Access all Databricks features through your personalized interface
               </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Solutions Section - Embedding Databricks Apps */}
+      <section className="py-16 px-8 bg-white dark:bg-background">
+        <div className="max-w-6xl mx-auto">
+          <div className="text-center mb-12">
+            <h2 className="text-3xl font-bold mb-4">
+              Embedding Databricks Apps w/o SSO
+            </h2>
+            <p className="text-lg text-muted-foreground max-w-3xl mx-auto">
+              Embed Databricks apps like the VSCode editor directly into your
+              custom interface without requiring users to go through Databricks SSO login
+            </p>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-8 mb-8">
+            <div className="space-y-6">
+              <div className="border-l-4 border-orange-500 pl-6 py-2">
+                <h3 className="text-xl font-semibold mb-2">What It Does</h3>
+                <p className="text-muted-foreground">
+                  The Go proxy server acts as a secure intermediary between your
+                  Next.js application and Databricks Lakehouse Apps. It encrypts
+                  OAuth tokens, handles HTTP/HTTPS requests, and provides full
+                  bidirectional WebSocket support for real-time features like
+                  terminal sessions and collaborative editing.
+                </p>
+              </div>
+
+              <div className="border-l-4 border-blue-500 pl-6 py-2">
+                <h3 className="text-xl font-semibold mb-2">Token Encryption</h3>
+                <p className="text-muted-foreground">
+                  OAuth access tokens are encrypted using AES-256-GCM in Next.js,
+                  embedded in proxy URLs, and decrypted server-side by the Go
+                  proxy. This ensures tokens never appear in plain text in the
+                  browser, protecting against token theft and unauthorized access.
+                </p>
+              </div>
+
+              <div className="border-l-4 border-green-500 pl-6 py-2">
+                <h3 className="text-xl font-semibold mb-2">Iframe Embedding</h3>
+                <p className="text-muted-foreground">
+                  Lakehouse Apps are embedded as iframes with carefully configured
+                  sandbox attributes and permissions. The iframe loads through the
+                  proxy URL, which handles authentication transparently while
+                  maintaining strict security controls and cross-origin isolation.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-6">
+              <div className="border-l-4 border-purple-500 pl-6 py-2">
+                <h3 className="text-xl font-semibold mb-2">WebSocket Support</h3>
+                <p className="text-muted-foreground">
+                  The proxy automatically detects WebSocket upgrade requests and
+                  establishes bidirectional connections. Messages are forwarded
+                  between the browser and Databricks in real-time, enabling
+                  interactive features like terminal sessions, live debugging,
+                  and Language Server Protocol for code intelligence.
+                </p>
+              </div>
+
+              <div className="border-l-4 border-pink-500 pl-6 py-2">
+                <h3 className="text-xl font-semibold mb-2">Secure by Design</h3>
+                <p className="text-muted-foreground">
+                  The architecture ensures OAuth tokens are never exposed to
+                  browser JavaScript. All authentication happens server-side,
+                  with encrypted tokens in transit and CORS headers properly
+                  configured for controlled access between origins.
+                </p>
+              </div>
+
+              <div className="border-l-4 border-indigo-500 pl-6 py-2">
+                <h3 className="text-xl font-semibold mb-2">Future: postMessage API</h3>
+                <p className="text-muted-foreground">
+                  Future enhancements will enable direct communication between
+                  the parent page and embedded apps using the postMessage API.
+                  This will allow theme synchronization, command execution,
+                  state extraction, and event forwarding for deeper integration.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900 rounded-xl p-8 border border-slate-200 dark:border-slate-700">
+            <div className="flex items-start gap-6">
+              <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-orange-500 to-yellow-500 flex items-center justify-center shrink-0">
+                <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <h3 className="text-2xl font-bold mb-3">Technical Deep Dive</h3>
+                <p className="text-muted-foreground mb-4">
+                  Learn about the complete architecture, including URL patterns,
+                  encryption algorithms, WebSocket proxying, iframe security
+                  controls, and deployment strategies.
+                </p>
+                <Link
+                  href="/docs/architecture/lakehouse-apps-proxy"
+                  className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-semibold rounded-lg hover:from-orange-600 hover:to-yellow-600 transition-all shadow-lg hover:shadow-xl"
+                >
+                  View Full Documentation
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                  </svg>
+                </Link>
+              </div>
             </div>
           </div>
         </div>
