@@ -385,12 +385,12 @@ For detailed architectural documentation, visit:
 - [Embedding Databricks Apps w/o SSO](http://localhost:3000/docs/architecture/lakehouse-apps-proxy)
 - [Databricks Identity Authentication](http://localhost:3000/docs/architecture/authentication/databricks-identity)
 
-## Support
+## Project Support
 
-For issues or questions:
-- Open an issue on GitHub
-- Contact support at support@firefly-analytics.com
+Please note that this project is provided for your exploration only and is not formally supported by Databricks with Service Level Agreements (SLAs). They are provided AS-IS, and we do not make any guarantees. Please do not submit a support ticket relating to any issues arising from the use of this project.
+
+Any issues discovered through the use of this project should be filed as GitHub Issues on this repository. They will be reviewed as time permits, but no formal SLAs for support exist.
 
 ## License
 
-[Your License Here]
+This project is licensed under the Databricks License. See the [LICENSE](LICENSE) file for details.
