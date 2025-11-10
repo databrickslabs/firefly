@@ -35,7 +35,7 @@ export function TopNav({ user, title, basePath }: TopNavProps) {
   };
 
   return (
-    <header className="h-14 border-b bg-background flex items-center justify-between px-4 gap-4">
+    <>
       {/* Left Section - Logo/Title */}
       <Link href={`${basePath}/dashboard`} className="flex items-center gap-3 flex-shrink-0 hover:opacity-80 transition-opacity">
         <Image
@@ -46,7 +46,7 @@ export function TopNav({ user, title, basePath }: TopNavProps) {
           className="object-contain"
         />
         <h1 className="text-xl font-semibold bg-gradient-to-r from-orange-500 to-yellow-500 bg-clip-text text-transparent">
-          FireFly Analytics
+          {title}
         </h1>
       </Link>
 
@@ -97,6 +97,6 @@ export function TopNav({ user, title, basePath }: TopNavProps) {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-    </header>
+    </>
   );
 }

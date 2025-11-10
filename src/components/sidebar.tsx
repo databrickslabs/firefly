@@ -12,6 +12,7 @@ import {
   Code,
   Briefcase,
   ShieldCheck,
+  FileCode,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -44,6 +45,11 @@ const navigationItems = [
     name: "SQL",
     href: "/sql",
     icon: Code,
+  },
+  {
+    name: "Code Editor",
+    href: "/code-editor",
+    icon: FileCode,
   },
   {
     name: "Jobs",
