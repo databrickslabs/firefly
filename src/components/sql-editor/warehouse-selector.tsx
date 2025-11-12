@@ -49,6 +49,7 @@ interface WarehouseSelectorProps {
 
 export function WarehouseSelector({ value, onValueChange, refreshTrigger, onWarehouseStateChange }: WarehouseSelectorProps) {
   const [open, setOpen] = React.useState(false);
+  const [isSigningOut, setIsSigningOut] = React.useState(false);
   const router = useRouter();
 
   const { data: warehousesData, isLoading, refetch, error } = useQuery<WarehousesResponse>({
@@ -82,8 +83,9 @@ export function WarehouseSelector({ value, onValueChange, refreshTrigger, onWare
 
   // Handle re-authentication required
   React.useEffect(() => {
-    if (error && (error as Error & { requireReauth?: boolean }).requireReauth) {
+    if (error && (error as Error & { requireReauth?: boolean }).requireReauth && !isSigningOut) {
       console.log("Warehouse API requires re-authentication, signing out");
+      setIsSigningOut(true);
       signOut({
         fetchOptions: {
           onSuccess: () => {
@@ -97,7 +99,7 @@ export function WarehouseSelector({ value, onValueChange, refreshTrigger, onWare
         },
       });
     }
-  }, [error, router]);
+  }, [error, router, isSigningOut]);
 
   // Refresh warehouses whenever refreshTrigger changes (when a query is executed)
   React.useEffect(() => {
@@ -129,6 +131,19 @@ export function WarehouseSelector({ value, onValueChange, refreshTrigger, onWare
         return "bg-gray-500/10 text-gray-600 dark:text-gray-400";
     }
   };
+
+  // Don't render if signing out
+  if (isSigningOut) {
+    return (
+      <Button
+        variant="outline"
+        disabled
+        className="w-[400px] justify-between"
+      >
+        <span className="text-muted-foreground">Signing out...</span>
+      </Button>
+    );
+  }
 
   return (
     <Popover open={open} onOpenChange={setOpen}>

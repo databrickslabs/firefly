@@ -1,6 +1,6 @@
 'use client'
 
-import { type ReactNode, useEffect } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { UserStoreProvider } from '@/providers/user-store-provider'
 import type { DatabricksWorkspaceTokenInfo } from '@/lib/databricks-workspace-token'
@@ -26,6 +26,7 @@ interface AccountNotFoundError extends Error {
 export function UserStoreInitializer({ children, orgId }: { children: ReactNode; orgId?: string }) {
   const router = useRouter()
   const { data: session } = useSession()
+  const [isSigningOut, setIsSigningOut] = useState(false)
 
   // Fetch user data once on mount
   const { data: userData, isLoading, error } = useQuery<UserDataResponse>({
@@ -95,8 +96,9 @@ export function UserStoreInitializer({ children, orgId }: { children: ReactNode;
     })
 
     // Handle re-authentication required (invalid token)
-    if (error && accountError?.requireReauth) {
+    if (error && accountError?.requireReauth && !isSigningOut) {
       console.log('Signing out user due to invalid token, requiring re-authentication')
+      setIsSigningOut(true)
       // Session is already revoked on server, just clear client state and redirect
       signOut({
         fetchOptions: {
@@ -115,8 +117,9 @@ export function UserStoreInitializer({ children, orgId }: { children: ReactNode;
     }
 
     // Handle account not found error
-    if (error && accountError?.accountNotFound) {
+    if (error && accountError?.accountNotFound && !isSigningOut) {
       console.log('Signing out user due to account not found')
+      setIsSigningOut(true)
       signOut({
         fetchOptions: {
           onSuccess: () => {
@@ -131,7 +134,19 @@ export function UserStoreInitializer({ children, orgId }: { children: ReactNode;
         },
       })
     }
-  }, [error, session, router])
+  }, [error, session, router, isSigningOut])
+
+  // Show loading state while signing out
+  if (isSigningOut) {
+    return (
+      <div className="h-screen flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <Spinner className="w-12 h-12 text-purple-600 mx-auto" />
+          <p className="text-muted-foreground">Signing out...</p>
+        </div>
+      </div>
+    )
+  }
 
   // Show loading state while fetching initial data
   if (isLoading) {
@@ -145,7 +160,7 @@ export function UserStoreInitializer({ children, orgId }: { children: ReactNode;
     )
   }
 
-  // Show error state if fetch fails
+  // Show error state if fetch fails (but not during sign-out)
   if (error || !userData?.data) {
     return (
       <div className="h-screen flex items-center justify-center">
