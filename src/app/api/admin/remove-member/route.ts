@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { revalidateTag } from "next/cache";
 import { ORGANIZATIONS_CACHE_TAG } from "../organizations/route";
 import { ORPHANED_USERS_CACHE_TAG } from "../orphaned-users/route";
+import { ORG_USERS_CACHE_TAG } from "@/app/api/databricks/workspace/organization-users/route";
 
 export async function POST(request: NextRequest) {
   try {
@@ -35,12 +36,25 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Get the member's organizationId before deleting
+    const memberToDelete = await db
+      .select({ organizationId: member.organizationId })
+      .from(member)
+      .where(eq(member.id, memberId))
+      .limit(1);
+
+    const organizationId = memberToDelete[0]?.organizationId;
+
     // Remove member from organization
     await db.delete(member).where(eq(member.id, memberId));
 
-    // Revalidate both caches
+    // Revalidate caches
     revalidateTag(ORGANIZATIONS_CACHE_TAG);
     revalidateTag(ORPHANED_USERS_CACHE_TAG);
+    revalidateTag(ORG_USERS_CACHE_TAG);
+    if (organizationId) {
+      revalidateTag(`org-${organizationId}`);
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

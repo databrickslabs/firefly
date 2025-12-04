@@ -5,6 +5,7 @@ import { member } from "@/db/schema/auth";
 import { revalidateTag } from "next/cache";
 import { ORGANIZATIONS_CACHE_TAG } from "../organizations/route";
 import { ORPHANED_USERS_CACHE_TAG } from "../orphaned-users/route";
+import { ORG_USERS_CACHE_TAG } from "@/app/api/databricks/workspace/organization-users/route";
 
 export async function POST(request: NextRequest) {
   try {
@@ -47,9 +48,11 @@ export async function POST(request: NextRequest) {
       updatedAt: new Date(),
     });
 
-    // Revalidate both caches
+    // Revalidate caches
     revalidateTag(ORGANIZATIONS_CACHE_TAG);
     revalidateTag(ORPHANED_USERS_CACHE_TAG);
+    revalidateTag(ORG_USERS_CACHE_TAG);
+    revalidateTag(`org-${organizationId}`);
 
     return NextResponse.json({ success: true });
   } catch (error) {

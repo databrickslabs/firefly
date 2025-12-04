@@ -5,6 +5,7 @@ import { member } from "@/db/schema/auth";
 import { eq } from "drizzle-orm";
 import { revalidateTag } from "next/cache";
 import { ORGANIZATIONS_CACHE_TAG } from "../organizations/route";
+import { ORG_USERS_CACHE_TAG } from "@/app/api/databricks/workspace/organization-users/route";
 
 export async function POST(request: NextRequest) {
   try {
@@ -34,14 +35,27 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Get the member's organizationId for cache invalidation
+    const memberRecord = await db
+      .select({ organizationId: member.organizationId })
+      .from(member)
+      .where(eq(member.id, memberId))
+      .limit(1);
+
+    const organizationId = memberRecord[0]?.organizationId;
+
     // Update member role
     await db
       .update(member)
       .set({ role, updatedAt: new Date() })
       .where(eq(member.id, memberId));
 
-    // Revalidate organizations cache
+    // Revalidate caches
     revalidateTag(ORGANIZATIONS_CACHE_TAG);
+    revalidateTag(ORG_USERS_CACHE_TAG);
+    if (organizationId) {
+      revalidateTag(`org-${organizationId}`);
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

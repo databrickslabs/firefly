@@ -92,7 +92,7 @@ export function Sidebar({ basePath, userEmail }: SidebarProps) {
           <>
             <div className="my-2 border-t"></div>
             <Link
-              href="/admin"
+              href={`/admin?returnUrl=${encodeURIComponent(pathname)}`}
               className={cn(
                 "flex items-center gap-3 px-3 py-2 text-sm rounded-md transition-colors",
                 pathname === "/admin"

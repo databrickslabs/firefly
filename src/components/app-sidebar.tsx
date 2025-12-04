@@ -111,7 +111,7 @@ export function AppSidebar({ basePath, userEmail }: AppSidebarProps) {
                     isActive={pathname === "/admin"}
                     tooltip="Admin"
                   >
-                    <Link href="/admin">
+                    <Link href={`/admin?returnUrl=${encodeURIComponent(pathname)}`}>
                       <ShieldCheck className="h-4 w-4" />
                       <span>Admin</span>
                     </Link>

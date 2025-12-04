@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Building2,
   Plus,
@@ -74,6 +74,8 @@ interface Member {
 
 export default function OrganizationsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const returnUrl = searchParams.get("returnUrl");
   const [searchQuery, setSearchQuery] = useState("");
   const [pageSize, setPageSize] = useState(25);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -164,7 +166,10 @@ export default function OrganizationsPage() {
               size="sm"
               onClick={() => {
                 if (row.original.slug) {
-                  router.push(`/admin/organizations/${row.original.slug}`);
+                  const url = returnUrl
+                    ? `/admin/organizations/${row.original.slug}?returnUrl=${encodeURIComponent(returnUrl)}`
+                    : `/admin/organizations/${row.original.slug}`;
+                  router.push(url);
                 }
               }}
               disabled={!row.original.slug}
@@ -176,7 +181,7 @@ export default function OrganizationsPage() {
         ),
       },
     ],
-    [router]
+    [router, returnUrl]
   );
 
   const filteredData = useMemo(() => {
