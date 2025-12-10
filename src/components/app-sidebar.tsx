@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation";
 import { isAdmin } from "@/lib/admin-utils";
 import {
   Home,
-  FileText,
   Clock,
   Database,
   Code,
@@ -35,11 +34,6 @@ const navigationItems = [
     name: "Home",
     href: "/dashboard",
     icon: Home,
-  },
-  {
-    name: "Notebooks",
-    href: "/notebooks",
-    icon: FileText,
   },
   {
     name: "Recents",
