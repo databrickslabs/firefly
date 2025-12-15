@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation";
 import { isAdmin } from "@/lib/admin-utils";
 import {
   Home,
-  Clock,
   Database,
   Code,
   Briefcase,
@@ -36,11 +35,6 @@ const navigationItems = [
     icon: Home,
   },
   {
-    name: "Recents",
-    href: "/recents",
-    icon: Clock,
-  },
-  {
     name: "Catalog",
     href: "/catalog",
     icon: Database,
@@ -56,11 +50,12 @@ const navigationItems = [
     icon: FileCode,
   },
   {
-    name: "Jobs",
-    href: "/jobs",
+    name: "Jobs (Coming Soon)",
+    href: null,
     icon: Briefcase,
+    disabled: true,
   },
-];
+] as const;
 
 export function AppSidebar({ basePath, userEmail }: AppSidebarProps) {
   const pathname = usePathname();
@@ -74,9 +69,26 @@ export function AppSidebar({ basePath, userEmail }: AppSidebarProps) {
           <SidebarGroupContent>
             <SidebarMenu>
               {navigationItems.map((item) => {
+                const Icon = item.icon;
+                const isDisabled = "disabled" in item && item.disabled;
+
+                if (isDisabled || !item.href) {
+                  return (
+                    <SidebarMenuItem key={item.name}>
+                      <SidebarMenuButton
+                        disabled
+                        tooltip={item.name}
+                        className="cursor-not-allowed opacity-50"
+                      >
+                        <Icon className="h-4 w-4" />
+                        <span>{item.name}</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                }
+
                 const fullPath = `${basePath}${item.href}`;
                 const isActive = pathname === fullPath;
-                const Icon = item.icon;
 
                 return (
                   <SidebarMenuItem key={item.name}>
