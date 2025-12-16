@@ -10,6 +10,7 @@ import {
   Briefcase,
   ShieldCheck,
   FileCode,
+  LayoutDashboard,
 } from "lucide-react";
 import {
   Sidebar,
@@ -48,6 +49,11 @@ const navigationItems = [
     name: "Code Editor",
     href: "/code-editor",
     icon: FileCode,
+  },
+  {
+    name: "Embedded Dashboard",
+    href: "/embedded-dashboard",
+    icon: LayoutDashboard,
   },
   {
     name: "Jobs (Coming Soon)",
