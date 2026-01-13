@@ -1,6 +1,6 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { organization, genericOAuth, admin } from "better-auth/plugins";
+import { organization, genericOAuth, admin, okta } from "better-auth/plugins";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
 import { eq } from "drizzle-orm";
@@ -52,6 +52,14 @@ export async function createAuthInstance() {
   const workspaceProviders = organizations.map(org =>
     createWorkspaceProviderConfig(org.id)
   );
+
+  const oktaConfig = okta({
+    clientId: process.env.SPN_AUTH_OKTA_CLIENT_ID!,
+    clientSecret: process.env.SPN_AUTH_OKTA_CLIENT_SECRET!,
+    issuer: process.env.SPN_AUTH_OKTA_ISSUER!,
+  })
+
+  oktaConfig.providerId = "databricks-spn-mapping"
 
   return betterAuth({
     database: drizzleAdapter(db, {
@@ -125,6 +133,7 @@ export async function createAuthInstance() {
               };
             },
           },
+          oktaConfig,
           // Dynamically generated workspace providers
           ...workspaceProviders,
         ],

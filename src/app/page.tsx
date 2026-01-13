@@ -41,7 +41,7 @@ export default function Home() {
           {/* CTA Buttons */}
           <div className="flex flex-col sm:flex-row gap-6 items-center justify-center">
             <Link
-              href="/sso-spn"
+              href="/sso-spn-login"
               className="group relative inline-flex items-center justify-center px-10 py-6 text-lg font-medium text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 rounded-xl transition-all duration-200 shadow-xl hover:shadow-2xl hover:scale-105 w-full sm:w-auto"
             >
               <div className="flex flex-col items-start">

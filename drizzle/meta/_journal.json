@@ -29,6 +29,20 @@
       "when": 1761937423460,
       "tag": "0003_fluffy_tombstone",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1764968260658,
+      "tag": "0004_huge_peter_quill",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1767718853409,
+      "tag": "0005_young_gauntlet",
+      "breakpoints": true
     }
   ]
 }
