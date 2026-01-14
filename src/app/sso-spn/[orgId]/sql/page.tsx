@@ -1,0 +1,954 @@
+"use client";
+
+import * as React from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import { FileTree } from "@/components/sql-editor/file-tree";
+import { EditorTabs } from "@/components/sql-editor/editor-tabs";
+import { MonacoMultiFileEditor } from "@/components/sql-editor/monaco-multi-file-editor";
+import { WarehouseSelector } from "@/components/sql-editor/warehouse-selector";
+import { QueryResultsTable } from "@/components/sql-editor/query-results-table";
+import { CollapsibleSidebar } from "@/components/sql-editor/collapsible-sidebar";
+import { CatalogTreeView } from "@/components/unity-catalog/catalog-tree-view";
+import { Button } from "@/components/ui/button";
+import { Kbd } from "@/components/ui/kbd";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Play, Square, AlertCircle, CheckCircle2, StopCircle, PlayCircle, Save } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
+import type { OpenFile } from "@/lib/workspace-file-manager";
+import { getCatalogCache, type CatalogMetadata } from "@/lib/catalog-metadata-cache";
+import {
+  loadWarehouse,
+  saveWarehouse,
+} from "@/lib/warehouse-storage";
+import { useActiveOrganizationId } from "@/providers/user-store-provider";
+import { useWorkspaceTabs } from "@/hooks/use-workspace-tabs";
+
+interface ExecuteResponse {
+  statement_id: string;
+  status?: {
+    state: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELED" | "CLOSED";
+  };
+  manifest?: {
+    schema?: {
+      columns: Array<{
+        name: string;
+        type_name: string;
+        type_text: string;
+        position: number;
+      }>;
+    };
+    total_row_count?: number;
+  };
+  result?: {
+    data_array?: unknown[][];
+  };
+}
+
+interface StatusResponse {
+  statement_id: string;
+  status: {
+    state: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELED" | "CLOSED";
+    error?: {
+      message?: string;
+    };
+  };
+  manifest?: {
+    schema: {
+      columns: Array<{
+        name: string;
+        type_name: string;
+        type_text: string;
+        position: number;
+      }>;
+    };
+    total_row_count?: number;
+  };
+  result?: {
+    data_array?: unknown[][];
+  };
+}
+
+export default function SQLPage() {
+  const queryClient = useQueryClient();
+  const sidebarPanelRef = React.useRef<React.ElementRef<typeof Panel>>(null);
+
+  // Get orgId from Zustand store
+  const orgId = useActiveOrganizationId();
+
+  // Use workspace tabs hook for persistence (read-only on mount)
+  const workspaceTabs = useWorkspaceTabs({ orgId, workspace: "sql" });
+
+  const [warehouseId, setWarehouseId] = React.useState<string>("");
+  const [warehouseState, setWarehouseState] = React.useState<"RUNNING" | "STOPPED" | "STARTING" | "STOPPING" | "DELETED" | undefined>();
+  const [statementId, setStatementId] = React.useState<string | null>(null);
+  const [isPolling, setIsPolling] = React.useState(false);
+  const [executionStartTime, setExecutionStartTime] = React.useState<number | null>(null);
+  const [executionTime, setExecutionTime] = React.useState<number | null>(null);
+  const [warehouseRefreshTrigger, setWarehouseRefreshTrigger] = React.useState<number>(0);
+  const [queryResults, setQueryResults] = React.useState<{
+    columns: Array<{
+      name: string;
+      type_name: string;
+      type_text: string;
+      position: number;
+    }>;
+    data: unknown[][];
+    rowCount: number;
+  } | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+
+  // File management state
+  const [openFiles, setOpenFiles] = React.useState<OpenFile[]>([]);
+  const [activeFilePath, setActiveFilePath] = React.useState<string | null>(null);
+  const [fileToClose, setFileToClose] = React.useState<string | null>(null);
+  const [isRestoringFromStorage, setIsRestoringFromStorage] = React.useState(true);
+
+  // Load persisted warehouse selection on mount
+  React.useEffect(() => {
+    const stored = loadWarehouse();
+    if (stored) {
+      setWarehouseId(stored.warehouseId);
+    }
+  }, []);
+
+  // Load files from storage on mount (only once)
+  const hasLoadedFromStorageRef = React.useRef(false);
+
+  React.useEffect(() => {
+    // Wait for the hook to finish loading from localStorage first
+    if (!workspaceTabs.hasLoaded) {
+      return;
+    }
+
+    // Only load once, after the hook has loaded data
+    if (hasLoadedFromStorageRef.current) {
+      return;
+    }
+
+    const storedPaths = workspaceTabs.openedPaths;
+    const storedActive = workspaceTabs.activePath;
+
+    if (storedPaths.length === 0) {
+      // No files to restore
+      setIsRestoringFromStorage(false);
+      return;
+    }
+
+    // Mark as loading to prevent duplicate loads
+    hasLoadedFromStorageRef.current = true;
+
+    const loadFilesFromStorage = async () => {
+      const loadedFiles: OpenFile[] = [];
+
+      console.log('[SQL Restore] Loading files from storage:', storedPaths);
+
+      for (const filePath of storedPaths) {
+        try {
+          console.log('[SQL Restore] Fetching file:', filePath);
+          const response = await fetch(
+            `/api/databricks/workspace/export?path=${encodeURIComponent(filePath)}`
+          );
+
+          if (response.ok) {
+            const data = await response.json();
+            console.log('[SQL Restore] API response for', filePath, ':', data);
+            console.log('[SQL Restore] Content length:', data.content?.length || 0);
+
+            loadedFiles.push({
+              path: filePath,
+              name: filePath.split("/").pop() || "",
+              content: data.content || "",
+              isDirty: false,
+              language: "sql",
+            });
+          } else {
+            console.error('[SQL Restore] API error:', response.status, response.statusText);
+          }
+        } catch (err) {
+          console.error(`Failed to load file from storage: ${filePath}`, err);
+        }
+      }
+
+      console.log('[SQL Restore] Loaded files:', loadedFiles.length, loadedFiles);
+
+      if (loadedFiles.length > 0) {
+        // Set files and active path FIRST
+        setOpenFiles(loadedFiles);
+        const activeFile = loadedFiles.find(f => f.path === storedActive);
+        setActiveFilePath(activeFile?.path || loadedFiles[0].path);
+
+        // Wait a bit longer to ensure state updates have propagated
+        setTimeout(() => {
+          setIsRestoringFromStorage(false);
+        }, 100);
+      } else {
+        // No files were loaded
+        setIsRestoringFromStorage(false);
+      }
+    };
+
+    loadFilesFromStorage();
+  }, [workspaceTabs.hasLoaded, workspaceTabs.openedPaths, workspaceTabs.activePath]); // Wait for hook to load data
+
+  // Execute SQL mutation
+  const executeMutation = useMutation({
+    mutationFn: async (query: string) => {
+      const response = await fetch("/api/databricks/sql/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          warehouse_id: warehouseId,
+          statement: query,
+          wait_timeout: "10s",
+          on_wait_timeout: "CONTINUE",
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to execute query");
+      }
+
+      return response.json() as Promise<ExecuteResponse>;
+    },
+    onSuccess: (data) => {
+      setStatementId(data.statement_id);
+      setExecutionStartTime(Date.now());
+      setError(null);
+
+      // Trigger warehouse refresh when query is executed (warehouse may start)
+      setWarehouseRefreshTrigger(Date.now());
+
+      // Check if query completed immediately
+      if (data.status?.state === "SUCCEEDED" && data.result?.data_array) {
+        handleSuccessfulQuery(data);
+      } else {
+        // Start polling for results
+        setIsPolling(true);
+      }
+    },
+    onError: (err: Error) => {
+      setError(err.message);
+      setIsPolling(false);
+      setExecutionTime(executionStartTime ? Date.now() - executionStartTime : null);
+    },
+  });
+
+  // Poll for statement status
+  const { data: statusData } = useQuery<StatusResponse>({
+    queryKey: ["sql-status", statementId],
+    queryFn: async () => {
+      if (!statementId) throw new Error("No statement ID");
+
+      const response = await fetch(`/api/databricks/sql/status/${statementId}`);
+      if (!response.ok) {
+        throw new Error("Failed to get status");
+      }
+      return response.json();
+    },
+    enabled: isPolling && !!statementId,
+    refetchInterval: 1000, // Poll every second
+    refetchOnWindowFocus: false,
+  });
+
+  // Save file mutation
+  const saveFileMutation = useMutation({
+    mutationFn: async ({ path, content }: { path: string; content: string }) => {
+      const response = await fetch("/api/databricks/workspace/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          path,
+          content,
+          format: "AUTO",
+          isNotebook: false, // Save as file, not notebook
+          overwrite: true,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to save file");
+      }
+
+      return response.json();
+    },
+    onSuccess: (_, variables) => {
+      // Mark file as not dirty
+      setOpenFiles((files) =>
+        files.map((f) =>
+          f.path === variables.path ? { ...f, isDirty: false } : f
+        )
+      );
+      queryClient.invalidateQueries({ queryKey: ["workspace-files"] });
+    },
+    onError: (err: Error) => {
+      setError(`Failed to save file: ${err.message}`);
+    },
+  });
+
+  const handleSuccessfulQuery = React.useCallback((data: ExecuteResponse | StatusResponse) => {
+    if (data.manifest?.schema?.columns && data.result?.data_array) {
+      setQueryResults({
+        columns: data.manifest.schema.columns,
+        data: data.result.data_array,
+        rowCount: data.manifest.total_row_count || data.result.data_array.length,
+      });
+      setExecutionTime(executionStartTime ? Date.now() - executionStartTime : null);
+    }
+  }, [executionStartTime]);
+
+  // Handle status updates
+  React.useEffect(() => {
+    if (!statusData || !isPolling) return;
+
+    const state = statusData.status.state;
+
+    if (state === "SUCCEEDED") {
+      handleSuccessfulQuery(statusData);
+      setIsPolling(false);
+    } else if (state === "FAILED") {
+      setError(statusData.status.error?.message || "Query failed");
+      setIsPolling(false);
+      setExecutionTime(executionStartTime ? Date.now() - executionStartTime : null);
+    } else if (state === "CANCELED") {
+      setError("Query was canceled");
+      setIsPolling(false);
+      setExecutionTime(executionStartTime ? Date.now() - executionStartTime : null);
+    }
+  }, [statusData, isPolling, executionStartTime, handleSuccessfulQuery]);
+
+  const handleFileSelect = async (filePath: string) => {
+    // Check if file is already open
+    const existingFile = openFiles.find((f) => f.path === filePath);
+    if (existingFile) {
+      setActiveFilePath(filePath);
+      return;
+    }
+
+    // Fetch file content
+    try {
+      const response = await fetch(
+        `/api/databricks/workspace/export?path=${encodeURIComponent(filePath)}`
+      );
+      if (!response.ok) {
+        throw new Error("Failed to fetch file");
+      }
+
+      const data = await response.json();
+      const newFile: OpenFile = {
+        path: filePath,
+        name: filePath.split("/").pop() || "",
+        content: data.content || "",
+        isDirty: false,
+        language: "sql",
+      };
+
+      setOpenFiles((files) => {
+        const updated = [...files, newFile];
+
+        // Save to localStorage immediately
+        const paths = updated.map(f => f.path);
+        workspaceTabs.setAllTabs(paths, filePath);
+
+        return updated;
+      });
+      setActiveFilePath(filePath);
+    } catch (err) {
+      setError(`Failed to open file: ${err}`);
+    }
+  };
+
+  const handleTabClose = (filePath: string) => {
+    const file = openFiles.find((f) => f.path === filePath);
+    if (file?.isDirty) {
+      // Show alert dialog for unsaved changes
+      setFileToClose(filePath);
+      return;
+    }
+
+    // Close immediately if no unsaved changes
+    closeFile(filePath);
+  };
+
+  const closeFile = (filePath: string) => {
+    setOpenFiles((files) => {
+      const filtered = files.filter((f) => f.path !== filePath);
+
+      // Save to localStorage immediately
+      const paths = filtered.map(f => f.path);
+      const newActive = filtered.length > 0 ? filtered[0].path : "";
+      workspaceTabs.setAllTabs(paths, newActive);
+
+      return filtered;
+    });
+
+    if (activeFilePath === filePath) {
+      const remainingFiles = openFiles.filter((f) => f.path !== filePath);
+      setActiveFilePath(remainingFiles.length > 0 ? remainingFiles[0].path : null);
+    }
+  };
+
+  const handleConfirmClose = () => {
+    if (fileToClose) {
+      closeFile(fileToClose);
+      setFileToClose(null);
+    }
+  };
+
+  const handleCancelClose = () => {
+    setFileToClose(null);
+  };
+
+  const handleContentChange = (path: string, content: string) => {
+    setOpenFiles((files) =>
+      files.map((f) => {
+        if (f.path === path) {
+          return { ...f, content, isDirty: true };
+        }
+        return f;
+      })
+    );
+  };
+
+  const handleSave = (path: string) => {
+    const file = openFiles.find((f) => f.path === path);
+    if (!file) return;
+
+    saveFileMutation.mutate({
+      path: file.path,
+      content: file.content,
+    });
+  };
+
+  const handleRunQuery = () => {
+    if (!warehouseId) {
+      setError("Please select a warehouse");
+      return;
+    }
+
+    const activeFile = openFiles.find((f) => f.path === activeFilePath);
+    if (!activeFile || !activeFile.content.trim()) {
+      setError("Please enter a SQL query");
+      return;
+    }
+
+    setQueryResults(null);
+    setError(null);
+    setExecutionTime(null);
+    executeMutation.mutate(activeFile.content);
+  };
+
+  const handleCancelQuery = async () => {
+    if (!statementId) return;
+
+    try {
+      await fetch(`/api/databricks/sql/cancel/${statementId}`, {
+        method: "POST",
+      });
+      setIsPolling(false);
+      setError("Query canceled");
+    } catch (err) {
+      console.error("Failed to cancel query:", err);
+    }
+  };
+
+  // Stop warehouse mutation
+  const stopWarehouseMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const response = await fetch(`/api/databricks/warehouses/${id}/stop`, {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to stop warehouse");
+      }
+
+      return response.json();
+    },
+    onSuccess: () => {
+      setWarehouseRefreshTrigger(Date.now());
+    },
+    onError: (err: Error) => {
+      setError(err.message);
+    },
+  });
+
+  // Start warehouse mutation
+  const startWarehouseMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const response = await fetch(`/api/databricks/warehouses/${id}/start`, {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to start warehouse");
+      }
+
+      return response.json();
+    },
+    onSuccess: () => {
+      setWarehouseRefreshTrigger(Date.now());
+    },
+    onError: (err: Error) => {
+      setError(err.message);
+    },
+  });
+
+  const handleStopWarehouse = () => {
+    if (!warehouseId) return;
+    stopWarehouseMutation.mutate(warehouseId);
+  };
+
+  const handleStartWarehouse = () => {
+    if (!warehouseId) return;
+    startWarehouseMutation.mutate(warehouseId);
+  };
+
+  const handleWarehouseChange = (newWarehouseId: string) => {
+    setWarehouseId(newWarehouseId);
+
+    // Save to localStorage
+    saveWarehouse({
+      warehouseId: newWarehouseId,
+      timestamp: Date.now(),
+    });
+  };
+
+  // Initialize catalog cache
+  const catalogCache = React.useMemo(() => getCatalogCache(), []);
+
+  // State to store all loaded catalog metadata for autocomplete
+  const [catalogMetadata, setCatalogMetadata] = React.useState<CatalogMetadata>(() => {
+    // Load initial state from cache
+    return catalogCache.getAllMetadata();
+  });
+
+  // Subscribe to cache updates (from other tabs)
+  React.useEffect(() => {
+    const unsubscribe = catalogCache.subscribe(() => {
+      setCatalogMetadata(catalogCache.getAllMetadata());
+    });
+    return unsubscribe;
+  }, [catalogCache]);
+
+  // Cleanup cache on unmount
+  React.useEffect(() => {
+    return () => {
+      catalogCache.cleanup();
+    };
+  }, [catalogCache]);
+
+  // Listen to catalog browser selections to load metadata
+  const handleCatalogItemSelect = React.useCallback(async (item: {
+    type: "catalog" | "schema" | "table";
+    catalog: string;
+    schema?: string;
+    table?: string;
+  }) => {
+    try {
+      if (item.type === "catalog") {
+        // Check cache first
+        const cachedSchemas = catalogCache.getSchemas(item.catalog);
+        if (cachedSchemas) {
+          setCatalogMetadata(prev => ({
+            ...prev,
+            schemas: { ...prev.schemas, [item.catalog]: cachedSchemas },
+          }));
+          return;
+        }
+
+        // Fetch schemas for this catalog
+        const response = await fetch(
+          `/api/databricks/unity-catalog/schemas?catalog_name=${encodeURIComponent(item.catalog)}`
+        );
+        if (response.ok) {
+          const data = await response.json();
+          const schemas = data.schemas?.map((s: { name: string }) => s.name) || [];
+
+          // Update cache
+          catalogCache.setSchemas(item.catalog, schemas);
+
+          // Update state
+          setCatalogMetadata(prev => ({
+            ...prev,
+            schemas: { ...prev.schemas, [item.catalog]: schemas },
+          }));
+        }
+      } else if (item.type === "schema" && item.schema) {
+        const schemaName = item.schema; // Extract to const for TypeScript
+
+        // Check cache first
+        const cachedTables = catalogCache.getTables(item.catalog, schemaName);
+        if (cachedTables) {
+          setCatalogMetadata(prev => ({
+            ...prev,
+            tables: {
+              ...prev.tables,
+              [item.catalog]: {
+                ...prev.tables[item.catalog],
+                [schemaName]: cachedTables,
+              },
+            },
+          }));
+          return;
+        }
+
+        // Fetch tables for this schema
+        const response = await fetch(
+          `/api/databricks/unity-catalog/tables?catalog_name=${encodeURIComponent(item.catalog)}&schema_name=${encodeURIComponent(schemaName)}`
+        );
+        if (response.ok) {
+          const data = await response.json();
+          const tables = data.tables?.map((t: { name: string }) => t.name) || [];
+
+          // Update cache
+          catalogCache.setTables(item.catalog, schemaName, tables);
+
+          // Update state
+          setCatalogMetadata(prev => ({
+            ...prev,
+            tables: {
+              ...prev.tables,
+              [item.catalog]: {
+                ...prev.tables[item.catalog],
+                [schemaName]: tables,
+              },
+            },
+          }));
+        }
+      } else if (item.type === "table" && item.schema && item.table) {
+        const fullName = `${item.catalog}.${item.schema}.${item.table}`;
+
+        // Check cache first
+        const cachedColumns = catalogCache.getColumns(fullName);
+        if (cachedColumns) {
+          setCatalogMetadata(prev => ({
+            ...prev,
+            columns: { ...prev.columns, [fullName]: cachedColumns },
+          }));
+          return;
+        }
+
+        // Fetch columns for this table
+        const response = await fetch(
+          `/api/databricks/unity-catalog/table-details?full_name=${encodeURIComponent(fullName)}`
+        );
+        if (response.ok) {
+          const data = await response.json();
+          const columns = data.columns?.map((c: { name: string; type_text: string; comment?: string }) => ({
+            name: c.name,
+            type: c.type_text,
+            comment: c.comment,
+          })) || [];
+
+          // Update cache
+          catalogCache.setColumns(fullName, columns);
+
+          // Update state
+          setCatalogMetadata(prev => ({
+            ...prev,
+            columns: { ...prev.columns, [fullName]: columns },
+          }));
+        }
+      }
+    } catch (error) {
+      console.error("Failed to fetch catalog metadata:", error);
+    }
+  }, [catalogCache]);
+
+  // Fetch initial catalog list
+  const { data: catalogsData } = useQuery({
+    queryKey: ["catalogs-autocomplete"],
+    queryFn: async () => {
+      // Check cache first
+      const cached = catalogCache.getCatalogs();
+      if (cached) {
+        return { catalogs: cached.map(name => ({ name })) };
+      }
+
+      const response = await fetch("/api/databricks/unity-catalog/catalogs");
+      if (!response.ok) throw new Error("Failed to fetch catalogs");
+      return response.json();
+    },
+    staleTime: 60 * 60 * 1000, // Cache for 1 hour
+  });
+
+  // Update catalog list when data loads
+  React.useEffect(() => {
+    if (catalogsData?.catalogs) {
+      const catalogNames = catalogsData.catalogs.map((c: { name: string }) => c.name);
+
+      // Update cache
+      catalogCache.setCatalogs(catalogNames);
+
+      // Update state
+      setCatalogMetadata(prev => ({
+        ...prev,
+        catalogs: catalogNames,
+      }));
+    }
+  }, [catalogsData, catalogCache]);
+
+  const catalogItems = catalogMetadata.catalogs.length > 0 ? catalogMetadata : undefined;
+
+  const isExecuting = executeMutation.isPending || isPolling;
+  const activeFile = openFiles.find((f) => f.path === activeFilePath);
+  const hasUnsavedChanges = openFiles.some((f) => f.isDirty);
+
+  const fileToCloseData = openFiles.find((f) => f.path === fileToClose);
+
+  return (
+    <div className="h-full flex flex-col">
+      {/* Unsaved Changes Alert Dialog */}
+      <AlertDialog open={!!fileToClose} onOpenChange={(open) => !open && handleCancelClose()}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Unsaved changes</AlertDialogTitle>
+            <AlertDialogDescription>
+              {fileToCloseData?.name} has unsaved changes. Are you sure you want to close it? Your changes will be lost.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={handleCancelClose}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmClose}>Close anyway</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Main Layout with Resizable Panels */}
+      <div className="flex-1 overflow-hidden bg-slate-100/80 p-4">
+        <div className="h-full rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <PanelGroup direction="horizontal" className="h-full">
+            {/* Left Panel - Collapsible Sidebar */}
+            <Panel
+              ref={sidebarPanelRef}
+              defaultSize={20}
+            minSize={15}
+            maxSize={40}
+            collapsible={true}
+            collapsedSize={5}
+          >
+            <CollapsibleSidebar
+              panelRef={sidebarPanelRef}
+              filesContent={
+                <FileTree
+                  onFileSelect={handleFileSelect}
+                  selectedFilePath={activeFilePath}
+                />
+              }
+              catalogContent={
+                <CatalogTreeView
+                  showColumns={true}
+                  onItemSelect={handleCatalogItemSelect}
+                />
+              }
+            />
+          </Panel>
+            <PanelResizeHandle className="w-[3px] bg-slate-200/80 hover:bg-slate-300 transition-colors" />
+
+            {/* Right Panel - Editor and Results */}
+            <Panel>
+              <PanelGroup direction="vertical">
+                {/* Top Section - Toolbar, Tabs, and Editor */}
+                <Panel defaultSize={50} minSize={20} maxSize={80}>
+                  <div className="h-full flex flex-col bg-white">
+                    {/* Toolbar */}
+                    <div className="px-4 py-2 border-b border-slate-200 flex items-center gap-4 bg-slate-50/80">
+                    <WarehouseSelector
+                      value={warehouseId}
+                      onValueChange={handleWarehouseChange}
+                      refreshTrigger={warehouseRefreshTrigger}
+                      onWarehouseStateChange={setWarehouseState}
+                    />
+                    {warehouseState === "STOPPED" ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleStartWarehouse}
+                        disabled={!warehouseId || startWarehouseMutation.isPending}
+                        className="gap-2"
+                      >
+                        {startWarehouseMutation.isPending ? (
+                          <Spinner className="h-4 w-4 text-emerald-600" />
+                        ) : (
+                          <PlayCircle className="h-4 w-4" />
+                        )}
+                        Start
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleStopWarehouse}
+                        disabled={
+                          !warehouseId ||
+                          warehouseState === "STOPPING" ||
+                          warehouseState === "STARTING" ||
+                          stopWarehouseMutation.isPending
+                        }
+                        className="gap-2"
+                      >
+                        {stopWarehouseMutation.isPending ? (
+                          <Spinner className="h-4 w-4 text-emerald-600" />
+                        ) : (
+                          <StopCircle className="h-4 w-4" />
+                        )}
+                        Stop
+                      </Button>
+                    )}
+                      <div className="flex gap-2 ml-auto">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => activeFilePath && handleSave(activeFilePath)}
+                        disabled={!activeFile?.isDirty || saveFileMutation.isPending}
+                        className="gap-2"
+                      >
+                        {saveFileMutation.isPending ? (
+                          <Spinner className="h-4 w-4 text-emerald-600" />
+                        ) : (
+                          <Save className="h-4 w-4" />
+                        )}
+                        Save
+                        {hasUnsavedChanges && (
+                          <Kbd className="ml-1">Cmd+S</Kbd>
+                        )}
+                      </Button>
+                      {isExecuting ? (
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={handleCancelQuery}
+                          className="gap-2"
+                        >
+                          <Square className="h-4 w-4" />
+                          Cancel
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="default"
+                          size="sm"
+                          onClick={handleRunQuery}
+                          disabled={!warehouseId || !activeFile?.content.trim()}
+                          className="gap-2"
+                        >
+                          <Play className="h-4 w-4" />
+                          Run Query
+                          <Kbd className="ml-1">Cmd+Enter</Kbd>
+                        </Button>
+                      )}
+                      </div>
+                    </div>
+
+                    {/* Editor Tabs */}
+                    <EditorTabs
+                      openFiles={openFiles}
+                      activeFilePath={activeFilePath}
+                      onTabClick={setActiveFilePath}
+                      onTabClose={handleTabClose}
+                    />
+
+                    {/* Monaco Editor */}
+                    <div className="flex-1 min-h-0">
+                      {isRestoringFromStorage ? (
+                        <div className="flex h-full items-center justify-center">
+                          <div className="flex flex-col items-center gap-2">
+                            <Spinner className="h-8 w-8 text-emerald-600" />
+                            <p className="text-sm text-muted-foreground">Restoring session...</p>
+                          </div>
+                        </div>
+                      ) : openFiles.length > 0 ? (
+                        <MonacoMultiFileEditor
+                          openFiles={openFiles}
+                          activeFilePath={activeFilePath}
+                          onContentChange={handleContentChange}
+                          onSave={handleSave}
+                          onRun={handleRunQuery}
+                          readOnly={isExecuting}
+                          catalogItems={catalogItems}
+                        />
+                      ) : (
+                        <div className="flex h-full items-center justify-center bg-slate-50/70">
+                          <div className="text-center text-muted-foreground">
+                            <p className="text-sm">No files open</p>
+                            <p className="text-xs mt-1">Select a file from the file tree to start editing</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                </div>
+              </Panel>
+
+              <PanelResizeHandle className="h-[3px] bg-slate-200/80 hover:bg-slate-300 transition-colors" />
+
+              {/* Bottom Section - Status and Results */}
+              <Panel defaultSize={50} minSize={20}>
+                <div className="h-full flex flex-col bg-slate-50/80">
+                  {/* Status Bar */}
+                  <div className="px-4 py-2 border-b border-slate-200 bg-white flex items-center gap-4 shadow-sm">
+                    {isExecuting ? (
+                      <div className="flex items-center gap-2 text-sm">
+                        <Spinner className="h-4 w-4 text-emerald-600" />
+                        <span className="text-emerald-600 dark:text-emerald-400">
+                          Executing query...
+                        </span>
+                      </div>
+                    ) : error ? (
+                      <div className="flex items-center gap-2 text-sm">
+                        <AlertCircle className="h-4 w-4 text-red-600" />
+                        <span className="text-red-600 dark:text-red-400">{error}</span>
+                      </div>
+                    ) : queryResults ? (
+                      <div className="flex items-center gap-2 text-sm">
+                        <CheckCircle2 className="h-4 w-4 text-green-600" />
+                        <span className="text-green-600 dark:text-green-400">
+                          Query succeeded
+                        </span>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {/* Results Panel */}
+                  <div className="flex-1 min-h-0 overflow-hidden p-4">
+                    <div className="h-full rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                      {queryResults ? (
+                        <QueryResultsTable
+                          columns={queryResults.columns}
+                          data={queryResults.data}
+                          rowCount={queryResults.rowCount}
+                          executionTime={executionTime || undefined}
+                        />
+                      ) : (
+                        <div className="flex h-full items-center justify-center bg-slate-50/70">
+                          <div className="text-center text-muted-foreground">
+                            <p className="text-sm">No results yet</p>
+                            <p className="text-xs mt-1">
+                              Select a warehouse and run a query to see results
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </Panel>
+              </PanelGroup>
+            </Panel>
+          </PanelGroup>
+        </div>
+      </div>
+    </div>
+  );
+}

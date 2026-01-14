@@ -2,7 +2,7 @@
 
 import { ReactNode, useEffect } from "react";
 import { useSession } from "@/lib/auth-client";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { Spinner } from "@/components/ui/spinner";
 
 export default function SsoSpnLayout({
@@ -12,13 +12,24 @@ export default function SsoSpnLayout({
 }) {
   const { data: session, isPending } = useSession();
   const router = useRouter();
+  const pathname = usePathname();
+
+  // Routes that don't need auth
+  const publicRoutes = ["/sso-spn", "/sso-spn/login", "/sso-spn/select-org"];
+  const isPublicRoute = publicRoutes.includes(pathname);
 
   useEffect(() => {
-    if (!isPending && !session) {
-      router.push("/sso-spn-login");
+    if (!isPending && !session && !isPublicRoute) {
+      router.push("/sso-spn");
     }
-  }, [session, isPending, router]);
+  }, [session, isPending, router, isPublicRoute]);
 
+  // Public routes render without layout
+  if (isPublicRoute) {
+    return <>{children}</>;
+  }
+
+  // Show loading for authenticated routes
   if (isPending) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -30,9 +41,11 @@ export default function SsoSpnLayout({
     );
   }
 
+  // Redirect if no session on protected routes
   if (!session) {
     return null;
   }
 
+  // Child routes (like [orgId]) handle their own layout
   return <>{children}</>;
 }

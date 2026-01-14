@@ -1,333 +1,222 @@
-import { getAuthInstance } from "@/lib/auth-dynamic";
-import { headers } from "next/headers";
-import { Key, AlertCircle, CheckCircle2, Database, Link2 } from "lucide-react";
-import { CopyTokenButton } from "./copy-token-button";
-import { getDatabricksSpnToken } from "@/lib/databricks-spn-authtoken";
+"use client";
 
-export const dynamic = "force-dynamic";
+import { useState, Suspense } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { Spinner } from "@/components/ui/spinner";
 
-// Databricks accounts URL and account ID for SPN token generation (from environment variables)
-const DATABRICKS_ACCOUNTS_URL = process.env.SPN_AUTH_DATABRICKS_ACCOUNTS_URL || "";
-const DATABRICKS_ACCOUNT_ID = process.env.SPN_AUTH_DATABRICKS_ACCOUNT_ID || "";
-const DATABRICKS_WORKSPACE_URL = process.env.SPN_AUTH_DATABRICKS_WORKSPACE_URL || "";
+function SsoSpnHrdContent() {
+  const router = useRouter();
+  const [email, setEmail] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-interface ProviderAccount {
-  providerId: string;
-  accountId: string;
-}
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
 
-async function getOktaToken() {
-  try {
-    const auth = await getAuthInstance();
-    const reqHeaders = await headers();
-
-    const session = await auth.api.getSession({
-      headers: reqHeaders,
-    });
-
-    if (!session) {
-      return { error: "Not logged in. Please sign in first.", session: null, accessToken: null, provider: null };
+    if (!email) {
+      setError("Please enter your email address");
+      return;
     }
 
-    // Get the list of linked accounts using better-auth API
-    let spnProvider: ProviderAccount | null = null;
     try {
-      const accountsResponse = await auth.api.listUserAccounts({
-        headers: reqHeaders,
+      setIsLoading(true);
+      setError(null);
+
+      // Call API to lookup organizations for this email
+      const response = await fetch("/api/databricks/hrd/lookup", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email }),
       });
 
-      if (accountsResponse && Array.isArray(accountsResponse)) {
-        const spnAccount = accountsResponse.find((a: ProviderAccount) => a.providerId === "databricks-spn-mapping");
-        if (spnAccount) {
-          spnProvider = {
-            providerId: spnAccount.providerId,
-            accountId: spnAccount.accountId,
-          };
-        }
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to lookup organizations");
       }
-    } catch (listError) {
-      console.error("Error listing accounts:", listError);
+
+      const data = await response.json();
+
+      if (data.organizations.length === 0) {
+        setError("No organizations found for this email address");
+        return;
+      }
+
+      if (data.organizations.length === 1) {
+        // Single org - redirect directly to login flow
+        router.push(`/sso-spn/login?email=${encodeURIComponent(email)}&org=${data.organizations[0].id}`);
+      } else {
+        // Multiple orgs - show selection page
+        router.push(`/sso-spn/select-org?email=${encodeURIComponent(email)}`);
+      }
+    } catch (err) {
+      console.error("Failed to lookup organizations:", err);
+      setError(err instanceof Error ? err.message : "Failed to lookup organizations. Please try again.");
+    } finally {
+      setIsLoading(false);
     }
-
-    // Get the access token for the databricks-spn-mapping provider
-    const tokenResponse = await auth.api.getAccessToken({
-      headers: reqHeaders,
-      body: {
-        providerId: "databricks-spn-mapping",
-      },
-    });
-
-    if (!tokenResponse || !tokenResponse.accessToken) {
-      return {
-        error: "No Okta access token found. Please sign in with Okta.",
-        session,
-        accessToken: null,
-        provider: spnProvider
-      };
-    }
-
-    return {
-      error: null,
-      session,
-      accessToken: tokenResponse.accessToken,
-      provider: spnProvider,
-    };
-  } catch (error) {
-    console.error("Error getting Okta token:", error);
-    return {
-      error: error instanceof Error ? error.message : "Failed to fetch token",
-      session: null,
-      accessToken: null,
-      provider: null
-    };
-  }
-}
-
-export default async function SsoSpnPage() {
-  const { error: oktaError, session, accessToken: oktaAccessToken, provider } = await getOktaToken();
-
-  // Get Databricks SPN tokens if user is logged in
-  let accountTokenResult: Awaited<ReturnType<typeof getDatabricksSpnToken>> | null = null;
-  let workspaceTokenResult: Awaited<ReturnType<typeof getDatabricksSpnToken>> | null = null;
-  if (session) {
-    accountTokenResult = await getDatabricksSpnToken(DATABRICKS_ACCOUNTS_URL, DATABRICKS_ACCOUNT_ID);
-    workspaceTokenResult = await getDatabricksSpnToken(DATABRICKS_WORKSPACE_URL);
-  }
+  };
 
   return (
-    <div className="h-full overflow-auto py-12 px-8 bg-gradient-to-b from-emerald-50 to-white dark:from-emerald-950/20 dark:to-background">
+    <div className="min-h-screen flex flex-col items-center justify-center p-8 bg-gradient-to-b from-emerald-50 to-white dark:from-emerald-950/20 dark:to-background">
       <div className="max-w-4xl mx-auto w-full space-y-8">
+        {/* Header */}
         <div className="text-center space-y-4">
+          <Link href="/" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+            &larr; Back to home
+          </Link>
           <h1 className="text-5xl font-bold bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
-            Custom SSO Mapped to SPN
+            SPN Workspace Login
           </h1>
           <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-            Tenant-based authentication with service principal identity mapping
+            Enter your email to connect with service principal authentication
           </p>
         </div>
 
-        <div className="max-w-2xl mx-auto p-10 border-2 border-emerald-200 dark:border-emerald-800 rounded-2xl bg-white dark:bg-slate-900 shadow-2xl">
-          <div className="space-y-6">
-            <div className="text-center">
-              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 mb-4">
-                <Key className="w-8 h-8 text-white" />
+        {/* Main Login Card */}
+        <div className="max-w-2xl mx-auto">
+          <div className="p-10 border-2 border-emerald-200 dark:border-emerald-800 rounded-2xl bg-white dark:bg-slate-900 shadow-2xl space-y-8">
+            {/* Logo/Icon */}
+            <div className="flex justify-center">
+              <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-600 flex items-center justify-center shadow-lg">
+                <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                </svg>
               </div>
-              {session ? (
-                <div className="flex items-center justify-center gap-2 text-emerald-600 dark:text-emerald-400">
-                  <CheckCircle2 className="w-5 h-5" />
-                  <span className="font-semibold">Logged In</span>
-                </div>
-              ) : (
-                <h2 className="text-2xl font-semibold mb-4">Not Logged In</h2>
-              )}
             </div>
 
-            {session && (
-              <div className="text-center text-muted-foreground space-y-2">
-                <p>Signed in as: <span className="font-mono font-semibold">{session.user.email}</span></p>
-                {provider && (
-                  <div className="flex items-center justify-center gap-2 text-sm">
-                    <Link2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                    <span>Provider: <span className="font-mono font-semibold text-emerald-700 dark:text-emerald-300">{provider.providerId}</span></span>
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="space-y-4 text-muted-foreground">
-              <p>
-                This authentication method allows you to log in per tenant to your identity provider, then map that identity to a service principal (SPN) in your organization.
+            {/* Description */}
+            <div className="text-center space-y-2">
+              <h2 className="text-2xl font-semibold">Home Realm Discovery</h2>
+              <p className="text-muted-foreground">
+                Enter your email address to find your organization&apos;s workspace
               </p>
-
-              <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-lg p-4">
-                <h3 className="font-semibold text-emerald-900 dark:text-emerald-100 mb-2">
-                  Key Features:
-                </h3>
-                <ul className="space-y-2 text-sm">
-                  <li className="flex items-start">
-                    <span className="text-emerald-600 dark:text-emerald-400 mr-2">•</span>
-                    <span>All users in an organization share the same SPN identity</span>
-                  </li>
-                  <li className="flex items-start">
-                    <span className="text-emerald-600 dark:text-emerald-400 mr-2">•</span>
-                    <span>Per-tenant IDP authentication with SPN mapping</span>
-                  </li>
-                  <li className="flex items-start">
-                    <span className="text-emerald-600 dark:text-emerald-400 mr-2">•</span>
-                    <span>Optional team/group-based SPN assignment</span>
-                  </li>
-                  <li className="flex items-start">
-                    <span className="text-emerald-600 dark:text-emerald-400 mr-2">•</span>
-                    <span>Users can be assigned to specific team SPNs for granular access control</span>
-                  </li>
-                </ul>
-              </div>
             </div>
-          </div>
-        </div>
 
-        {/* Okta Access Token Section */}
-        <div className="max-w-2xl mx-auto p-6 border-2 border-emerald-200 dark:border-emerald-800 rounded-2xl bg-white dark:bg-slate-900 shadow-xl">
-          <h3 className="text-lg font-semibold text-emerald-900 dark:text-emerald-100 mb-4">
-            Okta Access Token
-          </h3>
-
-          {oktaError && (
-            <div className="flex items-start gap-3 p-4 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg">
-              <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+            {/* Email Form */}
+            <form onSubmit={handleSubmit} className="space-y-6">
               <div>
-                <p className="text-red-800 dark:text-red-200 font-medium">Error</p>
-                <p className="text-sm text-red-700 dark:text-red-300">{oktaError}</p>
+                <label htmlFor="email" className="block text-sm font-medium mb-2">
+                  Email Address
+                </label>
+                <input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="your.email@company.com"
+                  required
+                  disabled={isLoading}
+                  className="w-full px-4 py-3 border-2 border-emerald-200 dark:border-emerald-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed bg-white dark:bg-slate-800 text-foreground"
+                />
               </div>
-            </div>
-          )}
 
-          {!oktaError && oktaAccessToken && (
-            <div className="space-y-3">
-              <div className="p-4 bg-slate-100 dark:bg-slate-800 rounded-lg overflow-x-auto">
-                <code className="text-xs font-mono text-slate-800 dark:text-slate-200 break-all whitespace-pre-wrap">
-                  {oktaAccessToken}
-                </code>
-              </div>
-              <CopyTokenButton token={oktaAccessToken} />
-            </div>
-          )}
+              {/* Error Message */}
+              {error && (
+                <div className="p-4 bg-red-100 dark:bg-red-900/20 border-2 border-red-400 dark:border-red-800 rounded-xl text-red-800 dark:text-red-200 flex items-start gap-3">
+                  <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                  </svg>
+                  <div>
+                    <p className="font-semibold">Error</p>
+                    <p className="text-sm">{error}</p>
+                  </div>
+                </div>
+              )}
 
-          {!oktaError && !oktaAccessToken && !session && (
-            <p className="text-muted-foreground">
-              Please <a href="/sso-spn-login" className="text-emerald-600 hover:underline">sign in</a> to view your access token.
-            </p>
-          )}
-        </div>
-
-        {/* Databricks Account SPN Access Token Section */}
-        <div className="max-w-2xl mx-auto p-6 border-2 border-blue-200 dark:border-blue-800 rounded-2xl bg-white dark:bg-slate-900 shadow-xl">
-          <div className="flex items-center gap-3 mb-4">
-            <Database className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-            <h3 className="text-lg font-semibold text-blue-900 dark:text-blue-100">
-              Databricks Account SPN Token
-            </h3>
-          </div>
-
-          {!session && (
-            <p className="text-muted-foreground">
-              Please <a href="/sso-spn-login" className="text-blue-600 hover:underline">sign in</a> to view your Databricks SPN token.
-            </p>
-          )}
-
-          {session && accountTokenResult && !accountTokenResult.success && (
-            <div className="flex items-start gap-3 p-4 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg">
-              <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-              <div>
-                <p className="text-red-800 dark:text-red-200 font-medium">Error</p>
-                <p className="text-sm text-red-700 dark:text-red-300">{accountTokenResult.error.error}</p>
-                {accountTokenResult.error.details != null && (
-                  <p className="text-xs text-red-600 dark:text-red-400 mt-1">
-                    {typeof accountTokenResult.error.details === 'string'
-                      ? accountTokenResult.error.details
-                      : JSON.stringify(accountTokenResult.error.details)}
-                  </p>
+              {/* Submit Button */}
+              <button
+                type="submit"
+                disabled={isLoading || !email}
+                className="w-full px-8 py-5 text-lg font-semibold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 rounded-xl transition-all duration-200 shadow-xl hover:shadow-2xl disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-[1.02] active:scale-[0.98]"
+              >
+                {isLoading ? (
+                  <span className="flex items-center justify-center gap-3">
+                    <svg className="animate-spin h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Looking up organizations...
+                  </span>
+                ) : (
+                  <span className="flex items-center justify-center gap-3">
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                    </svg>
+                    Continue
+                  </span>
                 )}
-              </div>
-            </div>
-          )}
+              </button>
+            </form>
 
-          {session && accountTokenResult && accountTokenResult.success && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <span className="text-muted-foreground">Client ID:</span>
-                  <p className="font-mono text-xs">{accountTokenResult.data.clientId}</p>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Token Type:</span>
-                  <p className="font-mono text-xs">{accountTokenResult.data.tokenType}</p>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Expires In:</span>
-                  <p className="font-mono text-xs">{accountTokenResult.data.expiresIn}s</p>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Target URL:</span>
-                  <p className="font-mono text-xs truncate">{DATABRICKS_ACCOUNTS_URL}</p>
-                </div>
-              </div>
-              <div className="space-y-3">
-                <div className="p-4 bg-slate-100 dark:bg-slate-800 rounded-lg overflow-x-auto">
-                  <code className="text-xs font-mono text-slate-800 dark:text-slate-200 break-all whitespace-pre-wrap">
-                    {accountTokenResult.data.accessToken}
-                  </code>
-                </div>
-                <CopyTokenButton token={accountTokenResult.data.accessToken} />
+            {/* Info Text */}
+            <div className="pt-4 border-t space-y-3">
+              <p className="text-sm text-muted-foreground text-center">
+                Secured with OAuth 2.0 and Service Principal
+              </p>
+              <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                </svg>
+                SPN-based access - shared service principal identity
               </div>
             </div>
-          )}
+          </div>
         </div>
 
-        {/* Databricks Workspace SPN Access Token Section */}
-        <div className="max-w-2xl mx-auto p-6 border-2 border-purple-200 dark:border-purple-800 rounded-2xl bg-white dark:bg-slate-900 shadow-xl">
-          <div className="flex items-center gap-3 mb-4">
-            <Database className="w-5 h-5 text-purple-600 dark:text-purple-400" />
-            <h3 className="text-lg font-semibold text-purple-900 dark:text-purple-100">
-              Databricks Workspace SPN Token
-            </h3>
+        {/* Login Flow Steps */}
+        <div className="max-w-3xl mx-auto">
+          <h3 className="text-center text-lg font-semibold mb-6">How it works</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="text-center space-y-3">
+              <div className="w-12 h-12 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center mx-auto">
+                <span className="text-xl font-bold text-emerald-600 dark:text-emerald-400">1</span>
+              </div>
+              <h4 className="font-semibold">Enter Email</h4>
+              <p className="text-sm text-muted-foreground">
+                We&apos;ll find all organizations associated with your email
+              </p>
+            </div>
+            <div className="text-center space-y-3">
+              <div className="w-12 h-12 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center mx-auto">
+                <span className="text-xl font-bold text-emerald-600 dark:text-emerald-400">2</span>
+              </div>
+              <h4 className="font-semibold">Authenticate</h4>
+              <p className="text-sm text-muted-foreground">
+                Sign in with your identity provider
+              </p>
+            </div>
+            <div className="text-center space-y-3">
+              <div className="w-12 h-12 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center mx-auto">
+                <span className="text-xl font-bold text-emerald-600 dark:text-emerald-400">3</span>
+              </div>
+              <h4 className="font-semibold">Access Workspace</h4>
+              <p className="text-sm text-muted-foreground">
+                Use SPN credentials to access Databricks resources
+              </p>
+            </div>
           </div>
-
-          {!session && (
-            <p className="text-muted-foreground">
-              Please <a href="/sso-spn-login" className="text-purple-600 hover:underline">sign in</a> to view your Databricks workspace token.
-            </p>
-          )}
-
-          {session && workspaceTokenResult && !workspaceTokenResult.success && (
-            <div className="flex items-start gap-3 p-4 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg">
-              <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-              <div>
-                <p className="text-red-800 dark:text-red-200 font-medium">Error</p>
-                <p className="text-sm text-red-700 dark:text-red-300">{workspaceTokenResult.error.error}</p>
-                {workspaceTokenResult.error.details != null && (
-                  <p className="text-xs text-red-600 dark:text-red-400 mt-1">
-                    {typeof workspaceTokenResult.error.details === 'string'
-                      ? workspaceTokenResult.error.details
-                      : JSON.stringify(workspaceTokenResult.error.details)}
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
-
-          {session && workspaceTokenResult && workspaceTokenResult.success && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <span className="text-muted-foreground">Client ID:</span>
-                  <p className="font-mono text-xs">{workspaceTokenResult.data.clientId}</p>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Token Type:</span>
-                  <p className="font-mono text-xs">{workspaceTokenResult.data.tokenType}</p>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Expires In:</span>
-                  <p className="font-mono text-xs">{workspaceTokenResult.data.expiresIn}s</p>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Target URL:</span>
-                  <p className="font-mono text-xs truncate">{DATABRICKS_WORKSPACE_URL}</p>
-                </div>
-              </div>
-              <div className="space-y-3">
-                <div className="p-4 bg-slate-100 dark:bg-slate-800 rounded-lg overflow-x-auto">
-                  <code className="text-xs font-mono text-slate-800 dark:text-slate-200 break-all whitespace-pre-wrap">
-                    {workspaceTokenResult.data.accessToken}
-                  </code>
-                </div>
-                <CopyTokenButton token={workspaceTokenResult.data.accessToken} />
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </div>
+  );
+}
+
+export default function SsoSpnPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-emerald-50 to-white dark:from-emerald-950/20 dark:to-background">
+          <div className="text-center space-y-4">
+            <Spinner className="w-12 h-12 text-emerald-600 mx-auto" />
+            <p className="text-muted-foreground">Loading...</p>
+          </div>
+        </div>
+      }
+    >
+      <SsoSpnHrdContent />
+    </Suspense>
   );
 }
