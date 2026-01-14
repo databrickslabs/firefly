@@ -1,15 +1,24 @@
 "use client";
 
-import { useState, Suspense } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Spinner } from "@/components/ui/spinner";
+import { useSession } from "@/lib/auth-client";
 
 function SsoSpnHrdContent() {
   const router = useRouter();
+  const { data: session } = useSession();
   const [email, setEmail] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Prefill email from session if user is authenticated
+  useEffect(() => {
+    if (session?.user?.email) {
+      setEmail(session.user.email);
+    }
+  }, [session?.user?.email]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -109,7 +118,8 @@ function SsoSpnHrdContent() {
                   placeholder="your.email@company.com"
                   required
                   disabled={isLoading}
-                  className="w-full px-4 py-3 border-2 border-emerald-200 dark:border-emerald-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed bg-white dark:bg-slate-800 text-foreground"
+                  readOnly={!!session?.user?.email}
+                  className={`w-full px-4 py-3 border-2 border-emerald-200 dark:border-emerald-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed bg-white dark:bg-slate-800 text-foreground ${session?.user?.email ? "bg-emerald-50 dark:bg-emerald-900/20 cursor-not-allowed" : ""}`}
                 />
               </div>
 
