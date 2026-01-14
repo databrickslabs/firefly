@@ -31,30 +31,17 @@ async function isSpnAuthenticated(userId: string): Promise<boolean> {
   return accounts.some(acc => acc.providerId === "databricks-spn-mapping");
 }
 
-// SPN workspace URL from environment variable (shared across all SPN users)
-const SPN_WORKSPACE_URL = process.env.SPN_AUTH_DATABRICKS_WORKSPACE_URL || "";
-
 /**
  * Gets a Databricks workspace token using SPN credentials
- * Uses the SPN_AUTH_DATABRICKS_WORKSPACE_URL environment variable for the workspace
+ * Uses the provided workspace URL from the organization configuration
  */
 async function getSpnWorkspaceToken(
   userEmail: string,
-  activeOrganizationId: string
+  activeOrganizationId: string,
+  workspaceUrl: string
 ): Promise<
   { success: true; data: DatabricksWorkspaceTokenInfo } | { success: false; error: TokenError }
 > {
-  if (!SPN_WORKSPACE_URL) {
-    return {
-      success: false,
-      error: {
-        error: "SPN_AUTH_DATABRICKS_WORKSPACE_URL environment variable is not configured",
-        status: 500,
-        details: "Server configuration error",
-      },
-    };
-  }
-
   // Look up the SPN credentials for this user's email
   const [spnRecord] = await db
     .select()
@@ -76,7 +63,7 @@ async function getSpnWorkspaceToken(
   const { clientId, clientSecret } = spnRecord;
 
   // Normalize the URL - remove trailing slash if present
-  const baseUrl = SPN_WORKSPACE_URL.replace(/\/$/, '');
+  const baseUrl = workspaceUrl.replace(/\/$/, '');
 
   // Workspace-level token endpoint
   const tokenUrl = `${baseUrl}/oidc/v1/token`;
@@ -208,7 +195,8 @@ export async function getDatabricksWorkspaceToken(orgIdOverride?: string): Promi
       console.log("User authenticated with SPN provider, using SPN credentials");
       return getSpnWorkspaceToken(
         session.user.email,
-        targetOrgId
+        targetOrgId,
+        workspaceUrl
       );
     }
 

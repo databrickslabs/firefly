@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { getDatabricksSpnToken } from "@/lib/databricks-spn-authtoken";
-
-// Databricks workspace URL for SPN token generation (from environment variables)
-const DATABRICKS_WORKSPACE_URL = process.env.SPN_AUTH_DATABRICKS_WORKSPACE_URL || "";
+import { getAuthInstance } from "@/lib/auth-dynamic";
+import { headers } from "next/headers";
+import { db } from "@/db";
+import { organization } from "@/db/schema";
+import { eq } from "drizzle-orm";
 
 export interface DatabricksSpnApiOptions {
   endpoint: string;
@@ -51,8 +53,57 @@ export async function callDatabricksSpnApi<T = unknown>(
   const { endpoint, method = "GET", body, queryParams } = options;
 
   try {
-    // Get the Databricks SPN token
-    const tokenResult = await getDatabricksSpnToken(DATABRICKS_WORKSPACE_URL);
+    // Get the current session to find the active organization
+    const auth = await getAuthInstance();
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session?.session?.activeOrganizationId) {
+      return {
+        success: false,
+        error: "No active organization in session",
+        details: "Please select an organization first",
+        status: 401,
+      };
+    }
+
+    const activeOrgId = session.session.activeOrganizationId;
+
+    // Fetch the organization to get the workspace URL
+    const [org] = await db
+      .select()
+      .from(organization)
+      .where(eq(organization.id, activeOrgId))
+      .limit(1);
+
+    if (!org) {
+      return {
+        success: false,
+        error: `Organization not found: ${activeOrgId}`,
+        details: "The organization associated with your session no longer exists.",
+        status: 404,
+      };
+    }
+
+    if (!org.workspaceUrl) {
+      return {
+        success: false,
+        error: "No workspace URL configured for this organization",
+        details: {
+          organizationId: org.id,
+          organizationName: org.name,
+        },
+        status: 400,
+      };
+    }
+
+    const workspaceUrl = org.workspaceUrl.replace(/\/$/, '');
+    const userEmail = session.user.email;
+
+    // Get the Databricks SPN token using the organization's workspace URL
+    // Pass userEmail to avoid duplicate session lookup
+    const tokenResult = await getDatabricksSpnToken(workspaceUrl, undefined, userEmail);
 
     if (!tokenResult.success) {
       return {
@@ -64,7 +115,6 @@ export async function callDatabricksSpnApi<T = unknown>(
     }
 
     const { accessToken } = tokenResult.data;
-    const workspaceUrl = DATABRICKS_WORKSPACE_URL.replace(/\/$/, '');
 
     // Construct the full API URL with query parameters
     let apiUrl = `${workspaceUrl}${endpoint}`;

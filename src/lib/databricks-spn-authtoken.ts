@@ -31,41 +31,50 @@ export interface SpnTokenError {
  *
  * @param databricksUrl - The Databricks URL (workspace URL, e.g., https://dbc-xxx.cloud.databricks.com)
  * @param accountId - The Databricks account ID (required for account-level tokens)
+ * @param userEmailOverride - Optional user email to skip session lookup (for performance when caller already has session)
  * @returns Either token info or error with status code
  */
 export async function getDatabricksSpnToken(
   databricksUrl: string,
-  accountId?: string
+  accountId?: string,
+  userEmailOverride?: string
 ): Promise<
   { success: true; data: DatabricksSpnTokenInfo } | { success: false; error: SpnTokenError }
 > {
   try {
-    // Get the session from Better Auth
-    const auth = await getAuthInstance();
-    const session = await auth.api.getSession({
-      headers: await headers(),
-    });
+    let userEmail: string;
 
-    if (!session) {
-      return {
-        success: false,
-        error: {
-          error: "Unauthorized - No active session",
-          status: 401,
-        },
-      };
-    }
+    if (userEmailOverride) {
+      // Use the provided email, skip session lookup
+      userEmail = userEmailOverride;
+    } else {
+      // Get the session from Better Auth
+      const auth = await getAuthInstance();
+      const session = await auth.api.getSession({
+        headers: await headers(),
+      });
 
-    const userEmail = session.user.email;
+      if (!session) {
+        return {
+          success: false,
+          error: {
+            error: "Unauthorized - No active session",
+            status: 401,
+          },
+        };
+      }
 
-    if (!userEmail) {
-      return {
-        success: false,
-        error: {
-          error: "No email found in session",
-          status: 400,
-        },
-      };
+      if (!session.user.email) {
+        return {
+          success: false,
+          error: {
+            error: "No email found in session",
+            status: 400,
+          },
+        };
+      }
+
+      userEmail = session.user.email;
     }
 
     // Look up the SPN credentials for this user's email

@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { getDatabricksSpnToken } from "@/lib/databricks-spn-authtoken";
+import { getAuthInstance } from "@/lib/auth-dynamic";
+import { headers } from "next/headers";
+import { db } from "@/db";
+import { organization } from "@/db/schema";
+import { eq } from "drizzle-orm";
+import { decodeJwt } from "jose";
 
 export const dynamic = "force-dynamic";
-
-// Databricks workspace URL for SPN token generation (from environment variables)
-const DATABRICKS_WORKSPACE_URL = process.env.SPN_AUTH_DATABRICKS_WORKSPACE_URL || "";
 
 /**
  * Returns the complete user data including email, workspace URL for SPN authentication
@@ -12,7 +15,47 @@ const DATABRICKS_WORKSPACE_URL = process.env.SPN_AUTH_DATABRICKS_WORKSPACE_URL |
  */
 export async function GET() {
   try {
-    const tokenResult = await getDatabricksSpnToken(DATABRICKS_WORKSPACE_URL);
+    // Get the current session to find the active organization
+    const auth = await getAuthInstance();
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session?.session?.activeOrganizationId) {
+      return NextResponse.json(
+        { error: "No active organization in session", details: "Please select an organization first" },
+        { status: 401 }
+      );
+    }
+
+    const activeOrgId = session.session.activeOrganizationId;
+
+    // Fetch the organization to get the workspace URL
+    const [org] = await db
+      .select()
+      .from(organization)
+      .where(eq(organization.id, activeOrgId))
+      .limit(1);
+
+    if (!org) {
+      return NextResponse.json(
+        { error: `Organization not found: ${activeOrgId}`, details: "The organization associated with your session no longer exists." },
+        { status: 404 }
+      );
+    }
+
+    if (!org.workspaceUrl) {
+      return NextResponse.json(
+        { error: "No workspace URL configured for this organization", details: { organizationId: org.id, organizationName: org.name } },
+        { status: 400 }
+      );
+    }
+
+    const workspaceUrl = org.workspaceUrl.replace(/\/$/, '');
+    const userEmail = session.user.email;
+
+    // Pass userEmail to avoid duplicate session lookup
+    const tokenResult = await getDatabricksSpnToken(workspaceUrl, undefined, userEmail);
 
     if (!tokenResult.success) {
       // Check if this is a re-authentication required scenario
@@ -33,14 +76,27 @@ export async function GET() {
       );
     }
 
+    // Decode the JWT token to get the subject (SPN identity)
+    const decodedToken = decodeJwt(tokenResult.data.accessToken);
+    const tokenSubject = decodedToken.sub as string;
+
+    if (!tokenSubject) {
+      return NextResponse.json(
+        { error: "Invalid token: missing subject claim", details: "The SPN token does not contain a valid subject" },
+        { status: 500 }
+      );
+    }
+
     // Return data in the same format as the regular user-data endpoint
+    // Use the token subject (SPN identity) for workspace paths
     return NextResponse.json({
       data: {
-        userEmail: tokenResult.data.userEmail,
-        workspaceUrl: DATABRICKS_WORKSPACE_URL,
-        // Use the SPN client ID as a pseudo organization ID
-        activeOrganizationId: tokenResult.data.clientId,
-        monacoRootPath: `/Users/${tokenResult.data.userEmail}`,
+        userEmail: tokenSubject,
+        workspaceUrl: workspaceUrl,
+        // Use the organization ID from the session
+        activeOrganizationId: activeOrgId,
+        // Use the token subject for workspace paths (SPN's workspace folder)
+        monacoRootPath: `/Users/${tokenSubject}`,
       }
     });
   } catch (error) {

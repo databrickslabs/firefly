@@ -3,7 +3,7 @@
 import { ReactNode, useEffect } from "react";
 import { useSession } from "@/lib/auth-client";
 import { useRouter, useParams } from "next/navigation";
-import { TopNav } from "@/components/top-nav";
+import { SsoSpnTopNav } from "@/components/sso-spn-top-nav";
 import { AppSidebar } from "@/components/app-sidebar";
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
 import { SsoSpnUserStoreInitializer } from "@/components/sso-spn-user-store-initializer";
@@ -57,9 +57,9 @@ export default function OrgLayout({
             <div className="flex h-14 shrink-0 items-center gap-2 border-b bg-background px-4">
               <SidebarTrigger className="-ml-1" />
               <Separator orientation="vertical" className="mr-2 h-4" />
-              <TopNav
+              <SsoSpnTopNav
                 user={session.user}
-                title="SPN Analytics"
+                title="FireFly Analytics"
                 basePath={basePath}
               />
             </div>
