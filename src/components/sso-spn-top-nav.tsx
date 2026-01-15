@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Search, ChevronDown, User } from "lucide-react";
+import { Search, ChevronDown, User, Settings } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import { OrgSwitcher } from "@/components/org-switcher";
@@ -30,6 +30,25 @@ interface SsoSpnTopNavProps {
 export function SsoSpnTopNav({ user, title, basePath }: SsoSpnTopNavProps) {
   const router = useRouter();
   const [accountModalOpen, setAccountModalOpen] = useState(false);
+  const [memberRole, setMemberRole] = useState<string | null>(null);
+
+  // Fetch current user's membership role using better-auth
+  useEffect(() => {
+    const fetchMemberRole = async () => {
+      try {
+        const result = await authClient.organization.getActiveMember();
+        if (result.data?.role) {
+          setMemberRole(result.data.role);
+        }
+      } catch {
+        // Silently fail - user just won't see org settings
+      }
+    };
+    fetchMemberRole();
+  }, []);
+
+  // Check if user is owner or admin
+  const isOwnerOrAdmin = memberRole === "owner" || memberRole === "admin";
 
   const handleSignOut = async () => {
     await authClient.signOut();
@@ -93,6 +112,17 @@ export function SsoSpnTopNav({ user, title, basePath }: SsoSpnTopNavProps) {
             </DropdownMenuItem>
             <DropdownMenuItem disabled>Profile Settings</DropdownMenuItem>
             <DropdownMenuItem disabled>Preferences</DropdownMenuItem>
+            {isOwnerOrAdmin && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem asChild>
+                  <Link href={`${basePath}/settings`} className="flex items-center gap-2">
+                    <Settings className="h-4 w-4" />
+                    Organization Settings
+                  </Link>
+                </DropdownMenuItem>
+              </>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onClick={handleSignOut}
