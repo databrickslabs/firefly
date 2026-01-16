@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   FileCode,
   LayoutDashboard,
+  GitBranch,
 } from "lucide-react";
 import {
   Sidebar,
@@ -54,6 +55,11 @@ const navigationItems = [
     name: "Embedded Dashboard",
     href: "/embedded-dashboard",
     icon: LayoutDashboard,
+  },
+  {
+    name: "Pipeline Studio",
+    href: "/pipeline-studio",
+    icon: GitBranch,
   },
   {
     name: "Jobs (Coming Soon)",
