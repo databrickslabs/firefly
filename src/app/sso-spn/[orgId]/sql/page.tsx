@@ -751,6 +751,7 @@ export default function SQLPage() {
               catalogContent={
                 <CatalogTreeView
                   showColumns={true}
+                  viewMode="editor"
                   onItemSelect={handleCatalogItemSelect}
                 />
               }

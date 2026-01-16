@@ -33,6 +33,7 @@ export default function CatalogPage() {
           <div className="flex-1 overflow-hidden">
             <CatalogTreeView
               showColumns={false}
+              viewMode="display"
               onItemSelect={setSelectedItem}
             />
           </div>

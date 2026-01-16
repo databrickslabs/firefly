@@ -18,10 +18,31 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
+// View mode determines the display context
+export type CatalogViewMode = "editor" | "display";
+
 // Helper to truncate text to max characters
 function truncateText(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text;
   return text.slice(0, maxChars) + "...";
+}
+
+// Truncation limits by view mode
+const TRUNCATE_LIMIT_EDITOR = 15;
+const TRUNCATE_LIMIT_DISPLAY = 30;
+const TRUNCATE_LIMIT_TABLE_EDITOR = 15;
+const TRUNCATE_LIMIT_TABLE_DISPLAY = 20;
+
+// Helper to conditionally truncate text based on view mode
+function displayText(text: string, viewMode: CatalogViewMode): string {
+  const maxChars = viewMode === "editor" ? TRUNCATE_LIMIT_EDITOR : TRUNCATE_LIMIT_DISPLAY;
+  return truncateText(text, maxChars);
+}
+
+// Helper for table names with different truncation limits
+function displayTableText(text: string, viewMode: CatalogViewMode): string {
+  const maxChars = viewMode === "editor" ? TRUNCATE_LIMIT_TABLE_EDITOR : TRUNCATE_LIMIT_TABLE_DISPLAY;
+  return truncateText(text, maxChars);
 }
 
 // Types
@@ -59,12 +80,15 @@ interface CatalogTreeViewProps {
   showColumns?: boolean;
   onItemSelect?: (item: SelectedItem) => void;
   className?: string;
+  /** View mode: "editor" truncates text, "display" shows full text */
+  viewMode?: CatalogViewMode;
 }
 
 export function CatalogTreeView({
   showColumns = false,
   onItemSelect,
   className,
+  viewMode = "display",
 }: CatalogTreeViewProps) {
   const [selectedItemKey, setSelectedItemKey] = React.useState<string | null>(null);
 
@@ -121,6 +145,7 @@ export function CatalogTreeView({
               key={catalog.name}
               catalog={catalog}
               showColumns={showColumns}
+              viewMode={viewMode}
               onCatalogClick={handleCatalogClick}
               onSchemaClick={handleSchemaClick}
               onTableClick={handleTableClick}
@@ -136,6 +161,7 @@ export function CatalogTreeView({
 interface CatalogNodeProps {
   catalog: Catalog;
   showColumns: boolean;
+  viewMode: CatalogViewMode;
   onCatalogClick: (catalog: string) => void;
   onSchemaClick: (catalog: string, schema: string) => void;
   onTableClick: (catalog: string, schema: string, table: string) => void;
@@ -145,6 +171,7 @@ interface CatalogNodeProps {
 function CatalogNode({
   catalog,
   showColumns,
+  viewMode,
   onCatalogClick,
   onSchemaClick,
   onTableClick,
@@ -184,7 +211,7 @@ function CatalogNode({
                 )}
               />
               <Database className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-              <span className="font-medium truncate">{truncateText(catalog.name, 10)}</span>
+              <span className="font-medium truncate">{displayText(catalog.name, viewMode)}</span>
             </button>
           </CollapsibleTrigger>
         </TooltipTrigger>
@@ -197,6 +224,7 @@ function CatalogNode({
           <SchemaList
             catalogName={catalog.name}
             showColumns={showColumns}
+            viewMode={viewMode}
             onSchemaClick={onSchemaClick}
             onTableClick={onTableClick}
             selectedItemKey={selectedItemKey}
@@ -210,6 +238,7 @@ function CatalogNode({
 interface SchemaListProps {
   catalogName: string;
   showColumns: boolean;
+  viewMode: CatalogViewMode;
   onSchemaClick: (catalog: string, schema: string) => void;
   onTableClick: (catalog: string, schema: string, table: string) => void;
   selectedItemKey: string | null;
@@ -218,6 +247,7 @@ interface SchemaListProps {
 function SchemaList({
   catalogName,
   showColumns,
+  viewMode,
   onSchemaClick,
   onTableClick,
   selectedItemKey,
@@ -254,6 +284,7 @@ function SchemaList({
           key={`${schema.catalog_name}.${schema.name}`}
           schema={schema}
           showColumns={showColumns}
+          viewMode={viewMode}
           onSchemaClick={onSchemaClick}
           onTableClick={onTableClick}
           selectedItemKey={selectedItemKey}
@@ -266,6 +297,7 @@ function SchemaList({
 interface SchemaNodeProps {
   schema: Schema;
   showColumns: boolean;
+  viewMode: CatalogViewMode;
   onSchemaClick: (catalog: string, schema: string) => void;
   onTableClick: (catalog: string, schema: string, table: string) => void;
   selectedItemKey: string | null;
@@ -274,6 +306,7 @@ interface SchemaNodeProps {
 function SchemaNode({
   schema,
   showColumns,
+  viewMode,
   onSchemaClick,
   onTableClick,
   selectedItemKey,
@@ -312,7 +345,7 @@ function SchemaNode({
                 )}
               />
               <Folder className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
-              <span className="truncate">{truncateText(schema.name, 10)}</span>
+              <span className="truncate">{displayText(schema.name, viewMode)}</span>
             </button>
           </CollapsibleTrigger>
         </TooltipTrigger>
@@ -326,6 +359,7 @@ function SchemaNode({
             catalogName={schema.catalog_name}
             schemaName={schema.name}
             showColumns={showColumns}
+            viewMode={viewMode}
             onTableClick={onTableClick}
             selectedItemKey={selectedItemKey}
           />
@@ -339,6 +373,7 @@ interface TableListProps {
   catalogName: string;
   schemaName: string;
   showColumns: boolean;
+  viewMode: CatalogViewMode;
   onTableClick: (catalog: string, schema: string, table: string) => void;
   selectedItemKey: string | null;
 }
@@ -347,6 +382,7 @@ function TableList({
   catalogName,
   schemaName,
   showColumns,
+  viewMode,
   onTableClick,
   selectedItemKey,
 }: TableListProps) {
@@ -384,6 +420,7 @@ function TableList({
           key={`${table.catalog_name}.${table.schema_name}.${table.name}`}
           table={table}
           showColumns={showColumns}
+          viewMode={viewMode}
           onTableClick={onTableClick}
           selectedItemKey={selectedItemKey}
         />
@@ -395,6 +432,7 @@ function TableList({
 interface TableNodeProps {
   table: Table;
   showColumns: boolean;
+  viewMode: CatalogViewMode;
   onTableClick: (catalog: string, schema: string, table: string) => void;
   selectedItemKey: string | null;
 }
@@ -402,6 +440,7 @@ interface TableNodeProps {
 function TableNode({
   table,
   showColumns,
+  viewMode,
   onTableClick,
   selectedItemKey,
 }: TableNodeProps) {
@@ -422,12 +461,7 @@ function TableNode({
             )}
           >
             <TableIcon className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
-            <span className="truncate">{truncateText(table.name, 10)}</span>
-            {table.table_type && (
-              <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-                {table.table_type}
-              </span>
-            )}
+            <span className="truncate">{displayTableText(table.name, viewMode)}</span>
           </button>
         </TooltipTrigger>
         <TooltipContent side="right">
@@ -468,12 +502,7 @@ function TableNode({
                 )}
               />
               <TableIcon className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
-              <span className="truncate">{truncateText(table.name, 10)}</span>
-              {table.table_type && (
-                <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-                  {table.table_type}
-                </span>
-              )}
+              <span className="truncate">{displayTableText(table.name, viewMode)}</span>
             </button>
           </CollapsibleTrigger>
         </TooltipTrigger>

@@ -621,7 +621,7 @@ export default function NotebookPage() {
                   selectedFilePath={currentFilePath}
                 />
               }
-              catalogContent={<CatalogTreeView showColumns={true} />}
+              catalogContent={<CatalogTreeView showColumns={true} viewMode="editor" />}
               sharedContent={<SharedNotebooksTree onNotebookClick={handleFileSelect} selectedFilePath={currentFilePath} />}
             />
           </Panel>
