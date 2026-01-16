@@ -10,7 +10,19 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+
+// Helper to truncate text to max characters
+function truncateText(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return text.slice(0, maxChars) + "...";
+}
 
 // Types
 export interface Catalog {
@@ -101,21 +113,23 @@ export function CatalogTreeView({
   }
 
   return (
-    <ScrollArea className={cn("h-full", className)}>
-      <div className="p-4 space-y-1">
-        {catalogsData?.map((catalog: Catalog) => (
-          <CatalogNode
-            key={catalog.name}
-            catalog={catalog}
-            showColumns={showColumns}
-            onCatalogClick={handleCatalogClick}
-            onSchemaClick={handleSchemaClick}
-            onTableClick={handleTableClick}
-            selectedItemKey={selectedItemKey}
-          />
-        ))}
-      </div>
-    </ScrollArea>
+    <TooltipProvider delayDuration={300}>
+      <ScrollArea className={cn("h-full", className)}>
+        <div className="p-4 space-y-1 overflow-hidden">
+          {catalogsData?.map((catalog: Catalog) => (
+            <CatalogNode
+              key={catalog.name}
+              catalog={catalog}
+              showColumns={showColumns}
+              onCatalogClick={handleCatalogClick}
+              onSchemaClick={handleSchemaClick}
+              onTableClick={handleTableClick}
+              selectedItemKey={selectedItemKey}
+            />
+          ))}
+        </div>
+      </ScrollArea>
+    </TooltipProvider>
   );
 }
 
@@ -146,31 +160,38 @@ function CatalogNode({
       onOpenChange={setIsOpen}
       className="group/collapsible"
     >
-      <CollapsibleTrigger asChild>
-        <button
-          onClick={(e) => {
-            // If clicking the catalog name (not the chevron), select it
-            if (!(e.target as HTMLElement).closest('[data-chevron]')) {
-              onCatalogClick(catalog.name);
-            }
-          }}
-          className={cn(
-            "flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded-md hover:bg-accent transition-colors",
-            "group-data-[state=open]/collapsible:bg-accent/50",
-            isSelected && "bg-accent"
-          )}
-        >
-          <ChevronRight
-            data-chevron
-            className={cn(
-              "h-4 w-4 transition-transform",
-              isOpen && "rotate-90"
-            )}
-          />
-          <Database className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-          <span className="font-medium">{catalog.name}</span>
-        </button>
-      </CollapsibleTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <CollapsibleTrigger asChild>
+            <button
+              onClick={(e) => {
+                // If clicking the catalog name (not the chevron), select it
+                if (!(e.target as HTMLElement).closest('[data-chevron]')) {
+                  onCatalogClick(catalog.name);
+                }
+              }}
+              className={cn(
+                "flex items-center gap-2 w-full min-w-0 px-2 py-1.5 text-sm rounded-md hover:bg-accent transition-colors",
+                "group-data-[state=open]/collapsible:bg-accent/50",
+                isSelected && "bg-accent"
+              )}
+            >
+              <ChevronRight
+                data-chevron
+                className={cn(
+                  "h-4 w-4 shrink-0 transition-transform",
+                  isOpen && "rotate-90"
+                )}
+              />
+              <Database className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+              <span className="font-medium truncate">{truncateText(catalog.name, 10)}</span>
+            </button>
+          </CollapsibleTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="right">
+          <p className="font-mono text-xs">{catalog.name}</p>
+        </TooltipContent>
+      </Tooltip>
       <CollapsibleContent className="pl-6">
         {isOpen && (
           <SchemaList
@@ -267,31 +288,38 @@ function SchemaNode({
       onOpenChange={setIsOpen}
       className="group/collapsible"
     >
-      <CollapsibleTrigger asChild>
-        <button
-          onClick={(e) => {
-            // If clicking the schema name (not the chevron), select it
-            if (!(e.target as HTMLElement).closest('[data-chevron]')) {
-              onSchemaClick(schema.catalog_name, schema.name);
-            }
-          }}
-          className={cn(
-            "flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded-md hover:bg-accent transition-colors",
-            "group-data-[state=open]/collapsible:bg-accent/50",
-            isSelected && "bg-accent"
-          )}
-        >
-          <ChevronRight
-            data-chevron
-            className={cn(
-              "h-4 w-4 transition-transform",
-              isOpen && "rotate-90"
-            )}
-          />
-          <Folder className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-          <span>{schema.name}</span>
-        </button>
-      </CollapsibleTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <CollapsibleTrigger asChild>
+            <button
+              onClick={(e) => {
+                // If clicking the schema name (not the chevron), select it
+                if (!(e.target as HTMLElement).closest('[data-chevron]')) {
+                  onSchemaClick(schema.catalog_name, schema.name);
+                }
+              }}
+              className={cn(
+                "flex items-center gap-2 w-full min-w-0 px-2 py-1.5 text-sm rounded-md hover:bg-accent transition-colors",
+                "group-data-[state=open]/collapsible:bg-accent/50",
+                isSelected && "bg-accent"
+              )}
+            >
+              <ChevronRight
+                data-chevron
+                className={cn(
+                  "h-4 w-4 shrink-0 transition-transform",
+                  isOpen && "rotate-90"
+                )}
+              />
+              <Folder className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <span className="truncate">{truncateText(schema.name, 10)}</span>
+            </button>
+          </CollapsibleTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="right">
+          <p className="font-mono text-xs">{schema.catalog_name}.{schema.name}</p>
+        </TooltipContent>
+      </Tooltip>
       <CollapsibleContent className="pl-6">
         {isOpen && (
           <TableList
@@ -384,21 +412,28 @@ function TableNode({
   if (!showColumns) {
     // Simple table item without columns
     return (
-      <button
-        onClick={() => onTableClick(table.catalog_name, table.schema_name, table.name)}
-        className={cn(
-          "flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded-md hover:bg-accent transition-colors",
-          isSelected && "bg-accent"
-        )}
-      >
-        <TableIcon className="h-4 w-4 text-green-600 dark:text-green-400" />
-        <span>{table.name}</span>
-        {table.table_type && (
-          <span className="ml-auto text-xs text-muted-foreground">
-            {table.table_type}
-          </span>
-        )}
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={() => onTableClick(table.catalog_name, table.schema_name, table.name)}
+            className={cn(
+              "flex items-center gap-2 w-full min-w-0 px-2 py-1.5 text-sm rounded-md hover:bg-accent transition-colors",
+              isSelected && "bg-accent"
+            )}
+          >
+            <TableIcon className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
+            <span className="truncate">{truncateText(table.name, 10)}</span>
+            {table.table_type && (
+              <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                {table.table_type}
+              </span>
+            )}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="right">
+          <p className="font-mono text-xs">{table.catalog_name}.{table.schema_name}.{table.name}</p>
+        </TooltipContent>
+      </Tooltip>
     );
   }
 
@@ -409,36 +444,43 @@ function TableNode({
       onOpenChange={setIsOpen}
       className="group/collapsible"
     >
-      <CollapsibleTrigger asChild>
-        <button
-          onClick={(e) => {
-            // If clicking the table name (not the chevron), select it
-            if (!(e.target as HTMLElement).closest('[data-chevron]')) {
-              onTableClick(table.catalog_name, table.schema_name, table.name);
-            }
-          }}
-          className={cn(
-            "flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded-md hover:bg-accent transition-colors",
-            "group-data-[state=open]/collapsible:bg-accent/50",
-            isSelected && "bg-accent"
-          )}
-        >
-          <ChevronRight
-            data-chevron
-            className={cn(
-              "h-4 w-4 transition-transform",
-              isOpen && "rotate-90"
-            )}
-          />
-          <TableIcon className="h-4 w-4 text-green-600 dark:text-green-400" />
-          <span>{table.name}</span>
-          {table.table_type && (
-            <span className="ml-auto text-xs text-muted-foreground">
-              {table.table_type}
-            </span>
-          )}
-        </button>
-      </CollapsibleTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <CollapsibleTrigger asChild>
+            <button
+              onClick={(e) => {
+                // If clicking the table name (not the chevron), select it
+                if (!(e.target as HTMLElement).closest('[data-chevron]')) {
+                  onTableClick(table.catalog_name, table.schema_name, table.name);
+                }
+              }}
+              className={cn(
+                "flex items-center gap-2 w-full min-w-0 px-2 py-1.5 text-sm rounded-md hover:bg-accent transition-colors",
+                "group-data-[state=open]/collapsible:bg-accent/50",
+                isSelected && "bg-accent"
+              )}
+            >
+              <ChevronRight
+                data-chevron
+                className={cn(
+                  "h-4 w-4 shrink-0 transition-transform",
+                  isOpen && "rotate-90"
+                )}
+              />
+              <TableIcon className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
+              <span className="truncate">{truncateText(table.name, 10)}</span>
+              {table.table_type && (
+                <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                  {table.table_type}
+                </span>
+              )}
+            </button>
+          </CollapsibleTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="right">
+          <p className="font-mono text-xs">{table.catalog_name}.{table.schema_name}.{table.name}</p>
+        </TooltipContent>
+      </Tooltip>
       <CollapsibleContent className="pl-6">
         {isOpen && (
           <ColumnList fullName={itemKey.replace("table:", "")} />
@@ -484,12 +526,12 @@ function ColumnList({ fullName }: ColumnListProps) {
       {columns.map((column: Column) => (
         <div
           key={column.name}
-          className="flex items-center gap-2 px-2 py-1 text-xs text-muted-foreground"
+          className="flex items-center gap-2 px-2 py-1 text-xs text-muted-foreground min-w-0"
         >
-          <Columns className="h-3 w-3 text-gray-500 dark:text-gray-400" />
-          <span className="font-medium">{column.name}</span>
-          <span className="text-gray-400 dark:text-gray-500">:</span>
-          <span className="font-mono text-[10px]">{column.type_text}</span>
+          <Columns className="h-3 w-3 shrink-0 text-gray-500 dark:text-gray-400" />
+          <span className="font-medium truncate">{column.name}</span>
+          <span className="shrink-0 text-gray-400 dark:text-gray-500">:</span>
+          <span className="font-mono text-[10px] truncate">{column.type_text}</span>
         </div>
       ))}
     </div>

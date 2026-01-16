@@ -177,33 +177,33 @@ export const CollapsibleSidebar = React.memo(function CollapsibleSidebar({
 
       {/* Content Panel */}
       {isExpanded && activeView && (
-        <div className="flex-1 border-r border-slate-200 overflow-hidden bg-white">
+        <div className="flex-1 min-w-0 border-r border-slate-200 overflow-hidden bg-white">
           {activeView === "files" && (
-            <div className="h-full flex flex-col">
-              <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/80">
+            <div className="h-full flex flex-col overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/80 shrink-0">
                 <h2 className="text-sm font-semibold">Workspace</h2>
               </div>
-              <div className="flex-1 min-h-0">
+              <div className="flex-1 min-h-0 overflow-hidden">
                 {filesContent}
               </div>
             </div>
           )}
           {activeView === "catalog" && (
-            <div className="h-full flex flex-col">
-              <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/80">
+            <div className="h-full flex flex-col overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/80 shrink-0">
                 <h2 className="text-sm font-semibold">Catalog</h2>
               </div>
-              <div className="flex-1 min-h-0">
+              <div className="flex-1 min-h-0 overflow-hidden">
                 {catalogContent}
               </div>
             </div>
           )}
           {activeView === "shared" && sharedContent && (
-            <div className="h-full flex flex-col">
-              <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/80">
+            <div className="h-full flex flex-col overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/80 shrink-0">
                 <h2 className="text-sm font-semibold">Shared with Me</h2>
               </div>
-              <div className="flex-1 min-h-0">
+              <div className="flex-1 min-h-0 overflow-hidden">
                 {sharedContent}
               </div>
             </div>
