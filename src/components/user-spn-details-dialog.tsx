@@ -37,6 +37,8 @@ interface UserSpnDetailsDialogProps {
   onOpenChange: (open: boolean) => void;
   userId: string | null;
   userName: string | null;
+  apiEndpoint?: string;
+  accentColor?: "emerald" | "purple";
 }
 
 function InfoRow({ label, value, icon: Icon }: { label: string; value: string; icon?: React.ElementType }) {
@@ -79,11 +81,18 @@ export function UserSpnDetailsDialog({
   onOpenChange,
   userId,
   userName,
+  apiEndpoint = "/api/sso-spn/user-spn-details",
+  accentColor = "emerald",
 }: UserSpnDetailsDialogProps) {
+  const colorClasses = {
+    icon: accentColor === "emerald" ? "text-emerald-600" : "text-purple-600",
+    spinner: accentColor === "emerald" ? "text-emerald-600" : "text-purple-600",
+  };
+
   const { data, isLoading, error } = useQuery<{ data: UserSpnDetailsResponse }>({
     queryKey: ["user-spn-details", userId],
     queryFn: async () => {
-      const response = await fetch(`/api/sso-spn/user-spn-details?userId=${userId}`);
+      const response = await fetch(`${apiEndpoint}?userId=${userId}`);
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || "Failed to fetch user details");
@@ -102,7 +111,7 @@ export function UserSpnDetailsDialog({
       <DialogContent className="max-w-lg max-h-[90vh]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <User className="h-5 w-5 text-emerald-600" />
+            <User className={`h-5 w-5 ${colorClasses.icon}`} />
             {userName || "User Details"}
           </DialogTitle>
           <DialogDescription>
@@ -113,7 +122,7 @@ export function UserSpnDetailsDialog({
         {isLoading && (
           <div className="flex items-center justify-center py-12">
             <div className="text-center space-y-4">
-              <Spinner className="w-8 h-8 text-emerald-600 mx-auto" />
+              <Spinner className={`w-8 h-8 ${colorClasses.spinner} mx-auto`} />
               <p className="text-sm text-muted-foreground">Loading user details...</p>
             </div>
           </div>

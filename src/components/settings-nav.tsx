@@ -3,13 +3,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { Building2, Cpu, Database } from "lucide-react";
+import { Building2, Cpu, Database, Cloud } from "lucide-react";
 
 interface SettingsNavProps {
   basePath: string;
 }
 
-const navItems = [
+const settingsItems = [
   {
     title: "Overview",
     href: "",
@@ -30,11 +30,52 @@ const navItems = [
   },
 ];
 
+const databricksItems = [
+  {
+    title: "Bring My Own Data",
+    href: "/bring-your-own-data",
+    icon: Cloud,
+    description: "SPNs, workspaces, and sharing",
+  },
+];
+
 export function SettingsNav({ basePath }: SettingsNavProps) {
   const pathname = usePathname();
 
+  const renderNavItem = (item: typeof settingsItems[0], basePath: string) => {
+    const href = `${basePath}${item.href}`;
+    const isActive = item.href === ""
+      ? pathname === basePath || pathname === `${basePath}/`
+      : pathname === href || pathname?.startsWith(`${href}/`);
+
+    return (
+      <Link
+        key={item.title}
+        href={href}
+        className={cn(
+          "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+          isActive
+            ? "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-100"
+            : "text-muted-foreground hover:bg-muted hover:text-foreground"
+        )}
+      >
+        <item.icon className={cn(
+          "h-4 w-4",
+          isActive ? "text-emerald-600 dark:text-emerald-400" : ""
+        )} />
+        <div className="flex flex-col">
+          <span className="font-medium">{item.title}</span>
+          <span className="text-xs text-muted-foreground">
+            {item.description}
+          </span>
+        </div>
+      </Link>
+    );
+  };
+
   return (
     <nav className="flex flex-col gap-1 w-64 shrink-0">
+      {/* Settings Section */}
       <div className="px-3 py-2">
         <h2 className="text-lg font-semibold">Settings</h2>
         <p className="text-sm text-muted-foreground">
@@ -42,36 +83,12 @@ export function SettingsNav({ basePath }: SettingsNavProps) {
         </p>
       </div>
       <div className="flex flex-col gap-1 px-2">
-        {navItems.map((item) => {
-          const href = `${basePath}${item.href}`;
-          const isActive = item.href === ""
-            ? pathname === basePath || pathname === `${basePath}/`
-            : pathname === href || pathname?.startsWith(`${href}/`);
+        {settingsItems.map((item) => renderNavItem(item, basePath))}
+      </div>
 
-          return (
-            <Link
-              key={item.title}
-              href={href}
-              className={cn(
-                "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
-                isActive
-                  ? "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-100"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
-              )}
-            >
-              <item.icon className={cn(
-                "h-4 w-4",
-                isActive ? "text-emerald-600 dark:text-emerald-400" : ""
-              )} />
-              <div className="flex flex-col">
-                <span className="font-medium">{item.title}</span>
-                <span className="text-xs text-muted-foreground">
-                  {item.description}
-                </span>
-              </div>
-            </Link>
-          );
-        })}
+      {/* Databricks Section */}
+      <div className="flex flex-col gap-1 px-2">
+        {databricksItems.map((item) => renderNavItem(item, basePath))}
       </div>
     </nav>
   );

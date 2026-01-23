@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, index, bigint } from 'drizzle-orm/pg-core';
 
 // User SPNs table - maps users (by email) to service principal credentials
 export const userSpns = pgTable('userSpns', {
@@ -6,6 +6,8 @@ export const userSpns = pgTable('userSpns', {
   email: text('email').notNull().unique(), // User email
   clientId: text('clientId').notNull(), // SPN client ID
   clientSecret: text('clientSecret').notNull(), // SPN client secret
+  principalId: bigint('principalId', { mode: 'number' }).notNull(), // Workspace principal ID
+  workspaceUrl: text('workspaceUrl').notNull(), // Workspace URL
   createdAt: timestamp('createdAt').notNull().defaultNow(),
   updatedAt: timestamp('updatedAt').notNull().defaultNow().$onUpdate(() => new Date()),
 }, (table) => ({

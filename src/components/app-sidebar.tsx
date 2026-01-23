@@ -12,6 +12,7 @@ import {
   FileCode,
   LayoutDashboard,
   GitBranch,
+  Upload,
 } from "lucide-react";
 import {
   Sidebar,
@@ -60,6 +61,11 @@ const navigationItems = [
     name: "Pipeline Studio",
     href: "/pipeline-studio",
     icon: GitBranch,
+  },
+  {
+    name: "Import Data",
+    href: "/import-data",
+    icon: Upload,
   },
   {
     name: "Jobs (Coming Soon)",

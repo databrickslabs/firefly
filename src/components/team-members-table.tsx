@@ -35,6 +35,7 @@ interface TeamMembersTableProps {
   onRoleChange: (userId: string, newRole: string) => void;
   isUpdatingRole: boolean;
   updatingUserId: string | undefined;
+  accentColor?: "emerald" | "purple";
 }
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50];
@@ -57,7 +58,13 @@ export function TeamMembersTable({
   onRoleChange,
   isUpdatingRole,
   updatingUserId,
+  accentColor = "emerald",
 }: TeamMembersTableProps) {
+  const colorClasses = {
+    currentUserBg: accentColor === "emerald" ? "bg-emerald-50 dark:bg-emerald-950/20" : "bg-purple-50 dark:bg-purple-950/20",
+    currentUserAvatar: accentColor === "emerald" ? "bg-emerald-600" : "bg-purple-600",
+    spinner: accentColor === "emerald" ? "text-emerald-600" : "text-purple-600",
+  };
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
@@ -98,14 +105,14 @@ export function TeamMembersTable({
             currentMembers.map((member) => (
               <TableRow
                 key={member.id}
-                className={`cursor-pointer ${member.isCurrentUser ? "bg-emerald-50 dark:bg-emerald-950/20" : ""}`}
+                className={`cursor-pointer ${member.isCurrentUser ? colorClasses.currentUserBg : ""}`}
                 onClick={() => onUserClick(member.id, member.name)}
               >
                 <TableCell>
                   <div className="flex items-center gap-3">
                     <div
                       className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-semibold text-sm ${
-                        member.isCurrentUser ? "bg-emerald-600" : "bg-slate-600"
+                        member.isCurrentUser ? colorClasses.currentUserAvatar : "bg-slate-600"
                       }`}
                     >
                       {member.name?.charAt(0) || member.email?.charAt(0) || "?"}
@@ -147,7 +154,7 @@ export function TeamMembersTable({
                       </span>
                     )}
                     {isUpdatingRole && updatingUserId === member.id && (
-                      <Spinner className="w-4 h-4 text-emerald-600" />
+                      <Spinner className={`w-4 h-4 ${colorClasses.spinner}`} />
                     )}
                   </div>
                 </TableCell>

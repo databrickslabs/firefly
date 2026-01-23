@@ -62,8 +62,8 @@ export default function SettingsLayout({
 
   return (
     <div className="flex min-h-full">
-      {/* Left Navigation */}
-      <div className="border-r bg-muted/30 py-6">
+      {/* Left Navigation - sticky, accounting for h-14 (3.5rem) top nav */}
+      <div className="border-r bg-muted/30 py-6 sticky top-0 h-[calc(100vh-3.5rem)] overflow-y-auto">
         <SettingsNav basePath={basePath} />
       </div>
 
