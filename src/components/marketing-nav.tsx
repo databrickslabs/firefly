@@ -96,6 +96,13 @@ const architecture: {
     comingSoon: true,
   },
   {
+    title: "Request Flow",
+    href: "/docs/architecture/request-flow",
+    description:
+      "Understand how data flows from the frontend through APIs to Databricks and back.",
+    comingSoon: false,
+  },
+  {
     title: "Security",
     href: "#",
     description:

@@ -1,0 +1,43 @@
+flowchart TB
+    subgraph Request["Incoming Request"]
+        REQ[API Request]
+    end
+
+    subgraph Auth["Authentication Layer"]
+        SessionCheck[User Session Validation<br/>via Okta SSO]
+        SPNTokenMgr[SPN Token Manager<br/>AES-256-GCM Encryption]
+    end
+
+    subgraph Database["PostgreSQL Database"]
+        subgraph SessionTables["User Session Management"]
+            SESSION[(SESSION<br/>token, userId, orgId, expiresAt)]
+            USER[(USER<br/>id, email, name)]
+        end
+
+        subgraph OrgTables["Organization & SPN"]
+            ORGANIZATION[(ORGANIZATION<br/>id, name, slug<br/>spn_client_id<br/>spn_secret_encrypted<br/>spn_token_cached)]
+            ORG_MEMBER[(ORGANIZATION_MEMBER<br/>userId, role)]
+        end
+
+        subgraph AppTables["Application Data"]
+            QUERY_HISTORY[(QUERY_HISTORY<br/>sql, duration, results)]
+            FILE_UPLOADS[(FILE_UPLOADS<br/>path, size, userId)]
+            USER_PREFS[(USER_PREFERENCES<br/>settings, theme)]
+        end
+    end
+
+    REQ --> SessionCheck
+    SessionCheck -->|1. Lookup Session| SESSION
+    SESSION -->|2. Join| USER
+    SessionCheck -->|3. Get Org Context| ORG_MEMBER
+    ORG_MEMBER -->|4. Get SPN Config| ORGANIZATION
+    ORGANIZATION --> SPNTokenMgr
+    SPNTokenMgr -->|5. Decrypt/Refresh Token| ORGANIZATION
+
+    Note1[User auth via Okta SSO]
+    Note2[Databricks auth via Organization SPN]
+
+    style SESSION fill:#e1f5fe
+    style USER fill:#e1f5fe
+    style ORGANIZATION fill:#fff3e0
+    style ORG_MEMBER fill:#f3e5f5

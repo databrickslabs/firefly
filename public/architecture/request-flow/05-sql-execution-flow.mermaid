@@ -1,0 +1,79 @@
+sequenceDiagram
+    autonumber
+    participant Browser as Browser
+    participant NextAPI as Next.js API<br/>/api/sql/*
+    participant Auth as Better-Auth
+    participant DB as PostgreSQL
+    participant Okta as Okta IDP
+    participant SPN as SPN Token Service
+    participant Statement as Databricks<br/>Statement Execution API
+
+    Note over Browser,Statement: Execute SQL Query (Full Auth Flow)
+    Browser->>NextAPI: POST /api/sql/execute
+    Note right of Browser: { sql: "SELECT * FROM...",<br/>warehouse_id: "abc123" }
+
+    Note over NextAPI,Okta: Step 1: Validate User Session
+    NextAPI->>Auth: Validate Session
+    Auth->>DB: Get Session + User + Org
+    DB-->>Auth: Session Context { userId, orgId }
+    opt Validate Okta Token
+        Auth->>Okta: Verify user token
+        Okta-->>Auth: Token valid
+    end
+    Auth-->>NextAPI: User Context + Org ID
+
+    Note over NextAPI,Statement: Step 2: Get SPN Token
+    NextAPI->>DB: Get Organization SPN Config
+    DB-->>NextAPI: SPN clientId + encrypted secret
+    NextAPI->>SPN: Get SPN access token
+
+    alt SPN Token Missing or Expired
+        SPN->>SPN: Decrypt client secret
+        SPN->>Statement: POST /oidc/v1/token<br/>grant_type=client_credentials
+        Statement-->>SPN: Access Token (1hr TTL)
+        SPN->>DB: Cache encrypted SPN token
+    end
+
+    SPN-->>NextAPI: SPN Bearer Token
+
+    Note over NextAPI,Statement: Step 3: Submit Statement
+    NextAPI->>Statement: POST /api/2.0/sql/statements<br/>Authorization: Bearer {spn_token}
+    Note right of NextAPI: wait_timeout: 50s<br/>on_wait_timeout: CONTINUE
+    Statement-->>NextAPI: { statement_id: "xyz", status: "PENDING" }
+
+    alt Query Completes Quickly
+        Statement-->>NextAPI: { status: "SUCCEEDED", result: {...} }
+        NextAPI-->>Browser: { rows: [...], schema: [...] }
+    else Query Takes Longer
+        NextAPI-->>Browser: { statement_id: "xyz", status: "RUNNING" }
+
+        loop Poll for Results (SPN Token Cached)
+            Browser->>NextAPI: GET /api/sql/status/{statement_id}
+            NextAPI->>Auth: Validate Session
+            NextAPI->>SPN: Get SPN token (from cache)
+            NextAPI->>Statement: GET /api/2.0/sql/statements/{id}<br/>Authorization: Bearer {spn_token}
+            Statement-->>NextAPI: { status: "RUNNING" | "SUCCEEDED" }
+            NextAPI-->>Browser: Status Update
+        end
+
+        Browser->>NextAPI: GET /api/sql/results/{statement_id}
+        NextAPI->>Auth: Validate Session
+        NextAPI->>SPN: Get SPN token
+        NextAPI->>Statement: GET /api/2.0/sql/statements/{id}<br/>Authorization: Bearer {spn_token}
+        Statement-->>NextAPI: { result: { data_array: [...] } }
+        NextAPI-->>Browser: { rows: [...], schema: [...] }
+    end
+
+    Note over Browser,Statement: Cancel Long-Running Query
+    Browser->>NextAPI: POST /api/sql/cancel/{statement_id}
+    NextAPI->>Auth: Validate Session
+    NextAPI->>SPN: Get SPN token
+    NextAPI->>Statement: POST /api/2.0/sql/statements/{id}/cancel<br/>Authorization: Bearer {spn_token}
+    Statement-->>NextAPI: { status: "CANCELED" }
+    NextAPI-->>Browser: { canceled: true }
+
+    Note over Browser,Statement: Query History (Optional Storage)
+    opt Store Query History
+        NextAPI->>DB: INSERT query_history
+        Note right of NextAPI: user_id, sql, duration, rows_returned
+    end

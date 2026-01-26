@@ -1,0 +1,61 @@
+flowchart TB
+    subgraph Client["Client Browser"]
+        FE[FireFly Frontend<br/>React/Next.js]
+    end
+
+    subgraph NextJS["Next.js Backend"]
+        API[API Routes<br/>/api/*]
+        Auth[Better-Auth<br/>Session Manager]
+        SPNMgr[SPN Token Manager<br/>Encryption/Caching]
+    end
+
+    subgraph External["External Services"]
+        Okta[Okta IDP<br/>User Authentication]
+        DB[(PostgreSQL<br/>Session & SPN Storage)]
+    end
+
+    subgraph Databricks["Databricks Platform"]
+        DBAUTH[Databricks OAuth<br/>client_credentials]
+        DBAPI[Databricks APIs<br/>REST/SQL]
+        UC[Unity Catalog]
+        WS[Workspace Services]
+    end
+
+    FE -->|1. API Request| API
+    API -->|2. Validate User Session| Auth
+    Auth -->|3. Lookup Session| DB
+    Auth -->|4. Verify Okta Token| Okta
+    API -->|5. Get SPN Credentials| SPNMgr
+    SPNMgr -->|6. Read Encrypted SPN| DB
+    SPNMgr -->|7. Get/Refresh SPN Token| DBAUTH
+    API -->|8. Make API Call| DBAPI
+    DBAPI --> UC
+    DBAPI --> WS
+    DBAPI -->|9. Response| API
+    API -->|10. Return Data| FE
+
+    %% Step colors: Blue=User Auth, Green=SPN, Purple=Databricks, Orange=Response
+    linkStyle 0 stroke:#3b82f6,stroke-width:2px
+    linkStyle 1 stroke:#3b82f6,stroke-width:2px
+    linkStyle 2 stroke:#3b82f6,stroke-width:2px
+    linkStyle 3 stroke:#3b82f6,stroke-width:2px
+    linkStyle 4 stroke:#22c55e,stroke-width:2px
+    linkStyle 5 stroke:#22c55e,stroke-width:2px
+    linkStyle 6 stroke:#22c55e,stroke-width:2px
+    linkStyle 7 stroke:#a855f7,stroke-width:2px
+    linkStyle 8 stroke:#a855f7,stroke-width:1px
+    linkStyle 9 stroke:#a855f7,stroke-width:1px
+    linkStyle 10 stroke:#a855f7,stroke-width:2px
+    linkStyle 11 stroke:#f97316,stroke-width:2px
+
+    %% Node styling
+    style FE fill:#f8fafc,stroke:#334155,stroke-width:2px
+    style API fill:#dbeafe,stroke:#3b82f6,stroke-width:2px
+    style Auth fill:#dbeafe,stroke:#3b82f6,stroke-width:2px
+    style SPNMgr fill:#dcfce7,stroke:#22c55e,stroke-width:2px
+    style Okta fill:#dbeafe,stroke:#3b82f6,stroke-width:2px
+    style DB fill:#f1f5f9,stroke:#64748b,stroke-width:2px
+    style DBAUTH fill:#dcfce7,stroke:#22c55e,stroke-width:2px
+    style DBAPI fill:#f3e8ff,stroke:#a855f7,stroke-width:2px
+    style UC fill:#f3e8ff,stroke:#a855f7,stroke-width:1px
+    style WS fill:#f3e8ff,stroke:#a855f7,stroke-width:1px

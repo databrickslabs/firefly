@@ -1,0 +1,50 @@
+sequenceDiagram
+    autonumber
+    participant Browser as Browser
+    participant NextAPI as Next.js API Route
+    participant BetterAuth as Better-Auth
+    participant Postgres as PostgreSQL
+    participant Okta as Okta IDP
+    participant SPNService as SPN Token Service
+    participant Databricks as Databricks API
+
+    Browser->>NextAPI: HTTP Request with Session Cookie
+
+    Note over NextAPI,BetterAuth: Session Validation Phase
+    NextAPI->>BetterAuth: Validate Session
+    BetterAuth->>Postgres: Query SESSION by token
+    Postgres-->>BetterAuth: Session + User + Org data
+
+    alt Session Invalid/Expired
+        BetterAuth-->>NextAPI: 401 Unauthorized
+        NextAPI-->>Browser: Redirect to Okta Login
+    end
+
+    Note over BetterAuth,Okta: User Token Validation
+    BetterAuth->>Okta: Validate User Token (if needed)
+    Okta-->>BetterAuth: Token Valid
+
+    Note over NextAPI,SPNService: SPN Token Retrieval Phase
+    NextAPI->>Postgres: Get Organization SPN Config
+    Postgres-->>NextAPI: SPN clientId + encrypted secret
+    NextAPI->>SPNService: Get SPN Access Token
+
+    alt SPN Token Missing or Expired
+        SPNService->>SPNService: Decrypt client secret
+        SPNService->>Databricks: POST /oidc/v1/token<br/>grant_type=client_credentials
+        Databricks-->>SPNService: Access Token (1hr TTL)
+        SPNService->>Postgres: Cache encrypted SPN token
+    end
+
+    SPNService-->>NextAPI: SPN Bearer Token
+
+    Note over NextAPI,Databricks: Databricks API Call Phase
+    NextAPI->>Databricks: API Request with SPN Bearer Token
+    Databricks-->>NextAPI: API Response
+
+    Note over NextAPI,Postgres: Optional: Cache/Store Response
+    opt Store Response Data
+        NextAPI->>Postgres: Cache response
+    end
+
+    NextAPI-->>Browser: JSON Response

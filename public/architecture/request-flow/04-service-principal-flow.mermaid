@@ -1,0 +1,53 @@
+sequenceDiagram
+    autonumber
+    participant Browser as Browser
+    participant NextAPI as Next.js API
+    participant Auth as Better-Auth
+    participant DB as PostgreSQL
+    participant Okta as Okta IDP
+    participant SPN as SPN Token Service
+    participant Databricks as Databricks API
+
+    Note over Browser,Databricks: SSO-SPN Authentication Architecture
+    Note over Browser,Databricks: Users authenticate via Okta, API calls use Service Principal
+
+    Browser->>NextAPI: API Request with Session Cookie
+
+    Note over NextAPI,Okta: Step 1: Validate User Session (Okta SSO)
+    NextAPI->>Auth: Validate User Session
+    Auth->>DB: Get User Session
+    DB-->>Auth: User + Organization Context
+
+    opt Validate Okta Token
+        Auth->>Okta: Verify user token
+        Okta-->>Auth: Token valid
+    end
+
+    Auth-->>NextAPI: SessionContext { userId, orgId, ... }
+
+    Note over NextAPI,DB: Step 2: Get Organization's Service Principal
+    NextAPI->>DB: Query organization SPN config
+    DB-->>NextAPI: SPN clientId + encrypted secret
+
+    Note over NextAPI,Databricks: Step 3: Get/Refresh SPN Token
+    NextAPI->>SPN: Get SPN access token
+
+    alt SPN Token Missing or Expired
+        SPN->>SPN: Decrypt client secret (AES-256-GCM)
+        SPN->>Databricks: POST /oidc/v1/token<br/>grant_type=client_credentials
+        Note right of SPN: client_id + client_secret
+        Databricks-->>SPN: Access Token (1 hour TTL)
+        SPN->>SPN: Encrypt token for storage
+        SPN->>DB: Cache SPN token (encrypted)
+    end
+
+    SPN-->>NextAPI: SPN Access Token
+
+    Note over NextAPI,Databricks: Step 4: Make API Call as Service Principal
+    NextAPI->>Databricks: API Request<br/>Authorization: Bearer {spn_token}
+    Databricks->>Databricks: Validate SPN permissions
+    Databricks-->>NextAPI: Response
+    NextAPI-->>Browser: Data
+
+    Note over Browser,Databricks: Key Benefits
+    Note right of Databricks: - Users don't need Databricks accounts<br/>- Centralized permission management<br/>- Audit trail per organization<br/>- Easy user onboarding via Okta

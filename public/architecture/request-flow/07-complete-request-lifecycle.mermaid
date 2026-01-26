@@ -1,0 +1,64 @@
+sequenceDiagram
+    autonumber
+    participant User as User Browser
+    participant FE as FireFly Frontend
+    participant API as Next.js API Route
+    participant Auth as Better-Auth
+    participant Postgres as PostgreSQL
+    participant Okta as Okta IDP
+    participant SPN as SPN Token Service
+    participant Databricks as Databricks APIs
+
+    rect rgb(240, 248, 255)
+        Note over User,FE: User Action
+        User->>FE: Click "View Catalog"
+        FE->>FE: Check local cache
+        FE->>API: GET /api/catalog/catalogs<br/>Cookie: session_token=xxx
+    end
+
+    rect rgb(255, 248, 240)
+        Note over API,Okta: User Session Validation
+        API->>Auth: getSession(request)
+        Auth->>Postgres: SELECT * FROM session<br/>WHERE token = 'xxx'
+        Postgres-->>Auth: Session + user + org data
+        Auth->>Auth: Check session expiry
+        opt Validate with Okta
+            Auth->>Okta: Verify user token
+            Okta-->>Auth: Token valid
+        end
+        Auth-->>API: SessionContext { userId, orgId, ... }
+    end
+
+    rect rgb(240, 255, 240)
+        Note over API,Databricks: SPN Token Retrieval
+        API->>Postgres: Get org.servicePrincipal config
+        Postgres-->>API: SPN clientId + encrypted secret
+        API->>SPN: Get/refresh SPN token
+
+        alt SPN Token Expired or Missing
+            SPN->>SPN: Decrypt client secret
+            SPN->>Databricks: POST /oidc/v1/token<br/>grant_type=client_credentials
+            Note right of SPN: client_id + client_secret
+            Databricks-->>SPN: Access Token (1hr TTL)
+            SPN->>SPN: Encrypt new token
+            SPN->>Postgres: Cache SPN token
+        end
+
+        SPN-->>API: SPN Bearer Token
+    end
+
+    rect rgb(255, 255, 240)
+        Note over API,Databricks: Databricks API Call
+        API->>Databricks: GET /api/2.1/unity-catalog/catalogs<br/>Authorization: Bearer {spn_token}
+        Databricks->>Databricks: Validate SPN token
+        Databricks->>Databricks: Check SPN permissions
+        Databricks-->>API: { catalogs: [...] }
+    end
+
+    rect rgb(248, 248, 255)
+        Note over FE,Postgres: Response & Caching
+        API->>Postgres: Optional: cache response
+        API-->>FE: JSON Response
+        FE->>FE: Update TanStack Query cache
+        FE->>User: Render catalog list
+    end

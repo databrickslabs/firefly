@@ -1,0 +1,88 @@
+sequenceDiagram
+    autonumber
+    participant Browser as Browser
+    participant NextAPI as Next.js API<br/>/api/files/*
+    participant Auth as Better-Auth
+    participant DB as PostgreSQL
+    participant Okta as Okta IDP
+    participant SPN as SPN Token Service
+    participant DBFS as Databricks DBFS<br/>or Volumes API
+
+    Note over Browser,DBFS: File Upload to Volumes (Full Auth Flow)
+    Browser->>NextAPI: POST /api/files/upload<br/>multipart/form-data
+    Note right of Browser: File: data.csv (5MB)<br/>Path: /Volumes/main/raw/uploads/
+
+    Note over NextAPI,Okta: Step 1: Validate User Session
+    NextAPI->>Auth: Validate Session
+    Auth->>DB: Get Session + User + Org
+    DB-->>Auth: Session Context { userId, orgId }
+    opt Validate Okta Token
+        Auth->>Okta: Verify user token
+        Okta-->>Auth: Token valid
+    end
+    Auth-->>NextAPI: User Context + Org ID
+
+    Note over NextAPI,DBFS: Step 2: Get SPN Token
+    NextAPI->>DB: Get Organization SPN Config
+    DB-->>NextAPI: SPN clientId + encrypted secret
+    NextAPI->>SPN: Get SPN access token
+
+    alt SPN Token Missing or Expired
+        SPN->>SPN: Decrypt client secret
+        SPN->>DBFS: POST /oidc/v1/token<br/>grant_type=client_credentials
+        DBFS-->>SPN: Access Token (1hr TTL)
+        SPN->>DB: Cache encrypted SPN token
+    end
+
+    SPN-->>NextAPI: SPN Bearer Token
+
+    Note over NextAPI,DBFS: Step 3: Stream Upload to Databricks
+    NextAPI->>DBFS: PUT /api/2.0/fs/files<br/>Authorization: Bearer {spn_token}
+    DBFS-->>NextAPI: { path: "/Volumes/main/raw/uploads/data.csv" }
+
+    opt Track Upload in Database
+        NextAPI->>DB: INSERT file_metadata
+        Note right of NextAPI: Store upload record for audit
+    end
+
+    NextAPI-->>Browser: { success: true, path: "..." }
+
+    Note over Browser,DBFS: Large File Upload (Chunked) - SPN Token Cached
+    Browser->>NextAPI: POST /api/files/upload/init
+    Note right of Browser: File: large_dataset.parquet (500MB)
+
+    NextAPI->>Auth: Validate Session
+    Auth-->>NextAPI: User Context + Org ID
+    NextAPI->>SPN: Get SPN token (from cache)
+    SPN-->>NextAPI: Cached SPN Token
+    NextAPI->>DBFS: POST /api/2.0/fs/files (create handle)<br/>Authorization: Bearer {spn_token}
+    DBFS-->>NextAPI: { handle: "abc123" }
+    NextAPI-->>Browser: { uploadId: "abc123" }
+
+    loop For Each Chunk (1MB each)
+        Browser->>NextAPI: POST /api/files/upload/chunk
+        Note right of Browser: Chunk data + uploadId
+        NextAPI->>Auth: Validate Session (quick check)
+        NextAPI->>SPN: Get SPN token (from cache)
+        NextAPI->>DBFS: POST /api/2.0/fs/add-block<br/>Authorization: Bearer {spn_token}
+        DBFS-->>NextAPI: { success: true }
+        NextAPI-->>Browser: { chunkIndex: N, success: true }
+    end
+
+    Browser->>NextAPI: POST /api/files/upload/complete
+    NextAPI->>Auth: Validate Session
+    NextAPI->>SPN: Get SPN token
+    NextAPI->>DBFS: POST /api/2.0/fs/close<br/>Authorization: Bearer {spn_token}
+    DBFS-->>NextAPI: { path: "...", size: 500MB }
+    NextAPI->>DB: UPDATE file_metadata (complete)
+    NextAPI-->>Browser: { success: true, path: "..." }
+
+    Note over Browser,DBFS: Download File
+    Browser->>NextAPI: GET /api/files/download?path=/Volumes/...
+    NextAPI->>Auth: Validate Session
+    Auth-->>NextAPI: User Context + Org ID
+    NextAPI->>SPN: Get SPN token
+    SPN-->>NextAPI: SPN Token
+    NextAPI->>DBFS: GET /api/2.0/fs/files?path=...<br/>Authorization: Bearer {spn_token}
+    DBFS-->>NextAPI: File Stream
+    NextAPI-->>Browser: File Download (streamed)

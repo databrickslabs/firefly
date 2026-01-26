@@ -1,0 +1,82 @@
+sequenceDiagram
+    autonumber
+    participant Browser as Browser
+    participant NextAPI as Next.js API<br/>/api/catalog/*
+    participant Auth as Better-Auth
+    participant DB as PostgreSQL
+    participant Okta as Okta IDP
+    participant SPN as SPN Token Service
+    participant UC as Unity Catalog API
+
+    Note over Browser,UC: Browse Catalogs (First Request - Full Auth Flow)
+    Browser->>NextAPI: GET /api/catalog/catalogs
+
+    Note over NextAPI,Okta: Step 1: Validate User Session
+    NextAPI->>Auth: Validate Session
+    Auth->>DB: Get Session + User + Org
+    DB-->>Auth: Session Context { userId, orgId }
+    opt Validate Okta Token
+        Auth->>Okta: Verify user token
+        Okta-->>Auth: Token valid
+    end
+    Auth-->>NextAPI: User Context + Org ID
+
+    Note over NextAPI,UC: Step 2: Get SPN Token
+    NextAPI->>DB: Get Organization SPN Config
+    DB-->>NextAPI: SPN clientId + encrypted secret
+    NextAPI->>SPN: Get SPN access token
+
+    alt SPN Token Missing or Expired
+        SPN->>SPN: Decrypt client secret
+        SPN->>UC: POST /oidc/v1/token<br/>grant_type=client_credentials
+        UC-->>SPN: Access Token (1hr TTL)
+        SPN->>DB: Cache encrypted SPN token
+    end
+
+    SPN-->>NextAPI: SPN Bearer Token
+
+    Note over NextAPI,UC: Step 3: Call Unity Catalog API
+    NextAPI->>UC: GET /api/2.1/unity-catalog/catalogs<br/>Authorization: Bearer {spn_token}
+    UC-->>NextAPI: Catalog List
+    NextAPI-->>Browser: { catalogs: [...] }
+
+    Note over Browser,UC: Browse Schemas (SPN Token Cached)
+    Browser->>NextAPI: GET /api/catalog/schemas?catalog=main
+    NextAPI->>Auth: Validate Session
+    Auth-->>NextAPI: User Context + Org ID
+    NextAPI->>SPN: Get SPN token (from cache)
+    SPN-->>NextAPI: Cached SPN Token
+    NextAPI->>UC: GET /api/2.1/unity-catalog/schemas
+    UC-->>NextAPI: Schema List
+    NextAPI-->>Browser: { schemas: [...] }
+
+    Note over Browser,UC: Browse Tables
+    Browser->>NextAPI: GET /api/catalog/tables?schema=default
+    NextAPI->>Auth: Validate Session
+    Auth-->>NextAPI: User Context
+    NextAPI->>SPN: Get SPN token (from cache)
+    SPN-->>NextAPI: Cached SPN Token
+    NextAPI->>UC: GET /api/2.1/unity-catalog/tables
+    UC-->>NextAPI: Table List
+    NextAPI-->>Browser: { tables: [...] }
+
+    Note over Browser,UC: Get Table Details
+    Browser->>NextAPI: GET /api/catalog/tables/main.default.users
+    NextAPI->>Auth: Validate Session
+    Auth-->>NextAPI: User Context
+    NextAPI->>SPN: Get SPN token
+    SPN-->>NextAPI: SPN Token
+    NextAPI->>UC: GET /api/2.1/unity-catalog/tables/main.default.users
+    UC-->>NextAPI: Table Metadata + Columns
+    NextAPI-->>Browser: { table: {...}, columns: [...] }
+
+    Note over Browser,UC: Preview Table Data
+    Browser->>NextAPI: POST /api/catalog/preview
+    Note right of NextAPI: { table: "main.default.users", limit: 100 }
+    NextAPI->>Auth: Validate Session
+    Auth-->>NextAPI: User Context
+    NextAPI->>SPN: Get SPN token
+    SPN-->>NextAPI: SPN Token
+    NextAPI->>UC: Execute SQL via Statement API<br/>Authorization: Bearer {spn_token}
+    UC-->>NextAPI: Sample Rows
+    NextAPI-->>Browser: { rows: [...], schema: [...] }
