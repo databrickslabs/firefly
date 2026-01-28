@@ -7,6 +7,7 @@ import {
   ContentBlock,
   HighlightBox,
   CodeBlock,
+  PageTitle,
 } from "@/components/docs/section";
 
 async function loadMermaidFile(filename: string): Promise<string> {
@@ -36,9 +37,7 @@ export default async function SsoMappedSpnDocsPage() {
           <div className="text-sm text-muted-foreground mb-2">
             Architecture / Authentication
           </div>
-          <h1 className="text-4xl font-bold mb-4 bg-gradient-to-r from-purple-500 to-indigo-500 bg-clip-text text-transparent">
-            SSO-Mapped Service Principal Authentication
-          </h1>
+          <PageTitle>SSO-Mapped Service Principal Authentication</PageTitle>
           <p className="text-xl text-muted-foreground">
             A comprehensive guide to the SSO-Mapped SPN authentication pattern,
             where users authenticate via SSO (Okta/OIDC) while Databricks API

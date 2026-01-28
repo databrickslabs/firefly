@@ -6,6 +6,7 @@ import {
   SectionContainer,
   ContentBlock,
   HighlightBox,
+  PageTitle,
 } from "@/components/docs/section";
 
 async function loadMermaidFile(filename: string): Promise<string> {
@@ -35,9 +36,7 @@ export default async function RequestFlowPage() {
           <div className="text-sm text-muted-foreground mb-2">
             Architecture / Request Flow
           </div>
-          <h1 className="text-4xl font-bold mb-4 bg-gradient-to-r from-orange-500 to-yellow-500 bg-clip-text text-transparent">
-            Request Flow Architecture
-          </h1>
+          <PageTitle>Request Flow Architecture</PageTitle>
           <p className="text-xl text-muted-foreground">
             A comprehensive guide to how data flows through FireFly Analytics
             using Service Principal (SPN) authentication. Users authenticate via

@@ -7,6 +7,7 @@ import {
   ContentBlock,
   HighlightBox,
   CodeBlock,
+  PageTitle,
 } from "@/components/docs/section";
 
 async function loadMermaidFile(filename: string): Promise<string> {
@@ -36,9 +37,7 @@ export default async function DatabricksIdentityAuthPage() {
             <div className="text-sm text-muted-foreground mb-2">
               Architecture / Authentication
             </div>
-            <h1 className="text-4xl font-bold mb-4 bg-gradient-to-r from-orange-500 to-yellow-500 bg-clip-text text-transparent">
-              Databricks Identity Authentication
-            </h1>
+            <PageTitle>Databricks Identity Authentication</PageTitle>
             <p className="text-xl text-muted-foreground">
               A comprehensive guide to the Databricks Identity authentication
               architecture, covering OAuth flows, token management, session

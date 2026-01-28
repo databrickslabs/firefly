@@ -1,16 +1,16 @@
 flowchart LR
     subgraph Users["End Users"]
-        U1["👤 Data Analysts"]
-        U2["👤 Business Users"]
-        U3["👤 Data Scientists"]
+        U1["Data Analysts"]
+        U2["Business Users"]
+        U3["Data Scientists"]
     end
 
     subgraph FireFly["FireFly Analytics Platform"]
-        FF["🔥 FireFly"]
+        FF["FireFly Application"]
     end
 
     subgraph Databricks["Databricks Lakehouse"]
-        DB["⚡ Databricks"]
+        DB["Databricks Workspace"]
     end
 
     Users --> FF

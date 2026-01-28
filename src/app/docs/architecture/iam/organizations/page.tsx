@@ -7,6 +7,7 @@ import {
   ContentBlock,
   HighlightBox,
   CodeBlock,
+  PageTitle,
 } from "@/components/docs/section";
 
 async function loadMermaidFile(subdir: string, filename: string): Promise<string> {
@@ -34,9 +35,7 @@ export default async function OrganizationsDocsPage() {
           <div className="text-sm text-muted-foreground mb-2">
             Architecture / IAM / Organizations
           </div>
-          <h1 className="text-4xl font-bold mb-4 bg-gradient-to-r from-blue-500 to-indigo-500 bg-clip-text text-transparent">
-            Organizations in FireFly
-          </h1>
+          <PageTitle>Organizations in FireFly</PageTitle>
           <p className="text-xl text-muted-foreground">
             A comprehensive guide to how organizations are created, mapped, and
             managed in the FireFly platform, including Databricks resource

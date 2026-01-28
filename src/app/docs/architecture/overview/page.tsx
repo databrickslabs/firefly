@@ -7,7 +7,100 @@ import {
   SectionContainer,
   ContentBlock,
   HighlightBox,
+  PageTitle,
 } from "@/components/docs/section";
+import { Button } from "@/components/ui/button";
+import { Github, Globe } from "lucide-react";
+
+// Tech stack data with GitHub and docs URLs
+const frontendTech = [
+  {
+    name: "Next.js 15",
+    description: "App Router, Server Components",
+    github: "https://github.com/vercel/next.js",
+    docs: "https://nextjs.org/docs",
+  },
+  {
+    name: "React 19",
+    description: "Modern React with hooks",
+    github: "https://github.com/facebook/react",
+    docs: "https://react.dev",
+  },
+  {
+    name: "TanStack Query",
+    description: "Data fetching & caching",
+    github: "https://github.com/TanStack/query",
+    docs: "https://tanstack.com/query/latest",
+  },
+  {
+    name: "Tailwind CSS",
+    description: "Utility-first styling",
+    github: "https://github.com/tailwindlabs/tailwindcss",
+    docs: "https://tailwindcss.com/docs",
+  },
+  {
+    name: "shadcn/ui",
+    description: "Accessible UI components",
+    github: "https://github.com/shadcn-ui/ui",
+    docs: "https://ui.shadcn.com",
+  },
+];
+
+const backendTech = [
+  {
+    name: "Next.js API",
+    description: "Server-side routes",
+    github: "https://github.com/vercel/next.js",
+    docs: "https://nextjs.org/docs/app/building-your-application/routing/route-handlers",
+  },
+  {
+    name: "Better-Auth",
+    description: "Authentication framework",
+    github: "https://github.com/better-auth/better-auth",
+    docs: "https://www.better-auth.com/docs",
+  },
+  {
+    name: "Drizzle ORM",
+    description: "Type-safe database access",
+    github: "https://github.com/drizzle-team/drizzle-orm",
+    docs: "https://orm.drizzle.team/docs/overview",
+  },
+  {
+    name: "Lakebase (PostgreSQL)",
+    description: "Primary database",
+    github: "https://github.com/postgres/postgres",
+    docs: "https://www.postgresql.org/docs/",
+  },
+  {
+    name: "Zod",
+    description: "Schema validation",
+    github: "https://github.com/colinhacks/zod",
+    docs: "https://zod.dev",
+  },
+];
+
+function TechItem({ tech }: { tech: { name: string; description: string; github: string; docs: string } }) {
+  return (
+    <div className="flex items-center justify-between p-2 bg-gray-50 rounded">
+      <div className="flex items-center gap-3">
+        <span className="font-mono text-sm font-semibold">{tech.name}</span>
+        <span className="text-xs text-muted-foreground">{tech.description}</span>
+      </div>
+      <div className="flex items-center gap-1">
+        <Button variant="ghost" size="icon-sm" asChild>
+          <a href={tech.github} target="_blank" rel="noopener noreferrer" aria-label={`${tech.name} GitHub`}>
+            <Github className="h-4 w-4" />
+          </a>
+        </Button>
+        <Button variant="ghost" size="icon-sm" asChild>
+          <a href={tech.docs} target="_blank" rel="noopener noreferrer" aria-label={`${tech.name} Documentation`}>
+            <Globe className="h-4 w-4" />
+          </a>
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 async function loadMermaidFile(filename: string): Promise<string> {
   const filePath = path.join(
@@ -32,9 +125,7 @@ export default async function ArchitectureOverviewPage() {
           <div className="text-sm text-muted-foreground mb-2">
             Architecture / Overview
           </div>
-          <h1 className="text-4xl font-bold mb-4 bg-gradient-to-r from-orange-500 to-yellow-500 bg-clip-text text-transparent">
-            FireFly Analytics Architecture
-          </h1>
+          <PageTitle>FireFly Analytics Architecture</PageTitle>
           <p className="text-xl text-muted-foreground">
             A comprehensive overview of FireFly Analytics using the <strong>SSO-SPN authentication model</strong> -
             where users authenticate via your identity provider (Okta, Azure AD, Auth0) and all Databricks
@@ -199,7 +290,7 @@ export default async function ArchitectureOverviewPage() {
               <div className="border rounded-lg p-4">
                 <h4 className="font-semibold mb-2 flex items-center gap-2">
                   <span className="w-3 h-3 rounded-full bg-yellow-500"></span>
-                  PostgreSQL
+                  Lakebase (PostgreSQL)
                 </h4>
                 <p className="text-sm text-muted-foreground mb-2">
                   Persistent storage for all platform data, with encrypted credentials
@@ -228,7 +319,7 @@ export default async function ArchitectureOverviewPage() {
                 <li>
                   <strong>Layer 2 - Service Principal</strong>: All Databricks API calls use the
                   organization&apos;s Service Principal. The SPN credentials are stored encrypted in
-                  PostgreSQL and tokens are managed server-side.
+                  Lakebase (PostgreSQL) and tokens are managed server-side.
                 </li>
               </ul>
             </HighlightBox>
@@ -300,7 +391,7 @@ export default async function ArchitectureOverviewPage() {
               <div className="pl-4 border-l-4 border-yellow-500 py-2">
                 <h4 className="font-semibold mb-2">Data Layer</h4>
                 <p className="text-sm text-muted-foreground">
-                  PostgreSQL stores users, organizations, sessions, and encrypted SPN credentials.
+                  Lakebase (PostgreSQL) stores users, organizations, sessions, and encrypted SPN credentials.
                   Uses Drizzle ORM for type-safe database operations.
                 </p>
               </div>
@@ -333,52 +424,18 @@ export default async function ArchitectureOverviewPage() {
             <div>
               <h4 className="font-semibold mb-3">Frontend Technologies</h4>
               <div className="space-y-2">
-                <div className="flex items-center gap-3 p-2 bg-gray-50 rounded">
-                  <span className="font-mono text-sm font-semibold">Next.js 15</span>
-                  <span className="text-xs text-muted-foreground">App Router, Server Components</span>
-                </div>
-                <div className="flex items-center gap-3 p-2 bg-gray-50 rounded">
-                  <span className="font-mono text-sm font-semibold">React 19</span>
-                  <span className="text-xs text-muted-foreground">Modern React with hooks</span>
-                </div>
-                <div className="flex items-center gap-3 p-2 bg-gray-50 rounded">
-                  <span className="font-mono text-sm font-semibold">TanStack Query</span>
-                  <span className="text-xs text-muted-foreground">Data fetching & caching</span>
-                </div>
-                <div className="flex items-center gap-3 p-2 bg-gray-50 rounded">
-                  <span className="font-mono text-sm font-semibold">Tailwind CSS</span>
-                  <span className="text-xs text-muted-foreground">Utility-first styling</span>
-                </div>
-                <div className="flex items-center gap-3 p-2 bg-gray-50 rounded">
-                  <span className="font-mono text-sm font-semibold">shadcn/ui</span>
-                  <span className="text-xs text-muted-foreground">Accessible UI components</span>
-                </div>
+                {frontendTech.map((tech) => (
+                  <TechItem key={tech.name} tech={tech} />
+                ))}
               </div>
             </div>
 
             <div>
               <h4 className="font-semibold mb-3">Backend Technologies</h4>
               <div className="space-y-2">
-                <div className="flex items-center gap-3 p-2 bg-gray-50 rounded">
-                  <span className="font-mono text-sm font-semibold">Next.js API</span>
-                  <span className="text-xs text-muted-foreground">Server-side routes</span>
-                </div>
-                <div className="flex items-center gap-3 p-2 bg-gray-50 rounded">
-                  <span className="font-mono text-sm font-semibold">Better-Auth</span>
-                  <span className="text-xs text-muted-foreground">Authentication framework</span>
-                </div>
-                <div className="flex items-center gap-3 p-2 bg-gray-50 rounded">
-                  <span className="font-mono text-sm font-semibold">Drizzle ORM</span>
-                  <span className="text-xs text-muted-foreground">Type-safe database access</span>
-                </div>
-                <div className="flex items-center gap-3 p-2 bg-gray-50 rounded">
-                  <span className="font-mono text-sm font-semibold">PostgreSQL</span>
-                  <span className="text-xs text-muted-foreground">Primary database</span>
-                </div>
-                <div className="flex items-center gap-3 p-2 bg-gray-50 rounded">
-                  <span className="font-mono text-sm font-semibold">Zod</span>
-                  <span className="text-xs text-muted-foreground">Schema validation</span>
-                </div>
+                {backendTech.map((tech) => (
+                  <TechItem key={tech.name} tech={tech} />
+                ))}
               </div>
             </div>
           </div>

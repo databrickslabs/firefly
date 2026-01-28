@@ -1,7 +1,10 @@
 "use client";
 
 import React from "react";
+import { Link, Copy, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { PageActions } from "./page-actions";
+import { toast } from "sonner";
 
 type SectionLevel = 1 | 2 | 3 | 4 | 5 | 6;
 
@@ -74,7 +77,7 @@ export function Section({
     <SectionContext.Provider value={{ level: currentLevel, registerSection, unregisterSection }}>
       <section id={id} className={cn("mb-16", className)}>
         {title && (
-          <SectionHeading className={headingClassName}>
+          <SectionHeading id={id} className={headingClassName}>
             {title}
           </SectionHeading>
         )}
@@ -87,14 +90,18 @@ export function Section({
 interface SectionHeadingProps {
   children: React.ReactNode;
   className?: string;
+  id?: string;
 }
 
 /**
  * SectionHeading component that renders the appropriate heading tag (h1-h6)
  * based on the current section nesting level.
+ * Includes link and copy icons on hover.
  */
-export function SectionHeading({ children, className }: SectionHeadingProps) {
+export function SectionHeading({ children, className, id }: SectionHeadingProps) {
   const { level } = useSection();
+  const [copiedLink, setCopiedLink] = React.useState(false);
+  const [copiedContent, setCopiedContent] = React.useState(false);
 
   // Map level to appropriate Tailwind classes
   const headingClasses: Record<SectionLevel, string> = {
@@ -106,12 +113,185 @@ export function SectionHeading({ children, className }: SectionHeadingProps) {
     6: "text-base font-semibold mb-2 mt-4",
   };
 
+  // Map level to icon sizes
+  const iconSizes: Record<SectionLevel, string> = {
+    1: "h-5 w-5",
+    2: "h-5 w-5",
+    3: "h-4 w-4",
+    4: "h-4 w-4",
+    5: "h-3.5 w-3.5",
+    6: "h-3.5 w-3.5",
+  };
+
   const Tag = `h${level}` as "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
 
+  const handleCopyLink = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!id) return;
+
+    try {
+      const url = `${window.location.origin}${window.location.pathname}#${id}`;
+      await navigator.clipboard.writeText(url);
+      setCopiedLink(true);
+      toast.success("Link copied to clipboard");
+      setTimeout(() => setCopiedLink(false), 2000);
+    } catch {
+      toast.error("Failed to copy link");
+    }
+  };
+
+  const handleCopyContent = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!id) return;
+
+    try {
+      // Find the section element by id
+      const section = document.getElementById(id);
+      if (!section) {
+        toast.error("Could not find section content");
+        return;
+      }
+
+      // Get text content of the section
+      const content = section.innerText || section.textContent || "";
+      const sectionTitle = typeof children === "string" ? children : "";
+      const url = `${window.location.origin}${window.location.pathname}#${id}`;
+
+      // Format content with title and link
+      const formattedContent = `## ${sectionTitle}\n\nSource: ${url}\n\n${content}`;
+
+      await navigator.clipboard.writeText(formattedContent);
+      setCopiedContent(true);
+      toast.success("Section content copied to clipboard");
+      setTimeout(() => setCopiedContent(false), 2000);
+    } catch {
+      toast.error("Failed to copy section content");
+    }
+  };
+
   return (
-    <Tag className={cn(headingClasses[level], className)}>
-      {children}
+    <Tag className={cn(headingClasses[level], "group flex items-center gap-2", className)}>
+      <span>{children}</span>
+      {id && (
+        <span className="inline-flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button
+            onClick={handleCopyLink}
+            className="p-1 rounded hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
+            title="Copy link to section"
+            aria-label="Copy link to section"
+          >
+            {copiedLink ? (
+              <Check className={cn(iconSizes[level], "text-green-500")} />
+            ) : (
+              <Link className={iconSizes[level]} />
+            )}
+          </button>
+          <button
+            onClick={handleCopyContent}
+            className="p-1 rounded hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
+            title="Copy section content"
+            aria-label="Copy section content"
+          >
+            {copiedContent ? (
+              <Check className={cn(iconSizes[level], "text-green-500")} />
+            ) : (
+              <Copy className={iconSizes[level]} />
+            )}
+          </button>
+        </span>
+      )}
     </Tag>
+  );
+}
+
+interface PageTitleProps {
+  children: React.ReactNode;
+  className?: string;
+}
+
+/**
+ * PageTitle component for the main page title with link and copy icons.
+ * Use this for the main h1 title of a docs page.
+ */
+export function PageTitle({ children, className }: PageTitleProps) {
+  const [copiedLink, setCopiedLink] = React.useState(false);
+  const [copiedContent, setCopiedContent] = React.useState(false);
+
+  const handleCopyLink = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    try {
+      const url = `${window.location.origin}${window.location.pathname}`;
+      await navigator.clipboard.writeText(url);
+      setCopiedLink(true);
+      toast.success("Link copied to clipboard");
+      setTimeout(() => setCopiedLink(false), 2000);
+    } catch {
+      toast.error("Failed to copy link");
+    }
+  };
+
+  const handleCopyContent = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    try {
+      // Get the main article content
+      const article = document.querySelector("article");
+      if (!article) {
+        toast.error("Could not find page content");
+        return;
+      }
+
+      const content = article.innerText || article.textContent || "";
+      const pageTitle = typeof children === "string" ? children : document.title;
+      const url = `${window.location.origin}${window.location.pathname}`;
+
+      // Format content with title and link
+      const formattedContent = `# ${pageTitle}\n\nSource: ${url}\n\n${content}`;
+
+      await navigator.clipboard.writeText(formattedContent);
+      setCopiedContent(true);
+      toast.success("Page content copied to clipboard");
+      setTimeout(() => setCopiedContent(false), 2000);
+    } catch {
+      toast.error("Failed to copy page content");
+    }
+  };
+
+  return (
+    <h1 className={cn("text-4xl font-bold mb-4 group flex items-center gap-2 bg-gradient-to-r from-orange-500 to-yellow-500 bg-clip-text text-transparent", className)}>
+      <span>{children}</span>
+      <span className="inline-flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button
+          onClick={handleCopyLink}
+          className="p-1 rounded hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
+          title="Copy link to page"
+          aria-label="Copy link to page"
+        >
+          {copiedLink ? (
+            <Check className="h-5 w-5 text-green-500" />
+          ) : (
+            <Link className="h-5 w-5" />
+          )}
+        </button>
+        <button
+          onClick={handleCopyContent}
+          className="p-1 rounded hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
+          title="Copy page content"
+          aria-label="Copy page content"
+        >
+          {copiedContent ? (
+            <Check className="h-5 w-5 text-green-500" />
+          ) : (
+            <Copy className="h-5 w-5" />
+          )}
+        </button>
+      </span>
+    </h1>
   );
 }
 
@@ -285,15 +465,100 @@ interface AutoTocProps {
 
 /**
  * AutoToc component that renders the table of contents with active section tracking
+ * and URL hash synchronization for deep linking
  */
 function AutoToc({ items, title = "On This Page" }: AutoTocProps) {
   const [activeId, setActiveId] = React.useState<string>("");
+  // Track if we're programmatically scrolling to prevent hash updates during auto-scroll
+  const isScrollingToHash = React.useRef(false);
 
+  // Helper to flatten items
+  const flattenItems = React.useCallback((items: TocItem[]): TocItem[] => {
+    return items.flatMap((item) => [item, ...(item.items ? flattenItems(item.items) : [])]);
+  }, []);
+
+  // Scroll to a specific section by id
+  const scrollToSection = React.useCallback((id: string, behavior: ScrollBehavior = "smooth") => {
+    const element = document.getElementById(id);
+    if (element) {
+      const scrollContainer = document.querySelector("main");
+      if (scrollContainer) {
+        const offset = 100;
+        const containerRect = scrollContainer.getBoundingClientRect();
+        const elementRect = element.getBoundingClientRect();
+        const relativeTop =
+          elementRect.top - containerRect.top + scrollContainer.scrollTop;
+
+        scrollContainer.scrollTo({
+          top: relativeTop - offset,
+          behavior,
+        });
+      }
+    }
+  }, []);
+
+  // Handle initial hash on page load and scroll to section
+  React.useEffect(() => {
+    const hash = window.location.hash.slice(1); // Remove the # prefix
+    if (hash) {
+      const allItems = flattenItems(items);
+      const validIds = allItems.map((item) => item.id);
+      if (validIds.includes(hash)) {
+        // Set flag to prevent hash updates during initial scroll
+        isScrollingToHash.current = true;
+        setActiveId(hash);
+        // Small delay to ensure DOM is ready
+        setTimeout(() => {
+          scrollToSection(hash, "instant");
+          // Reset flag after scroll completes
+          setTimeout(() => {
+            isScrollingToHash.current = false;
+          }, 100);
+        }, 50);
+      }
+    }
+  }, [items, flattenItems, scrollToSection]);
+
+  // Update URL hash when activeId changes (from scrolling)
+  React.useEffect(() => {
+    if (activeId && !isScrollingToHash.current) {
+      // Use replaceState to update URL without adding to history
+      const newUrl = `${window.location.pathname}${window.location.search}#${activeId}`;
+      window.history.replaceState(null, "", newUrl);
+    }
+  }, [activeId]);
+
+  // Handle browser back/forward navigation with hash changes
+  React.useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.slice(1);
+      if (hash) {
+        const allItems = flattenItems(items);
+        const validIds = allItems.map((item) => item.id);
+        if (validIds.includes(hash)) {
+          isScrollingToHash.current = true;
+          setActiveId(hash);
+          scrollToSection(hash);
+          setTimeout(() => {
+            isScrollingToHash.current = false;
+          }, 500);
+        }
+      }
+    };
+
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, [items, flattenItems, scrollToSection]);
+
+  // Intersection observer for scroll tracking
   React.useEffect(() => {
     const scrollContainer = document.querySelector("main");
 
     const observer = new IntersectionObserver(
       (entries) => {
+        // Don't update activeId while we're programmatically scrolling to a hash
+        if (isScrollingToHash.current) return;
+
         const intersectingEntries = entries.filter((entry) => entry.isIntersecting);
         if (intersectingEntries.length > 0) {
           const topEntry = intersectingEntries.reduce((prev, current) => {
@@ -310,10 +575,6 @@ function AutoToc({ items, title = "On This Page" }: AutoTocProps) {
         threshold: [0, 0.1, 0.2, 0.5, 1],
       }
     );
-
-    const flattenItems = (items: TocItem[]): TocItem[] => {
-      return items.flatMap((item) => [item, ...(item.items ? flattenItems(item.items) : [])]);
-    };
 
     const allItems = flattenItems(items);
 
@@ -332,26 +593,14 @@ function AutoToc({ items, title = "On This Page" }: AutoTocProps) {
         }
       });
     };
-  }, [items]);
+  }, [items, flattenItems]);
 
   const handleClick = (e: React.MouseEvent<HTMLAnchorElement>, id: string) => {
     e.preventDefault();
-    const element = document.getElementById(id);
-    if (element) {
-      const scrollContainer = document.querySelector("main");
-      if (scrollContainer) {
-        const offset = 100;
-        const containerRect = scrollContainer.getBoundingClientRect();
-        const elementRect = element.getBoundingClientRect();
-        const relativeTop =
-          elementRect.top - containerRect.top + scrollContainer.scrollTop;
-
-        scrollContainer.scrollTo({
-          top: relativeTop - offset,
-          behavior: "smooth",
-        });
-      }
-    }
+    // Update the URL hash first
+    window.history.pushState(null, "", `${window.location.pathname}${window.location.search}#${id}`);
+    setActiveId(id);
+    scrollToSection(id);
   };
 
   const isActiveOrHasActiveChild = (item: TocItem): boolean => {
@@ -399,6 +648,7 @@ function AutoToc({ items, title = "On This Page" }: AutoTocProps) {
         {title}
       </h3>
       <nav className="space-y-2 text-sm">{renderItems(items)}</nav>
+      <PageActions />
     </div>
   );
 }

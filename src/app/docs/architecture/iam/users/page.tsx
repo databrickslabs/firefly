@@ -7,6 +7,7 @@ import {
   ContentBlock,
   HighlightBox,
   CodeBlock,
+  PageTitle,
 } from "@/components/docs/section";
 
 async function loadMermaidFile(filename: string): Promise<string> {
@@ -34,9 +35,7 @@ export default async function UsersDocsPage() {
           <div className="text-sm text-muted-foreground mb-2">
             Architecture / IAM / Users
           </div>
-          <h1 className="text-4xl font-bold mb-4 bg-gradient-to-r from-green-500 to-emerald-500 bg-clip-text text-transparent">
-            User Onboarding in FireFly
-          </h1>
+          <PageTitle>User Onboarding in FireFly</PageTitle>
           <p className="text-xl text-muted-foreground">
             A comprehensive guide to how users are registered, authenticated,
             and granted access to organizations and Databricks resources in the

@@ -7,6 +7,7 @@ import {
   ContentBlock,
   HighlightBox,
   CodeBlock,
+  PageTitle,
 } from "@/components/docs/section";
 
 async function loadMermaidFile(filename: string): Promise<string> {
@@ -34,9 +35,7 @@ export default async function LakehouseAppsProxyPage() {
           <div className="text-sm text-muted-foreground mb-2">
             Architecture / Solutions
           </div>
-          <h1 className="text-4xl font-bold mb-4 bg-gradient-to-r from-orange-500 to-yellow-500 bg-clip-text text-transparent">
-            Embedding Databricks Apps w/o SSO
-          </h1>
+          <PageTitle>Embedding Databricks Apps w/o SSO</PageTitle>
           <p className="text-xl text-muted-foreground">
             A comprehensive guide to the Go-based reverse proxy that enables
             embedding Databricks Lakehouse Apps (like the VSCode editor) without
