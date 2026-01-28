@@ -1,0 +1,35 @@
+sequenceDiagram
+    participant User as End User
+    participant App as FireFly App
+    participant Auth as better-auth
+    participant Okta as Okta IDP
+    participant DB as PostgreSQL
+
+    Note over User,DB: User Registration Flow
+
+    User->>App: Visit /sso-spn/login
+    App->>Auth: Check for existing session
+    Auth-->>App: No session found
+    App-->>User: Redirect to Okta login
+
+    User->>Okta: Enter credentials
+    Okta->>Okta: Validate credentials
+    Okta-->>User: Return authorization code
+
+    User->>Auth: /api/auth/callback with code
+    Auth->>Okta: Exchange code for tokens
+    Okta-->>Auth: Access token + ID token
+
+    Auth->>DB: Check if user exists
+    alt User does not exist
+        Auth->>DB: INSERT into user table
+        Note right of Auth: Create new user record
+        Auth->>DB: INSERT into account table
+        Note right of Auth: Link OAuth account
+    else User exists
+        Auth->>DB: UPDATE account tokens
+    end
+
+    Auth->>DB: INSERT into session table
+    Auth-->>User: Set session cookie
+    User->>App: Redirect to /sso-spn/select-org

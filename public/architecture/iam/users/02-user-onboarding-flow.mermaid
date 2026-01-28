@@ -1,0 +1,42 @@
+flowchart TD
+    subgraph Registration["1. User Registration"]
+        A[User visits FireFly] --> B{Has account?}
+        B -->|No| C[User signs up via Okta SSO]
+        B -->|Yes| D[User logs in via Okta SSO]
+        C --> E[User record created in PostgreSQL]
+        D --> E2[Session created]
+        E --> E2
+    end
+
+    subgraph OrgAccess["2. Organization Access"]
+        E2 --> F{Member of any org?}
+        F -->|No| G[Show 'No organizations' message]
+        F -->|Yes| H[Show organization selector]
+        H --> I[User selects organization]
+        I --> J[Session updated with activeOrganizationId]
+    end
+
+    subgraph SPNMapping["3. SPN Mapping (MANUAL)"]
+        J --> K{User has SPN mapped?}
+        K -->|No| L[Admin creates user SPN in Databricks]
+        L --> M[Admin maps user to SPN in FireFly]
+        M --> N[userSpns record created]
+        K -->|Yes| N
+    end
+
+    subgraph GroupAccess["4. Databricks Group Access (MANUAL)"]
+        N --> O{User in Databricks group?}
+        O -->|No| P[Admin adds user/SPN to org group]
+        P --> Q[User can access Unity Catalog data]
+        O -->|Yes| Q
+    end
+
+    subgraph DataAccess["5. Data Access"]
+        Q --> R[User accesses notebooks/SQL/catalog]
+        R --> S[FireFly uses org SPN for API calls]
+        S --> T[Data returned to user]
+    end
+
+    style L fill:#ffcccc
+    style M fill:#ffcccc
+    style P fill:#ffcccc

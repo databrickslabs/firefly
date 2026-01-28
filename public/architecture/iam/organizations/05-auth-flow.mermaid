@@ -1,0 +1,51 @@
+sequenceDiagram
+    participant User as User Browser
+    participant FE as FireFly Frontend
+    participant API as FireFly API
+    participant Auth as Better-Auth
+    participant IDP as OIDC Provider
+    participant DB as PostgreSQL
+    participant Databricks as Databricks
+
+    rect rgb(239, 246, 255)
+        Note over User,IDP: User Authentication (SSO)
+        User->>FE: Access FireFly
+        FE->>Auth: Check session
+        Auth->>DB: Lookup session
+        DB-->>Auth: No valid session
+        Auth->>IDP: Redirect to login
+        User->>IDP: Enter credentials
+        IDP-->>FE: Auth callback with tokens
+        FE->>Auth: Create session
+        Auth->>DB: Store session + tokens
+        DB-->>Auth: Session created
+    end
+
+    rect rgb(240, 253, 244)
+        Note over User,DB: Organization Selection
+        User->>FE: Select organization
+        FE->>API: POST /api/auth/set-active-organization
+        API->>Auth: Update activeOrganizationId
+        Auth->>DB: Update session
+        DB-->>API: Updated
+        API-->>FE: Organization set
+    end
+
+    rect rgb(255, 247, 237)
+        Note over User,Databricks: API Request with SPN
+        User->>FE: Request data (e.g., list catalogs)
+        FE->>API: GET /api/databricks/unity-catalog/catalogs
+        API->>Auth: Validate session
+        Auth->>DB: Get session + org
+        DB-->>API: Session + activeOrganizationId
+        API->>DB: Get org SPN credentials
+        DB-->>API: clientId, clientSecret (encrypted)
+        API->>Databricks: POST /oidc/v1/token
+        Note right of API: client_credentials grant
+        Databricks-->>API: access_token
+        API->>Databricks: GET /api/2.1/unity-catalog/catalogs
+        Note right of API: Authorization: Bearer {spn_token}
+        Databricks-->>API: Catalog list
+        API-->>FE: Catalog data
+        FE-->>User: Display catalogs
+    end

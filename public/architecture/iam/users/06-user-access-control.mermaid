@@ -1,0 +1,39 @@
+flowchart TD
+    subgraph Roles["User Roles in FireFly"]
+        R1[Owner] --> R1A[Full organization control]
+        R1A --> R1B[Manage members]
+        R1A --> R1C[Configure BYOD settings]
+        R1A --> R1D[Access all features]
+
+        R2[Admin] --> R2A[Manage members]
+        R2A --> R2B[Configure settings]
+        R2A --> R2C[Access all features]
+
+        R3[Member] --> R3A[Access notebooks]
+        R3A --> R3B[Access SQL editor]
+        R3A --> R3C[Access catalog browser]
+        R3A --> R3D[Access import data]
+    end
+
+    subgraph DatabricksAccess["Databricks Access Control"]
+        DA1[Unity Catalog Group] --> DA2[Catalog permissions]
+        DA2 --> DA3[SELECT on tables]
+        DA2 --> DA4[MODIFY on tables]
+        DA2 --> DA5[CREATE on schemas]
+
+        DB1[User SPN] --> DB2[Workspace access]
+        DB2 --> DB3[Cluster access]
+        DB2 --> DB4[SQL warehouse access]
+    end
+
+    subgraph AccessFlow["Access Resolution"]
+        AF1[User makes request] --> AF2{Has session?}
+        AF2 -->|No| AF3[Redirect to login]
+        AF2 -->|Yes| AF4{Active org selected?}
+        AF4 -->|No| AF5[Show org selector]
+        AF4 -->|Yes| AF6{Is member of org?}
+        AF6 -->|No| AF7[Access denied]
+        AF6 -->|Yes| AF8{Role check}
+        AF8 --> AF9[Apply role-based restrictions]
+        AF9 --> AF10[Execute request via org SPN]
+    end

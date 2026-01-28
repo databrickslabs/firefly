@@ -1,0 +1,43 @@
+sequenceDiagram
+    participant Admin as Platform Admin
+    participant UI as Admin UI
+    participant API as Admin APIs
+    participant DB as PostgreSQL
+    participant DBX as Databricks
+
+    Note over Admin,DBX: 5. Member Management (After Org Setup Complete)
+
+    Note over Admin,DBX: Step 5.1 - Add User as Member in FireFly
+    Admin->>UI: Search for user
+    UI->>API: GET /api/admin/search-users?q=email
+    API->>DB: SELECT from user WHERE email LIKE
+    DB-->>API: Return matching users
+    API-->>UI: Display user list
+    Admin->>UI: Select user & role
+    UI->>API: POST /api/admin/add-member
+    API->>DB: INSERT into member table
+    DB-->>API: Success
+    API-->>UI: Member added to organization
+
+    Note over Admin,DBX: Step 5.2 - Create User SPN in Databricks (MANUAL)
+    rect rgb(255, 235, 235)
+        Admin->>DBX: Create Service Principal for user
+        Admin->>DBX: Grant SPN access to workspace
+        Note right of Admin: Manual step in Databricks console
+    end
+
+    Note over Admin,DBX: Step 5.3 - Map User to SPN in FireFly
+    Admin->>UI: Enter user SPN credentials
+    UI->>API: POST /api/admin/databricks/accounts/map-scim-user
+    API->>DBX: GET /api/2.0/accounts/{id}/scim/v2/Users?filter=email
+    DBX-->>API: Return SCIM user ID
+    API->>DB: UPDATE user SET accountIdUserIdMapping
+    API->>DB: INSERT into userSpns table
+    DB-->>API: Success
+    API-->>UI: User mapped to SPN
+
+    Note over Admin,DBX: Step 5.4 - Add User to Databricks Group (MANUAL)
+    rect rgb(255, 235, 235)
+        Admin->>DBX: Add user/SPN to organization group
+        Note right of Admin: Required for Unity Catalog access
+    end

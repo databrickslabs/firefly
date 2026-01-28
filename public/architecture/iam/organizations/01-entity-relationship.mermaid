@@ -1,0 +1,60 @@
+erDiagram
+    organization ||--o{ member : "has"
+    organization ||--o| organizationSetup : "configures"
+    organization ||--o| organizationStorageSettings : "stores"
+    organization ||--o{ byodDatabricksSpns : "owns"
+    organization ||--o{ byodDatabricksWorkspaces : "maps to"
+    organization ||--o{ byodDatabricksMetastores : "uses"
+    organization ||--o{ byodDatabricksSharingCatalogs : "shares"
+    organization ||--o{ invitation : "sends"
+    organization ||--o{ ssoProvider : "authenticates via"
+    organization ||--o{ oauthFlowMapping : "tracks"
+
+    byodDatabricksSpns ||--o{ byodDatabricksWorkspaces : "authenticates"
+
+    member {
+        string id PK
+        string organizationId FK
+        string userId FK
+        string role "owner|admin|member"
+    }
+
+    organization {
+        string id PK
+        string name
+        string slug UK
+        string workspaceUrl
+        boolean ssoEnabled
+    }
+
+    organizationSetup {
+        string id PK
+        string organizationId FK
+        string catalogName
+        string volumeName
+        string groupName
+    }
+
+    organizationStorageSettings {
+        int id PK
+        string organizationId FK
+        string primaryOrganizationGroup
+        string primaryOrganizationGroupId
+        string organizationEditableCatalog
+    }
+
+    byodDatabricksSpns {
+        string id PK
+        string organizationId FK
+        string name
+        string clientId
+        string clientSecret
+    }
+
+    byodDatabricksWorkspaces {
+        string id PK
+        string organizationId FK
+        string workspaceUrl
+        string spnId FK
+        string deltaSharingGlobalMetastoreId
+    }

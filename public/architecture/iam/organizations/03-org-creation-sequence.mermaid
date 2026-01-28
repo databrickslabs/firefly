@@ -1,0 +1,54 @@
+sequenceDiagram
+    participant Admin as Platform Admin
+    participant UI as Admin UI
+    participant API as /api/admin/organizations
+    participant DB as PostgreSQL
+    participant DBX as Databricks
+
+    Note over Admin,DBX: 1. Organization Creation (Automated via UI)
+    Admin->>UI: Click "New Organization"
+    UI->>UI: Fill form (name, slug)
+    UI->>API: POST /api/admin/organizations
+    API->>DB: INSERT into organization table
+    DB-->>API: Return new org record
+    API-->>UI: Return organization
+    UI-->>Admin: Show success
+
+    Note over Admin,DBX: 2. Databricks Setup
+    rect rgb(240, 248, 255)
+        Note right of Admin: Workspace must exist or be created
+        alt Workspace does not exist
+            Admin->>DBX: Create new Databricks workspace
+            Note right of Admin: Manual step in Databricks console
+        end
+        Admin->>UI: Set workspace URL for organization
+        UI->>API: PUT /api/admin/organizations (workspaceUrl)
+        API->>DB: UPDATE organization SET workspaceUrl
+        DB-->>API: Success
+    end
+
+    Note over Admin,DBX: 3. Workspace Setup (MANUAL)
+    rect rgb(255, 235, 235)
+        Note right of Admin: These steps are NOT automated
+        Admin->>DBX: Create Service Principal in Databricks
+        Admin->>DBX: Grant SPN permissions to workspace
+        Admin->>DBX: Create group for organization
+        Admin->>DBX: Create catalog for organization
+        Admin->>DBX: Grant catalog permissions to group
+        Admin->>DBX: Create uploads schema and user volumes
+        Admin->>DBX: Set up Delta Sharing (if needed)
+    end
+
+    Note over Admin,DBX: 4. FireFly Configuration (via Settings UI)
+    Admin->>UI: Navigate to Settings > BYOD
+    UI->>API: POST /api/sso-spn/byod/databricks/spns
+    API->>DB: INSERT into byodDatabricksSpns
+
+    Admin->>UI: Add workspace mapping
+    UI->>API: POST /api/sso-spn/byod/databricks/workspaces
+    API->>DB: INSERT into byodDatabricksWorkspaces
+
+    Admin->>UI: Configure storage settings
+    UI->>API: POST /api/sso-spn/storage-settings
+    API->>DB: INSERT into organizationStorageSettings
+    Note right of Admin: Set organization group + catalog

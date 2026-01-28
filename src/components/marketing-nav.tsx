@@ -51,13 +51,31 @@ const solutions: { title: string; href: string; description: string; comingSoon?
   },
 ];
 
+
+const iamOnboardingOptions: { title: string; href: string; description: string; comingSoon?: boolean }[] = [
+  {
+    title: "Organizations",
+    href: "/docs/architecture/iam/organizations",
+    description:
+      "Manage organizations, configure settings, and control access across your multi-tenant platform.",
+    comingSoon: false,
+  },
+  {
+    title: "Users",
+    href: "/docs/architecture/iam/users",
+    description:
+      "Manage users, roles, and permissions. Onboard new users and configure access controls.",
+    comingSoon: false,
+  },
+];
+
 const authenticationOptions: { title: string; href: string; description: string; comingSoon?: boolean }[] = [
   {
     title: "SSO Mapped to SPN",
-    href: "/sso-spn",
+    href: "/docs/architecture/authentication/sso-mapped-spn",
     description:
       "Tenant-based authentication with service principal identity mapping. Users share a common SPN per organization.",
-    comingSoon: true,
+    comingSoon: false,
   },
   {
     title: "Custom Federation",
@@ -83,23 +101,29 @@ const architecture: {
   comingSoon?: boolean;
 }[] = [
   {
+    title: "Overview",
+    href: "/docs/architecture/overview",
+    description:
+      "SSO-SPN architecture overview - from 10,000 feet to detailed component views.",
+    comingSoon: false,
+  },
+  {
     title: "Authentication",
     description:
       "Choose from multiple authentication strategies to fit your organization's needs.",
     submenu: authenticationOptions,
   },
   {
-    title: "Multi-Tenant",
-    href: "#",
+    title: "IAM & Onboarding",
     description:
-      "Support multiple organizations with isolated workspaces and shared infrastructure.",
-    comingSoon: true,
+      "Identity and access management with user onboarding workflows.",
+    submenu: iamOnboardingOptions,
   },
   {
     title: "Request Flow",
     href: "/docs/architecture/request-flow",
     description:
-      "Understand how data flows from the frontend through APIs to Databricks and back.",
+      "Understand how SSO authentication and SPN tokens flow through the system.",
     comingSoon: false,
   },
   {

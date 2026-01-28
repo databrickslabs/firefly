@@ -1,0 +1,49 @@
+flowchart TD
+    subgraph Creation["1. Organization Creation"]
+        A[Admin creates org via UI] --> B[Org record in PostgreSQL]
+        B --> C[Organization created with name and slug]
+    end
+
+    subgraph DBXSetup["2. Databricks Setup"]
+        C --> D0{Workspace exists?}
+        D0 -->|No| D1[Create Databricks workspace]
+        D0 -->|Yes| D[Set workspace URL for organization]
+        D1 --> D
+        D --> E[Map organization to Databricks workspace]
+        E --> F[Organization linked to workspace]
+    end
+
+    subgraph WorkspaceSetup["3. Workspace Setup (MANUAL)"]
+        F --> G[Create Service Principal in Databricks]
+        G --> H[Grant SPN to workspace]
+        H --> I[Create Unity Catalog group]
+        I --> I2[Create catalog for organization]
+        I2 --> J[Grant catalog permissions to group]
+        J --> K[Configure Delta Sharing if needed]
+    end
+
+    subgraph ConfigFF["4. FireFly Configuration"]
+        K --> L[Add SPN to FireFly via BYOD settings]
+        L --> M[Map workspace to SPN in FireFly]
+        M --> N[Validate workspace connection]
+        N --> O[Configure storage settings]
+        O --> P[Set organization group + catalog]
+    end
+
+    subgraph Members["5. Member Management"]
+        P --> Q[Add users as members in FireFly]
+        Q --> Q2[Create user SPNs in Databricks]
+        Q2 --> R[Map users to SPNs in FireFly]
+        R --> S{Add to Databricks group?}
+        S -->|MANUAL| T[Admin adds user to group in Databricks]
+        T --> U[User can access org data]
+    end
+
+    style G fill:#ffcccc
+    style H fill:#ffcccc
+    style I fill:#ffcccc
+    style I2 fill:#ffcccc
+    style J fill:#ffcccc
+    style K fill:#ffcccc
+    style Q2 fill:#ffcccc
+    style T fill:#ffcccc

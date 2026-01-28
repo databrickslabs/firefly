@@ -1,0 +1,59 @@
+flowchart TB
+    subgraph DatabricksSetup["Databricks Account Console (Manual Steps)"]
+        direction TB
+
+        subgraph Step1["Step 1: Create Service Principal"]
+            CreateSPN["Account Admin > User Management<br/>> Service Principals > Add"]
+            SPNDetails["Enter SPN Name<br/>e.g., 'firefly-org-acme'"]
+        end
+
+        subgraph Step2["Step 2: Generate OAuth Secret"]
+            GenSecret["SPN Details > Generate Secret"]
+            CopySecret["Copy Client ID & Client Secret"]
+            Note1["Secret shown only once!"]
+        end
+
+        subgraph Step3["Step 3: Assign to Workspace"]
+            AssignWS["Workspace Permissions"]
+            SelectWS["Select Target Workspace(s)"]
+            GrantAccess["Grant 'User' or 'Admin' access"]
+        end
+
+        subgraph Step4["Step 4: Unity Catalog Permissions"]
+            CreateGroup["Create Account Group"]
+            AddSPN["Add SPN to Group"]
+            GrantUC["Grant Catalog Permissions<br/>USE CATALOG, SELECT, MODIFY"]
+        end
+    end
+
+    subgraph FireFlySetup["FireFly Configuration (Automated)"]
+        direction TB
+
+        subgraph Config1["Store SPN Credentials"]
+            BYOD["Settings > Bring Your Own Data"]
+            AddSPN2["Add Service Principal"]
+            StoreCreds["Store Client ID & Secret"]
+        end
+
+        subgraph Config2["Map Workspace"]
+            MapWS["Map Workspace URL to SPN"]
+            Validate["Validate Connection"]
+        end
+
+        subgraph Config3["Configure Storage"]
+            SetGroup["Set Organization Group"]
+            SetCatalog["Set Editable Catalog"]
+        end
+    end
+
+    Step1 --> Step2
+    Step2 --> Step3
+    Step3 --> Step4
+
+    Step4 --> Config1
+    Config1 --> Config2
+    Config2 --> Config3
+
+    style DatabricksSetup fill:#fff3e0
+    style FireFlySetup fill:#e8f5e9
+    style Note1 fill:#ffcdd2,stroke:#f44336

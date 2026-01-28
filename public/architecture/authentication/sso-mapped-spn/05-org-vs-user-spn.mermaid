@@ -1,0 +1,46 @@
+flowchart TB
+    subgraph Users["Users (SSO Authenticated)"]
+        U1["Alice<br/>(alice@company.com)"]
+        U2["Bob<br/>(bob@company.com)"]
+        U3["Charlie<br/>(charlie@company.com)"]
+    end
+
+    subgraph OrgLevel["Organization-Level SPN"]
+        direction TB
+        OrgSPN["Org SPN<br/>client_id: org_spn_123"]
+        OrgNote["All users share one SPN<br/>Simpler setup<br/>Aggregate audit logs"]
+    end
+
+    subgraph UserLevel["User-Level SPN Mapping"]
+        direction TB
+        USPN1["Alice's SPN<br/>client_id: alice_spn"]
+        USPN2["Bob's SPN<br/>client_id: bob_spn"]
+        USPN3["Charlie's SPN<br/>client_id: charlie_spn"]
+        UserNote["Per-user SPNs<br/>Individual audit trails<br/>Granular permissions"]
+    end
+
+    subgraph DBX["Databricks"]
+        UC["Unity Catalog"]
+        Audit["Audit Logs"]
+    end
+
+    U1 & U2 & U3 -->|"Default Path"| OrgSPN
+    OrgSPN -->|"API Calls"| UC
+    OrgSPN -->|"Logged as org_spn_123"| Audit
+
+    U1 -.->|"If mapped"| USPN1
+    U2 -.->|"If mapped"| USPN2
+    U3 -.->|"If mapped"| USPN3
+
+    USPN1 -->|"Alice's calls"| UC
+    USPN2 -->|"Bob's calls"| UC
+    USPN3 -->|"Charlie's calls"| UC
+
+    USPN1 -->|"Logged as alice_spn"| Audit
+    USPN2 -->|"Logged as bob_spn"| Audit
+    USPN3 -->|"Logged as charlie_spn"| Audit
+
+    style OrgLevel fill:#e8f5e9,stroke:#4caf50
+    style UserLevel fill:#fff3e0,stroke:#ff9800
+    style OrgNote fill:#e8f5e9,stroke:#4caf50,stroke-dasharray: 5 5
+    style UserNote fill:#fff3e0,stroke:#ff9800,stroke-dasharray: 5 5

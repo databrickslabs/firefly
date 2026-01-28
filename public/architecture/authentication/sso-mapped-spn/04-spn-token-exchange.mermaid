@@ -1,0 +1,52 @@
+sequenceDiagram
+    autonumber
+    participant App as FireFly API Route
+    participant Cache as Token Cache
+    participant DB as PostgreSQL
+    participant DBX as Databricks OAuth
+
+    Note over App,DBX: SPN OAuth Token Exchange (M2M Flow)
+
+    App->>Cache: Check for valid token
+
+    alt Token exists and valid
+        Cache-->>App: Return cached token
+    else Token missing or expired
+        App->>DB: Get SPN credentials
+        Note right of DB: byodDatabricksSpns table
+        DB-->>App: clientId, clientSecret (encrypted)
+
+        App->>App: Decrypt client secret
+
+        App->>DBX: POST /oidc/v1/token
+        Note right of App: Authorization: Basic base64(clientId:clientSecret)
+        Note right of App: Body: grant_type=client_credentials&scope=all-apis
+
+        DBX->>DBX: Validate credentials
+        DBX->>DBX: Generate access token
+
+        DBX-->>App: Token Response
+        Note left of DBX: access_token, token_type, expires_in
+
+        App->>Cache: Store token with TTL
+        Note right of Cache: TTL = expires_in - 60 (buffer)
+
+        App-->>App: Return access token
+    end
+
+    Note over App,DBX: Token Format Details
+
+    rect rgb(240, 248, 255)
+        Note over DBX: Token Request Format
+        Note over DBX: POST https://{workspace}/oidc/v1/token
+        Note over DBX: Content-Type: application/x-www-form-urlencoded
+        Note over DBX: Authorization: Basic {base64(client_id:client_secret)}
+        Note over DBX: Body: grant_type=client_credentials&scope=all-apis
+    end
+
+    rect rgb(255, 248, 240)
+        Note over DBX: Token Response Format
+        Note over DBX: { "access_token": "eyJraWQ...",
+        Note over DBX:   "token_type": "Bearer",
+        Note over DBX:   "expires_in": 3600 }
+    end

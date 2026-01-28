@@ -1,0 +1,21 @@
+flowchart LR
+    subgraph Users["End Users"]
+        U1["👤 Data Analysts"]
+        U2["👤 Business Users"]
+        U3["👤 Data Scientists"]
+    end
+
+    subgraph FireFly["FireFly Analytics Platform"]
+        FF["🔥 FireFly"]
+    end
+
+    subgraph Databricks["Databricks Lakehouse"]
+        DB["⚡ Databricks"]
+    end
+
+    Users --> FF
+    FF --> DB
+
+    style FF fill:#f97316,stroke:#ea580c,color:#fff
+    style DB fill:#3b82f6,stroke:#2563eb,color:#fff
+    style Users fill:#f8fafc,stroke:#e2e8f0

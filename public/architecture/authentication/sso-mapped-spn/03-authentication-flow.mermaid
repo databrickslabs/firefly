@@ -1,0 +1,64 @@
+sequenceDiagram
+    autonumber
+    participant User as End User
+    participant Browser as Browser
+    participant App as FireFly App
+    participant Auth as Better-Auth
+    participant DB as PostgreSQL
+    participant Okta as Okta IDP
+    participant DBX as Databricks
+
+    Note over User,DBX: Phase 1: SSO Authentication (User Identity)
+
+    User->>Browser: Navigate to /sso-spn/login
+    Browser->>App: GET /sso-spn/login
+    App->>Auth: Check session
+    Auth-->>App: No session
+    App-->>Browser: Show login page
+
+    User->>Browser: Click "Sign in with SSO"
+    Browser->>Auth: Initiate OAuth
+    Auth->>Auth: Generate state + PKCE
+    Auth-->>Browser: Redirect to Okta
+
+    Browser->>Okta: Authorize request
+    User->>Okta: Enter credentials
+    Okta->>Okta: Authenticate user
+    Okta-->>Browser: Redirect with auth code
+
+    Browser->>Auth: Callback with code
+    Auth->>Okta: Exchange code for tokens
+    Okta-->>Auth: Access token + ID token
+
+    Auth->>Auth: Extract user info
+    Auth->>DB: Upsert user record
+    Auth->>DB: Create session
+    Auth-->>Browser: Set session cookie
+
+    Note over User,DBX: Phase 2: Organization Selection (Context)
+
+    Browser->>App: GET /sso-spn/select-org
+    App->>DB: Get user memberships
+    DB-->>App: List of organizations
+    App-->>Browser: Display org selector
+
+    User->>Browser: Select organization
+    Browser->>App: POST /api/oauth/set-org
+    App->>DB: Verify membership
+    App->>DB: UPDATE session SET activeOrganizationId
+    App-->>Browser: Redirect to dashboard
+
+    Note over User,DBX: Phase 3: Databricks API Access (via SPN)
+
+    Browser->>App: Request Databricks data
+    App->>DB: Get org SPN credentials
+    DB-->>App: clientId + clientSecret
+
+    App->>DBX: POST /oidc/v1/token
+    Note right of App: client_credentials grant
+    DBX-->>App: SPN access token
+
+    App->>App: Cache token
+    App->>DBX: API call with Bearer token
+    DBX-->>App: Data response
+    App-->>Browser: Rendered data

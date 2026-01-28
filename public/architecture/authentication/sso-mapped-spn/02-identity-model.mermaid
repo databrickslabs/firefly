@@ -1,0 +1,78 @@
+erDiagram
+    user ||--o{ member : "belongs to"
+    user ||--o| userSpns : "has"
+    user ||--o{ account : "has"
+    user ||--o{ session : "has"
+
+    organization ||--o{ member : "has"
+    organization ||--o{ byodDatabricksSpns : "owns"
+    organization ||--o{ byodDatabricksWorkspaces : "maps to"
+    organization ||--o| organizationStorageSettings : "configures"
+
+    byodDatabricksSpns ||--o{ byodDatabricksWorkspaces : "authenticates"
+
+    user {
+        string id PK
+        string email UK
+        string name
+        jsonb accountIdUserIdMapping "SCIM IDs per account"
+        timestamp createdAt
+    }
+
+    session {
+        string id PK
+        string userId FK
+        string activeOrganizationId FK
+        string token UK
+        timestamp expiresAt
+        string ipAddress
+        string userAgent
+    }
+
+    member {
+        string id PK
+        string userId FK
+        string organizationId FK
+        string role "owner|admin|member"
+    }
+
+    userSpns {
+        string id PK
+        string email UK "Links to user"
+        string clientId "SPN OAuth ID"
+        string clientSecret "Encrypted"
+        bigint principalId "Databricks ID"
+        string workspaceUrl
+    }
+
+    organization {
+        string id PK
+        string name
+        string slug UK
+        string workspaceUrl
+        boolean ssoEnabled
+    }
+
+    byodDatabricksSpns {
+        string id PK
+        string organizationId FK
+        string name
+        string clientId
+        string clientSecret "Encrypted"
+    }
+
+    byodDatabricksWorkspaces {
+        string id PK
+        string organizationId FK
+        string workspaceUrl
+        string spnId FK
+        string deltaSharingGlobalMetastoreId
+    }
+
+    organizationStorageSettings {
+        int id PK
+        string organizationId FK
+        string primaryOrganizationGroup
+        string primaryOrganizationGroupId
+        string organizationEditableCatalog
+    }

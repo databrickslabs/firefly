@@ -1,0 +1,70 @@
+flowchart TB
+    subgraph Client["Client Layer"]
+        direction TB
+        Browser["Web Browser"]
+        FE["Next.js Frontend<br/>React + TanStack Query"]
+        Browser --> FE
+    end
+
+    subgraph Auth["Authentication Layer"]
+        direction TB
+        OIDC["OAuth 2.0 / OIDC Provider<br/>(Okta, Azure AD, Auth0, etc.)"]
+        BAuth["Better-Auth<br/>Session Management"]
+        Sessions[("Session Store<br/>Cookies + DB")]
+    end
+
+    subgraph Backend["Backend Layer"]
+        direction TB
+        Routes["Next.js API Routes"]
+        Middleware["Auth Middleware<br/>Session Validation"]
+        SPNMgr["SPN Token Manager<br/>Caching & Refresh"]
+    end
+
+    subgraph Storage["Data Layer"]
+        direction TB
+        PG[("PostgreSQL")]
+        subgraph PGTables["Tables"]
+            Users["users"]
+            Orgs["organizations"]
+            OrgMembers["organization_members"]
+            SPNs["spn_credentials"]
+            SessionsT["sessions"]
+        end
+        PG --> PGTables
+    end
+
+    subgraph Databricks["Databricks Platform"]
+        direction TB
+        subgraph APIs["APIs"]
+            UCApi["Unity Catalog API"]
+            SQLApi["Statement Execution API"]
+            DBFSApi["Files API"]
+            AppsApi["Apps API"]
+        end
+        subgraph Resources["Resources"]
+            Catalogs["Catalogs & Schemas"]
+            Tables["Tables & Views"]
+            Volumes["Volumes & Files"]
+            Warehouses["SQL Warehouses"]
+        end
+        APIs --> Resources
+    end
+
+    FE --> Routes
+    Routes --> Middleware
+    Middleware --> BAuth
+    BAuth --> OIDC
+    BAuth --> Sessions
+    Sessions --> PG
+    Middleware --> SPNMgr
+    SPNMgr --> PG
+    SPNMgr --> UCApi
+    SPNMgr --> SQLApi
+    SPNMgr --> DBFSApi
+    SPNMgr --> AppsApi
+
+    style Client fill:#f8fafc,stroke:#e2e8f0
+    style Auth fill:#f0fdf4,stroke:#22c55e
+    style Backend fill:#fff7ed,stroke:#f97316
+    style Storage fill:#fef3c7,stroke:#f59e0b
+    style Databricks fill:#eff6ff,stroke:#3b82f6

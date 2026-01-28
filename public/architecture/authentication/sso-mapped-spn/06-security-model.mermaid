@@ -1,0 +1,53 @@
+flowchart TB
+    subgraph External["External (Internet)"]
+        User["End User"]
+    end
+
+    subgraph TrustBoundary1["Trust Boundary 1: SSO Provider"]
+        Okta["Okta IDP"]
+    end
+
+    subgraph TrustBoundary2["Trust Boundary 2: FireFly Platform"]
+        subgraph Auth["Authentication"]
+            Session["Session Cookie<br/>(HttpOnly, Secure, SameSite)"]
+            BetterAuth["Better-Auth"]
+        end
+
+        subgraph Secrets["Secret Management"]
+            EnvVar["Environment Variables<br/>(Encryption Key)"]
+            Encrypted["Encrypted at Rest<br/>(AES-256-GCM)"]
+        end
+
+        subgraph TokenMgmt["Token Management"]
+            TokenCache["In-Memory Token Cache"]
+            RefreshLogic["Auto Token Refresh"]
+        end
+
+        DB[(PostgreSQL)]
+    end
+
+    subgraph TrustBoundary3["Trust Boundary 3: Databricks"]
+        OAuth["OAuth Token Endpoint"]
+        API["Databricks APIs"]
+        SPNAuth["SPN Authentication"]
+    end
+
+    User -->|"1. HTTPS Only"| Auth
+    User -->|"2. SSO Redirect"| Okta
+    Okta -->|"3. OIDC Tokens"| BetterAuth
+
+    Session -->|"4. Validate"| BetterAuth
+    BetterAuth -->|"5. User Context"| DB
+
+    DB -->|"6. Encrypted SPN Creds"| Encrypted
+    Encrypted -->|"7. Decrypt"| EnvVar
+    EnvVar -->|"8. Plain Creds"| TokenMgmt
+
+    TokenMgmt -->|"9. M2M OAuth"| OAuth
+    OAuth -->|"10. Access Token"| SPNAuth
+    SPNAuth -->|"11. Authorized"| API
+
+    style External fill:#ffebee
+    style TrustBoundary1 fill:#e3f2fd
+    style TrustBoundary2 fill:#e8f5e9
+    style TrustBoundary3 fill:#f3e5f5

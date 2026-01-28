@@ -1,0 +1,63 @@
+flowchart TB
+    subgraph Users["End Users"]
+        U1[User A]
+        U2[User B]
+        U3[User C]
+    end
+
+    subgraph FireFly["FireFly Platform"]
+        subgraph Auth["Authentication Layer"]
+            SSO[SSO via Okta/OIDC]
+            Session[Session Management]
+        end
+
+        subgraph Identity["Identity Mapping"]
+            OrgSPN[Organization SPN]
+            UserSPN[User SPN Mapping]
+        end
+
+        subgraph API["API Proxy Layer"]
+            Proxy[API Proxy]
+            TokenCache[SPN Token Cache]
+        end
+    end
+
+    subgraph Databricks["Databricks Platform"]
+        subgraph OAuthEndpoints["OAuth Endpoints"]
+            WSOAuth[Workspace OAuth]
+            AcctOAuth[Account OAuth]
+        end
+
+        subgraph Resources["Resources"]
+            Workspace[Workspace]
+            UC[Unity Catalog]
+            SQL[SQL Warehouses]
+        end
+
+        subgraph SPNs["Service Principals"]
+            OrgSPNDB[(Org SPN)]
+            UserSPNDB[(User SPN)]
+        end
+    end
+
+    U1 & U2 & U3 -->|1. SSO Login| SSO
+    SSO -->|2. Create Session| Session
+    Session -->|3. Set Active Org| Identity
+
+    OrgSPN -->|4a. Use Org SPN| Proxy
+    UserSPN -->|4b. Use User SPN| Proxy
+
+    Proxy -->|5. Request Token| TokenCache
+    TokenCache -->|6. OAuth M2M| WSOAuth
+    WSOAuth -->|7. Access Token| TokenCache
+
+    Proxy -->|8. API Calls| Resources
+
+    OrgSPNDB & UserSPNDB -.->|Configured| SPNs
+
+    style Users fill:#e1f5fe
+    style FireFly fill:#fff3e0
+    style Databricks fill:#f3e5f5
+    style Auth fill:#c8e6c9
+    style Identity fill:#ffecb3
+    style API fill:#ffe0b2

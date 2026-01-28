@@ -1,0 +1,55 @@
+erDiagram
+    user ||--o{ member : "belongs to"
+    user ||--o{ userSpns : "mapped to"
+    user ||--o{ session : "has"
+    user ||--o{ account : "authenticates"
+
+    member ||--o| organization : "belongs to"
+
+    user {
+        string id PK
+        string email UK
+        string name
+        string image
+        boolean emailVerified
+        json accountIdUserIdMapping
+        datetime createdAt
+        datetime updatedAt
+    }
+
+    member {
+        string id PK
+        string organizationId FK
+        string userId FK
+        string role "owner|admin|member"
+        datetime createdAt
+    }
+
+    userSpns {
+        string id PK
+        string email UK
+        string clientId
+        string clientSecret
+        bigint principalId
+        string workspaceUrl
+    }
+
+    session {
+        string id PK
+        string userId FK
+        string token UK
+        string activeOrganizationId FK
+        datetime expiresAt
+        datetime createdAt
+        datetime updatedAt
+    }
+
+    account {
+        string id PK
+        string userId FK
+        string accountId
+        string providerId
+        string accessToken
+        string refreshToken
+        datetime accessTokenExpiresAt
+    }

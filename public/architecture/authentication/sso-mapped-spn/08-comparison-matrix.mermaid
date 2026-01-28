@@ -1,0 +1,51 @@
+flowchart TB
+    subgraph Comparison["Authentication Strategy Comparison"]
+        direction TB
+
+        subgraph SSOSPN["SSO-Mapped SPN (This Page)"]
+            SSO1["User Auth: SSO (Okta/OIDC)"]
+            SSO2["API Auth: Service Principal OAuth"]
+            SSO3["Identity: Users don't need Databricks accounts"]
+            SSO4["Audit: SPN-level or per-user if mapped"]
+            SSO5["Use Case: Multi-tenant SaaS apps"]
+        end
+
+        subgraph DBXIdentity["Databricks Identity"]
+            DBX1["User Auth: Databricks OAuth"]
+            DBX2["API Auth: User's OAuth token"]
+            DBX3["Identity: Users need Databricks accounts"]
+            DBX4["Audit: Per-user tracking"]
+            DBX5["Use Case: Single-tenant, direct access"]
+        end
+
+        subgraph Federation["Custom Federation"]
+            Fed1["User Auth: Your IDP"]
+            Fed2["API Auth: Federated tokens"]
+            Fed3["Identity: SCIM-synced users"]
+            Fed4["Audit: Full per-user tracking"]
+            Fed5["Use Case: Enterprise SSO integration"]
+        end
+    end
+
+    subgraph When["When to Use Each"]
+        direction TB
+
+        UseSSO["SSO-Mapped SPN when:"]
+        UseSSO1["- Users don't have Databricks accounts"]
+        UseSSO2["- Building multi-tenant applications"]
+        UseSSO3["- Need simplified identity management"]
+
+        UseDBX["Databricks Identity when:"]
+        UseDBX1["- Users have Databricks accounts"]
+        UseDBX2["- Need direct workspace access"]
+        UseDBX3["- Building single-tenant tools"]
+
+        UseFed["Custom Federation when:"]
+        UseFed1["- Enterprise SSO is required"]
+        UseFed2["- Full audit trail per user"]
+        UseFed3["- Complex identity requirements"]
+    end
+
+    style SSOSPN fill:#e8f5e9,stroke:#4caf50
+    style DBXIdentity fill:#e3f2fd,stroke:#2196f3
+    style Federation fill:#fff3e0,stroke:#ff9800

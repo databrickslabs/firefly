@@ -1,0 +1,37 @@
+flowchart LR
+    subgraph Frontend["Frontend Stack"]
+        direction TB
+        Next["Next.js 15"]
+        React["React 19"]
+        TQ["TanStack Query"]
+        Tailwind["Tailwind CSS"]
+        Shadcn["shadcn/ui"]
+    end
+
+    subgraph Backend["Backend Stack"]
+        direction TB
+        NextAPI["Next.js API Routes"]
+        BetterAuth["Better-Auth"]
+        Drizzle["Drizzle ORM"]
+        Zod["Zod Validation"]
+    end
+
+    subgraph Database["Database"]
+        direction TB
+        PostgreSQL["PostgreSQL"]
+    end
+
+    subgraph External["External Services"]
+        direction TB
+        OIDC["OAuth 2.0 / OIDC"]
+        DatabricksAPI["Databricks APIs"]
+    end
+
+    Frontend --> Backend
+    Backend --> Database
+    Backend --> External
+
+    style Frontend fill:#f97316,stroke:#ea580c,color:#fff
+    style Backend fill:#fb923c,stroke:#f97316,color:#fff
+    style Database fill:#fbbf24,stroke:#f59e0b,color:#000
+    style External fill:#3b82f6,stroke:#2563eb,color:#fff

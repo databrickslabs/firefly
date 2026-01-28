@@ -1,0 +1,36 @@
+sequenceDiagram
+    participant Admin as FireFly Admin
+    participant API as FireFly API
+    participant DB as PostgreSQL
+    participant DBA as Databricks Admin
+    participant Databricks as Databricks
+
+    rect rgb(240, 253, 244)
+        Note over Admin,DB: Automated Steps
+        Admin->>API: POST /api/admin/add-member
+        API->>DB: Check user exists
+        DB-->>API: User found
+        API->>DB: Create member record
+        Note right of DB: organizationId, userId, role
+        DB-->>API: Member created
+        API-->>Admin: Success response
+    end
+
+    rect rgb(254, 242, 242)
+        Note over DBA,Databricks: Manual Steps
+        Admin->>DBA: Request user access
+        DBA->>Databricks: Create user in Account
+        DBA->>Databricks: Add user to org group
+        Note right of Databricks: Grants Unity Catalog access
+        DBA-->>Admin: User setup complete
+    end
+
+    rect rgb(240, 253, 244)
+        Note over Admin,DB: Automated Steps
+        Admin->>API: POST /api/admin/databricks/accounts/map-scim-user
+        API->>Databricks: GET /api/2.0/preview/scim/v2/Users
+        Databricks-->>API: User SCIM ID
+        API->>DB: Update user.databricksScimId
+        DB-->>API: Updated
+        API-->>Admin: SCIM mapping complete
+    end

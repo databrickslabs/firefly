@@ -1,0 +1,36 @@
+sequenceDiagram
+    participant User as End User
+    participant App as FireFly App
+    participant Auth as better-auth
+    participant DB as PostgreSQL
+    participant Okta as Okta IDP
+    participant DBX as Databricks
+
+    Note over User,DBX: SSO-SPN Authentication Flow
+    User->>App: Access /sso-spn/login
+    App->>Auth: Check session
+    Auth-->>App: No session
+    App->>User: Redirect to Okta login
+
+    User->>Okta: Authenticate
+    Okta-->>User: Return auth code
+    User->>Auth: /api/auth/callback
+    Auth->>Okta: Exchange code for tokens
+    Okta-->>Auth: Access token + ID token
+    Auth->>DB: Create session, store tokens
+
+    Note over User,DBX: Organization Selection
+    User->>App: Select organization
+    App->>API: POST /api/oauth/set-org
+    API->>DB: INSERT into oauthFlowMapping
+    API->>DB: UPDATE session SET activeOrganizationId
+
+    Note over User,DBX: Databricks API Calls (Using Org SPN)
+    User->>App: Request Databricks data
+    App->>DB: GET byodDatabricksSpns WHERE orgId
+    DB-->>App: SPN clientId + clientSecret
+    App->>DBX: OAuth token request (SPN credentials)
+    DBX-->>App: Access token
+    App->>DBX: API call with SPN token
+    DBX-->>App: Data response
+    App-->>User: Rendered data
