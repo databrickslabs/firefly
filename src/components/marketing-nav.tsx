@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Menu } from "lucide-react";
 
 import {
   NavigationMenu,
@@ -13,11 +13,19 @@ import {
   NavigationMenuList,
   NavigationMenuTrigger,
 } from "@/components/ui/navigation-menu";
+import { Button } from "@/components/ui/button";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
 const solutions: { title: string; href: string; description: string; comingSoon?: boolean }[] = [
@@ -310,9 +318,11 @@ function ArchitectureMenu({
 }
 
 export function MarketingNav() {
+  const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
+
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="container flex h-14 items-center px-4">
+      <div className="w-full flex h-14 items-center px-6">
         <Link href="/" className="flex items-center gap-3 mr-8">
           <Image
             src="/logo.png"
@@ -326,6 +336,7 @@ export function MarketingNav() {
           </span>
         </Link>
 
+        {/* Desktop Navigation */}
         <NavigationMenu className="hidden md:flex">
           <NavigationMenuList>
             <NavigationMenuItem>
@@ -354,6 +365,98 @@ export function MarketingNav() {
             </NavigationMenuItem>
           </NavigationMenuList>
         </NavigationMenu>
+
+        <div className="ml-auto flex items-center gap-2">
+          {/* Mobile Menu */}
+          <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+            <SheetTrigger asChild className="md:hidden">
+              <Button variant="ghost" size="icon">
+                <Menu className="h-5 w-5" />
+                <span className="sr-only">Toggle menu</span>
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="right" className="w-full sm:w-[400px] overflow-y-auto">
+              <SheetHeader className="border-b pb-4">
+                <SheetTitle>
+                  <Link href="/" className="flex items-center gap-3" onClick={() => setMobileMenuOpen(false)}>
+                    <Image
+                      src="/logo.png"
+                      alt="FireFly Analytics Logo"
+                      width={24}
+                      height={24}
+                      className="object-contain"
+                    />
+                    <span className="text-xl font-semibold bg-gradient-to-r from-orange-500 to-yellow-500 bg-clip-text text-transparent">
+                      FireFly Analytics
+                    </span>
+                  </Link>
+                </SheetTitle>
+              </SheetHeader>
+              <nav className="flex flex-col gap-6 py-6 px-4">
+                <div className="space-y-1">
+                  <h3 className="font-semibold text-xs text-muted-foreground uppercase tracking-wider mb-3">
+                    Solutions
+                  </h3>
+                  {solutions.map((item) => (
+                    <Link
+                      key={item.title}
+                      href={item.comingSoon ? "#" : item.href}
+                      onClick={() => !item.comingSoon && setMobileMenuOpen(false)}
+                      className={cn(
+                        "flex items-center justify-between py-3 px-3 rounded-lg text-sm transition-colors",
+                        item.comingSoon
+                          ? "text-muted-foreground cursor-not-allowed"
+                          : "hover:bg-accent"
+                      )}
+                    >
+                      <span>{item.title}</span>
+                      {item.comingSoon && (
+                        <span className="text-xs bg-muted text-muted-foreground px-2 py-1 rounded-full">
+                          Soon
+                        </span>
+                      )}
+                    </Link>
+                  ))}
+                </div>
+                <div className="space-y-1">
+                  <h3 className="font-semibold text-xs text-muted-foreground uppercase tracking-wider mb-3">
+                    Architecture
+                  </h3>
+                  {architecture.map((item) => (
+                    <Link
+                      key={item.title}
+                      href={item.comingSoon ? "#" : (item.href || "#")}
+                      onClick={() => !item.comingSoon && setMobileMenuOpen(false)}
+                      className={cn(
+                        "flex items-center justify-between py-3 px-3 rounded-lg text-sm transition-colors",
+                        item.comingSoon
+                          ? "text-muted-foreground cursor-not-allowed"
+                          : "hover:bg-accent"
+                      )}
+                    >
+                      <span>{item.title}</span>
+                      {item.comingSoon && (
+                        <span className="text-xs bg-muted text-muted-foreground px-2 py-1 rounded-full">
+                          Soon
+                        </span>
+                      )}
+                    </Link>
+                  ))}
+                </div>
+              </nav>
+              <div className="absolute bottom-0 left-0 right-0 p-6 border-t bg-background">
+                <Button asChild className="w-full" size="lg" onClick={() => setMobileMenuOpen(false)}>
+                  <Link href="/get-started">Get Started</Link>
+                </Button>
+              </div>
+            </SheetContent>
+          </Sheet>
+
+          {/* Desktop Get Started Button */}
+          <Button asChild className="hidden md:inline-flex">
+            <Link href="/get-started">Get Started</Link>
+          </Button>
+        </div>
       </div>
     </header>
   );

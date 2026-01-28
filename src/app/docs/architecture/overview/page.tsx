@@ -46,7 +46,7 @@ export default async function ArchitectureOverviewPage() {
         <Section id="what-is-firefly" title="What is FireFly Analytics?">
           <ContentBlock>
             <p className="mb-4">
-              FireFly Analytics is a <strong>white-label analytics platform</strong> built on top of
+              FireFly Analytics is an <strong>analytics platform</strong> built on top of
               Databricks using the <strong>SSO-SPN (Single Sign-On to Service Principal)</strong> architecture.
               Users authenticate via your existing identity provider, while all Databricks operations
               are performed using organization-specific Service Principals.

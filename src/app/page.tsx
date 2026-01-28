@@ -1,121 +1,342 @@
+"use client";
+
+import { useState } from "react";
 import Link from "next/link";
 import { MarketingNav } from "@/components/marketing-nav";
+import {
+  Users,
+  Shield,
+  Layers,
+  Database,
+  BarChart3,
+  FileCode,
+  Code,
+  GitBranch,
+  Lock,
+  Upload,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+
+const FEATURE_TABS = [
+  {
+    id: "code-editor",
+    label: "Code Editor",
+    title: "Code Editor via Code Server",
+    description:
+      "Give your developers a full VS Code experience directly in the browser, connected to your Databricks environment.",
+    features: [
+      "Full VS Code experience in the browser",
+      "Direct connection to Databricks clusters",
+      "Git integration for version control",
+      "Extension support for Python, SQL, and more",
+    ],
+    icon: Code,
+    visual: {
+      title: "Development Environment",
+      items: ["VS Code Server", "Terminal Access", "Git Integration", "Extensions"],
+    },
+  },
+  {
+    id: "drag-drop-etl",
+    label: "Drag & Drop ETL",
+    title: "Visual Pipeline Builder",
+    description:
+      "Build data pipelines visually with a drag-and-drop interface. No coding required for common ETL patterns.",
+    features: [
+      "Visual pipeline designer",
+      "Pre-built transformations and connectors",
+      "Real-time data preview",
+      "Automatic code generation",
+    ],
+    icon: GitBranch,
+    visual: {
+      title: "Pipeline Studio",
+      items: ["Source Connectors", "Transformations", "Data Preview", "Auto-Deploy"],
+    },
+  },
+  {
+    id: "security",
+    label: "Security & Governance",
+    title: "Enterprise Security",
+    description:
+      "Built-in security controls and governance features to keep your data safe and compliant.",
+    features: [
+      "Role-based access control (RBAC)",
+      "Unity Catalog integration",
+      "Audit logging and compliance",
+      "Data masking and encryption",
+    ],
+    icon: Lock,
+    visual: {
+      title: "Security Controls",
+      items: ["RBAC", "Audit Logs", "Data Masking", "Encryption"],
+    },
+  },
+  {
+    id: "byod",
+    label: "Bring Your Own Data",
+    title: "Connect Any Data Source",
+    description:
+      "Import data from anywhere - local files, cloud storage, databases, or APIs.",
+    features: [
+      "Drag-and-drop file upload",
+      "Cloud storage connectors (S3, ADLS, GCS)",
+      "Database connections (PostgreSQL, MySQL, etc.)",
+      "REST API data ingestion",
+    ],
+    icon: Upload,
+    visual: {
+      title: "Data Sources",
+      items: ["File Upload", "Cloud Storage", "Databases", "REST APIs"],
+    },
+  },
+];
 
 export default function Home() {
+  const [activeTab, setActiveTab] = useState("code-editor");
+  const activeFeature = FEATURE_TABS.find((tab) => tab.id === activeTab)!;
+  const ActiveIcon = activeFeature.icon;
+
   return (
     <div className="h-full overflow-auto flex flex-col">
       <MarketingNav />
-      {/* Hero Banner with Gradient Background */}
-      <section className="relative bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-700 text-white py-24 px-8">
-        <div className="absolute inset-0 bg-black/10"></div>
-        <div className="relative max-w-4xl mx-auto text-center space-y-6">
-          <h1 className="text-6xl font-bold tracking-tight">
-            <span className="bg-gradient-to-r from-orange-400 to-yellow-400 bg-clip-text text-transparent">FireFly Analytics</span>
-          </h1>
-          <p className="text-2xl text-white/90 max-w-2xl mx-auto">
-            A personalized Databricks experience powered by Databricks itself
-          </p>
+
+      {/* Hero Section */}
+      <section className="py-20 px-8 bg-background">
+        <div className="max-w-6xl mx-auto grid md:grid-cols-2 gap-12 items-start">
+          {/* Left side - Hero content */}
+          <div className="space-y-6">
+            <span className="inline-block px-4 py-1.5 bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 text-sm font-medium rounded-full">
+              Analytics Platform
+            </span>
+            <h1 className="text-5xl font-bold tracking-tight">
+              Build exceptional
+              <br />
+              experiences with
+              <br />
+              <span className="text-orange-500">Databricks</span>
+            </h1>
+            <p className="text-lg text-muted-foreground max-w-md">
+              A customizable analytics platform that enables organizations to
+              deliver powerful data experiences to their users, powered by the
+              Databricks Lakehouse.
+            </p>
+            <div className="flex gap-4 pt-4">
+              <Button asChild className="bg-orange-500 hover:bg-orange-600">
+                <Link href="/get-started">Get Started</Link>
+              </Button>
+              <Button asChild variant="outline">
+                <Link href="/docs/architecture/overview">Learn More</Link>
+              </Button>
+            </div>
+          </div>
+
+          {/* Right side - Feature cards */}
+          <div className="space-y-4">
+            <div className="p-6 rounded-xl border bg-card hover:shadow-md transition-shadow">
+              <div className="flex items-start gap-4">
+                <div className="p-2 rounded-lg bg-orange-100 dark:bg-orange-900/30">
+                  <Users className="w-6 h-6 text-orange-600 dark:text-orange-400" />
+                </div>
+                <div>
+                  <h3 className="font-semibold mb-1">Multi-Tenant Organizations</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Isolate data and access by organization
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 rounded-xl border bg-card hover:shadow-md transition-shadow">
+              <div className="flex items-start gap-4">
+                <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/30">
+                  <Shield className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                </div>
+                <div>
+                  <h3 className="font-semibold mb-1">Flexible Authentication</h3>
+                  <p className="text-sm text-muted-foreground">
+                    SSO integration, Service Principal mapping, or Databricks
+                    native auth
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 rounded-xl border bg-card hover:shadow-md transition-shadow">
+              <div className="flex items-start gap-4">
+                <div className="p-2 rounded-lg bg-purple-100 dark:bg-purple-900/30">
+                  <Layers className="w-6 h-6 text-purple-600 dark:text-purple-400" />
+                </div>
+                <div>
+                  <h3 className="font-semibold mb-1">Data Catalog Integration</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Leverage Databricks governance with fine-grained access
+                    controls
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 rounded-xl border bg-card hover:shadow-md transition-shadow">
+              <div className="flex items-start gap-4">
+                <div className="p-2 rounded-lg bg-green-100 dark:bg-green-900/30">
+                  <Database className="w-6 h-6 text-green-600 dark:text-green-400" />
+                </div>
+                <div>
+                  <h3 className="font-semibold mb-1">Unparalleled Scale & Security</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Enterprise-grade infrastructure for all your data needs
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
-      {/* Description Section */}
-      <section className="bg-gradient-to-b from-slate-50 to-white dark:from-slate-900 dark:to-background py-16 px-8">
-        <div className="max-w-4xl mx-auto text-center space-y-6">
-          <div className="space-y-4 text-lg text-muted-foreground">
-            <p>
-              Experience the power of Databricks with a completely customized interface
-              tailored to your workflow. Same backend, any frontend you can imagine.
-            </p>
-            <p>
-              Choose your authentication method and get started with your personalized
-              Databricks environment.
-            </p>
+      {/* Features Section with Tabs */}
+      <section className="py-20 px-8 bg-slate-50 dark:bg-slate-900/50">
+        <div className="max-w-6xl mx-auto">
+          <div className="text-center mb-12">
+            <span className="text-sm font-medium text-orange-600 dark:text-orange-400 uppercase tracking-wide">
+              Platform Features
+            </span>
+            <h2 className="text-3xl font-bold mt-2">
+              Everything Your Organization Needs
+            </h2>
+          </div>
+
+          {/* Tabs */}
+          <div className="flex flex-wrap justify-center gap-2 mb-12">
+            {FEATURE_TABS.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={cn(
+                  "px-5 py-2.5 rounded-full text-sm font-medium transition-colors",
+                  activeTab === tab.id
+                    ? "bg-orange-500 text-white"
+                    : "bg-white dark:bg-slate-800 text-muted-foreground hover:text-foreground border"
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Tab Content */}
+          <div className="grid md:grid-cols-2 gap-8">
+            {/* Left side - Feature list */}
+            <div className="space-y-6">
+              <h3 className="text-xl font-semibold">{activeFeature.title}</h3>
+              <p className="text-muted-foreground">{activeFeature.description}</p>
+
+              <ul className="space-y-4">
+                {activeFeature.features.map((feature, index) => (
+                  <li key={index} className="flex items-start gap-3">
+                    <svg
+                      className="w-5 h-5 text-orange-500 mt-0.5 shrink-0"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M5 13l4 4L19 7"
+                      />
+                    </svg>
+                    <span>{feature}</span>
+                  </li>
+                ))}
+              </ul>
+
+              <Button asChild variant="outline" className="mt-4">
+                <Link href="/docs/architecture/overview">Explore Architecture</Link>
+              </Button>
+            </div>
+
+            {/* Right side - Visual card */}
+            <div className="bg-white dark:bg-slate-800 rounded-xl border shadow-lg p-6">
+              <div className="flex items-center gap-2 mb-6">
+                <ActiveIcon className="w-5 h-5 text-orange-500" />
+                <span className="font-semibold">{activeFeature.visual.title}</span>
+              </div>
+              <div className="space-y-4">
+                <div className="p-4 bg-slate-50 dark:bg-slate-700 rounded-lg">
+                  <div className="flex items-center gap-3 mb-3">
+                    <Database className="w-5 h-5 text-blue-600" />
+                    <span className="font-medium text-sm">Databricks Lakehouse</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                    <div className="p-2 bg-white dark:bg-slate-600 rounded">
+                      Unity Catalog
+                    </div>
+                    <div className="p-2 bg-white dark:bg-slate-600 rounded">
+                      SQL Warehouses
+                    </div>
+                    <div className="p-2 bg-white dark:bg-slate-600 rounded">
+                      Volumes
+                    </div>
+                    <div className="p-2 bg-white dark:bg-slate-600 rounded">DBFS</div>
+                  </div>
+                </div>
+                <div className="p-4 bg-orange-50 dark:bg-orange-900/20 rounded-lg border border-orange-200 dark:border-orange-800">
+                  <div className="flex items-center gap-3 mb-3">
+                    <BarChart3 className="w-5 h-5 text-orange-600" />
+                    <span className="font-medium text-sm">
+                      {activeFeature.visual.title}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                    {activeFeature.visual.items.map((item, index) => (
+                      <div
+                        key={index}
+                        className="p-2 bg-white dark:bg-slate-700 rounded"
+                      >
+                        {item}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="p-4 bg-slate-50 dark:bg-slate-700 rounded-lg">
+                  <div className="flex items-center gap-3 mb-3">
+                    <FileCode className="w-5 h-5 text-purple-600" />
+                    <span className="font-medium text-sm">Your Users</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Access data through your branded experience
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
       {/* CTA Section */}
-      <main className="flex-1 px-8 py-12">
-        <div className="max-w-4xl mx-auto text-center space-y-12">
-
-          {/* CTA Buttons */}
-          <div className="flex flex-col sm:flex-row gap-6 items-center justify-center">
-            <Link
-              href="/sso-spn-login"
-              className="group relative inline-flex items-center justify-center px-10 py-6 text-lg font-medium text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 rounded-xl transition-all duration-200 shadow-xl hover:shadow-2xl hover:scale-105 w-full sm:w-auto"
+      <section className="py-16 px-8 bg-orange-500">
+        <div className="max-w-4xl mx-auto text-center text-white">
+          <h2 className="text-3xl font-bold mb-4">Ready to build with FireFly?</h2>
+          <p className="text-lg text-white/90 mb-8">
+            Start building your customized Databricks experience today with our
+            comprehensive platform and documentation.
+          </p>
+          <div className="flex gap-4 justify-center">
+            <Button asChild size="lg" variant="secondary">
+              <Link href="/get-started">Get Started</Link>
+            </Button>
+            <Button
+              asChild
+              size="lg"
+              className="bg-white/20 text-white hover:bg-white/30 border-0"
             >
-              <div className="flex flex-col items-start">
-                <span className="font-semibold text-xl">SSO Mapped to SPN</span>
-                <span className="text-sm text-white/90">
-                  Tenant IDP with shared SPN
-                </span>
-              </div>
-            </Link>
-
-            <Link
-              href="/federation"
-              className="group relative inline-flex items-center justify-center px-10 py-6 text-lg font-medium text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 rounded-xl transition-all duration-200 shadow-xl hover:shadow-2xl hover:scale-105 w-full sm:w-auto"
-            >
-              <div className="flex flex-col items-start">
-                <span className="font-semibold text-xl">Custom Federation</span>
-                <span className="text-sm text-white/90">
-                  Multi-tenant with your identity
-                </span>
-              </div>
-            </Link>
-
-            <Link
-              href="/databricks-idp"
-              className="group relative inline-flex items-center justify-center px-10 py-6 text-lg font-medium text-white bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 rounded-xl transition-all duration-200 shadow-xl hover:shadow-2xl hover:scale-105 w-full sm:w-auto"
-            >
-              <div className="flex flex-col items-start">
-                <span className="font-semibold text-xl">Databricks Identity</span>
-                <span className="text-sm text-white/90">
-                  Per-workspace authentication
-                </span>
-              </div>
-            </Link>
-          </div>
-        </div>
-      </main>
-
-      {/* Features Section */}
-      <section className="bg-gradient-to-b from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20 py-16 px-8">
-        <div className="max-w-6xl mx-auto">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div className="p-8 rounded-xl border-2 border-blue-200 dark:border-blue-800 bg-white dark:bg-slate-900 shadow-lg hover:shadow-xl transition-shadow">
-              <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center mb-4">
-                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                </svg>
-              </div>
-              <h3 className="text-xl font-semibold mb-3">Organization Support</h3>
-              <p className="text-muted-foreground">
-                Multi-tenant architecture with organization management
-              </p>
-            </div>
-            <div className="p-8 rounded-xl border-2 border-purple-200 dark:border-purple-800 bg-white dark:bg-slate-900 shadow-lg hover:shadow-xl transition-shadow">
-              <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center mb-4">
-                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                </svg>
-              </div>
-              <h3 className="text-xl font-semibold mb-3">Flexible Authentication</h3>
-              <p className="text-muted-foreground">
-                Choose between custom federation or Databricks native auth
-              </p>
-            </div>
-            <div className="p-8 rounded-xl border-2 border-indigo-200 dark:border-indigo-800 bg-white dark:bg-slate-900 shadow-lg hover:shadow-xl transition-shadow">
-              <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center mb-4">
-                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-              </div>
-              <h3 className="text-xl font-semibold mb-3">Full Databricks Power</h3>
-              <p className="text-muted-foreground">
-                Access all Databricks features through your personalized interface
-              </p>
-            </div>
+              <a href="https://databrickslabs.github.io/partner-architecture/" target="_blank" rel="noopener noreferrer">
+                Read the Databricks WAF
+              </a>
+            </Button>
           </div>
         </div>
       </section>
