@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useMemo, useCallback } from "react";
-import { Handle, Position, NodeToolbar, type NodeProps } from "@xyflow/react";
+import { Handle, Position, NodeToolbar, NodeResizer, type NodeProps } from "@xyflow/react";
 import { AlertTriangle, Database, Table2, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { PipelineNode, NodeCategory } from "@/stores/pipeline-store";
@@ -284,6 +284,15 @@ function BaseNodeComponent({
 
   return (
     <>
+      {/* Node Resizer - only visible when selected */}
+      <NodeResizer
+        minWidth={160}
+        minHeight={80}
+        isVisible={selected}
+        lineClassName="!border-blue-400"
+        handleClassName="!w-2 !h-2 !bg-blue-500 !border-white !border-2 !rounded-sm"
+      />
+
       {/* Floating toolbar - appears above node when selected */}
       <NodeToolbar
         isVisible={selected}
@@ -311,7 +320,7 @@ function BaseNodeComponent({
 
       <div
         className={cn(
-          "px-3 py-2 rounded-lg border-2 min-w-[160px] shadow-sm transition-all relative",
+          "px-3 py-2 rounded-lg border-2 min-w-[160px] min-h-[80px] h-full w-full shadow-sm transition-all relative",
           categoryStyles[category],
           selected && "ring-2 ring-blue-500 ring-offset-2",
           !validation.isValid && "border-amber-500"

@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { ReactFlowProvider } from "@xyflow/react";
 import { PipelineCanvas } from "./pipeline-canvas";
@@ -8,7 +9,13 @@ import { PipelinePropertiesPanel } from "./pipeline-properties-panel";
 import { PipelineConsole } from "./pipeline-console";
 import { PipelineToolbar } from "./pipeline-toolbar";
 import { DnDProvider } from "./dnd-context";
-import { PipelineStoreProvider, useSelectedNodeIds } from "@/providers/pipeline-store-provider";
+import { PipelineStoreProvider, useSelectedNodeIds, usePipelineStore } from "@/providers/pipeline-store-provider";
+import { usePipelineQuery } from "@/hooks/use-pipeline-persistence";
+import { Spinner } from "@/components/ui/spinner";
+
+interface PipelineStudioLayoutProps {
+  pipelineId?: string | null;
+}
 
 function HorizontalResizeHandle() {
   return (
@@ -22,9 +29,79 @@ function VerticalResizeHandle() {
   );
 }
 
-function PipelineStudioContent() {
+function PipelineStudioContent({ pipelineId }: { pipelineId?: string | null }) {
   const selectedNodeIds = useSelectedNodeIds();
   const hasSelection = selectedNodeIds.length > 0;
+  const store = usePipelineStore();
+  const { loadPipelineData, clearPipeline, pipelineId: storePipelineId, isDirty } = store;
+  const lastLoadedDataRef = useRef<{ id: string; updatedAt: string } | null>(null);
+
+  // Load pipeline data if an ID is provided
+  const { data, isLoading, error } = usePipelineQuery(pipelineId || null);
+
+  // Load pipeline data into store when data is available
+  useEffect(() => {
+    if (pipelineId && data?.pipeline) {
+      const pipeline = data.pipeline;
+      const dataKey = { id: pipeline.id, updatedAt: pipeline.updatedAt };
+
+      // Check if this is new data we haven't loaded yet
+      const isNewData = !lastLoadedDataRef.current ||
+        lastLoadedDataRef.current.id !== dataKey.id ||
+        lastLoadedDataRef.current.updatedAt !== dataKey.updatedAt;
+
+      // Load if: new data AND (not dirty OR different pipeline)
+      const shouldLoad = isNewData && (!isDirty || storePipelineId !== pipeline.id);
+
+      if (shouldLoad) {
+        loadPipelineData({
+          id: pipeline.id,
+          name: pipeline.name,
+          description: pipeline.description,
+          nodes: pipeline.pipelineJson.nodes,
+          edges: pipeline.pipelineJson.edges,
+          access: pipeline.access,
+        });
+        lastLoadedDataRef.current = dataKey;
+      }
+    }
+  }, [pipelineId, data, loadPipelineData, isDirty, storePipelineId]);
+
+  // Reset ref when pipelineId changes
+  useEffect(() => {
+    return () => {
+      lastLoadedDataRef.current = null;
+    };
+  }, [pipelineId]);
+
+  // Clear store when creating a new pipeline (no ID)
+  useEffect(() => {
+    if (!pipelineId) {
+      clearPipeline();
+    }
+  }, [pipelineId, clearPipeline]);
+
+  if (pipelineId && isLoading) {
+    return (
+      <div className="flex items-center justify-center h-full bg-slate-100">
+        <div className="flex flex-col items-center gap-2">
+          <Spinner className="h-8 w-8 text-emerald-600" />
+          <p className="text-sm text-muted-foreground">Loading pipeline...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (pipelineId && error) {
+    return (
+      <div className="flex items-center justify-center h-full bg-slate-100">
+        <div className="text-center">
+          <p className="text-red-600 mb-2">Failed to load pipeline</p>
+          <p className="text-sm text-muted-foreground">{error.message}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-full flex flex-col bg-slate-100">
@@ -81,12 +158,12 @@ function PipelineStudioContent() {
   );
 }
 
-export function PipelineStudioLayout() {
+export function PipelineStudioLayout({ pipelineId }: PipelineStudioLayoutProps) {
   return (
     <PipelineStoreProvider>
       <ReactFlowProvider>
         <DnDProvider>
-          <PipelineStudioContent />
+          <PipelineStudioContent pipelineId={pipelineId} />
         </DnDProvider>
       </ReactFlowProvider>
     </PipelineStoreProvider>

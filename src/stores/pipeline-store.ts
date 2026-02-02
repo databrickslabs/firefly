@@ -63,12 +63,30 @@ export interface SampleDataResult {
 export type PipelineNode = Node<PipelineNodeData>;
 export type PipelineEdge = Edge;
 
+// Permission level type for shared pipelines
+export type PipelinePermissionLevel = 'CAN_READ' | 'CAN_EDIT' | 'CAN_RUN';
+
+// Pipeline access information
+export interface PipelineAccess {
+  canRead: boolean;
+  canEdit: boolean;
+  canRun: boolean;
+  isOwner: boolean;
+  permissionLevel: PipelinePermissionLevel | null;
+}
+
 // Store state interface
 export interface PipelineState {
   // Pipeline metadata
   pipelineId: string | null;
   pipelineName: string;
+  pipelineDescription: string | null;
   isDirty: boolean;
+
+  // Access control
+  isOwner: boolean;
+  permissionLevel: PipelinePermissionLevel | null;
+  lastSavedAt: Date | null;
 
   // Canvas state
   nodes: PipelineNode[];
@@ -114,7 +132,18 @@ export interface PipelineState {
   pasteNodes: () => void;
 
   // Actions - Pipeline
-  setPipeline: (id: string | null, name: string) => void;
+  setPipeline: (id: string | null, name: string, description?: string | null) => void;
+  setPipelineName: (name: string) => void;
+  loadPipelineData: (data: {
+    id: string;
+    name: string;
+    description: string | null;
+    nodes: PipelineNode[];
+    edges: PipelineEdge[];
+    access: PipelineAccess;
+  }) => void;
+  setPipelineAccess: (access: PipelineAccess) => void;
+  setLastSavedAt: (date: Date | null) => void;
   clearPipeline: () => void;
   setDirty: (dirty: boolean) => void;
 
@@ -147,7 +176,11 @@ export interface PipelineState {
 const initialState = {
   pipelineId: null,
   pipelineName: "Untitled Pipeline",
+  pipelineDescription: null as string | null,
   isDirty: false,
+  isOwner: true,
+  permissionLevel: null as PipelinePermissionLevel | null,
+  lastSavedAt: null as Date | null,
   nodes: [] as PipelineNode[],
   edges: [] as PipelineEdge[],
   selectedNodeIds: [] as string[],
@@ -335,12 +368,40 @@ export const createPipelineStore = () => {
           }),
 
         // Pipeline actions
-        setPipeline: (id, name) =>
+        setPipeline: (id, name, description) =>
           set({
             pipelineId: id,
             pipelineName: name,
+            pipelineDescription: description ?? null,
             isDirty: false,
           }),
+
+        setPipelineName: (name) =>
+          set({
+            pipelineName: name,
+            isDirty: true,
+          }),
+
+        loadPipelineData: (data) =>
+          set({
+            pipelineId: data.id,
+            pipelineName: data.name,
+            pipelineDescription: data.description,
+            nodes: data.nodes,
+            edges: data.edges,
+            isOwner: data.access.isOwner,
+            permissionLevel: data.access.permissionLevel,
+            isDirty: false,
+            lastSavedAt: new Date(),
+          }),
+
+        setPipelineAccess: (access) =>
+          set({
+            isOwner: access.isOwner,
+            permissionLevel: access.permissionLevel,
+          }),
+
+        setLastSavedAt: (date) => set({ lastSavedAt: date }),
 
         clearPipeline: () =>
           set({

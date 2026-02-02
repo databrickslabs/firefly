@@ -3,3 +3,4 @@ export * from './auth';
 export * from './auth-spn';
 export * from './organization-setup';
 export * from './byod-databricks';
+export * from './pipelines';

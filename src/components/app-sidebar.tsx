@@ -58,8 +58,8 @@ const navigationItems = [
     icon: LayoutDashboard,
   },
   {
-    name: "Pipeline Studio",
-    href: "/pipeline-studio",
+    name: "Pipelines",
+    href: "/pipelines",
     icon: GitBranch,
   },
   {

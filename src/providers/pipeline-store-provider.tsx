@@ -119,7 +119,11 @@ export function usePipelineMetadata() {
     useShallow((state) => ({
       pipelineId: state.pipelineId,
       pipelineName: state.pipelineName,
+      pipelineDescription: state.pipelineDescription,
       isDirty: state.isDirty,
+      isOwner: state.isOwner,
+      permissionLevel: state.permissionLevel,
+      lastSavedAt: state.lastSavedAt,
     }))
   );
 }
