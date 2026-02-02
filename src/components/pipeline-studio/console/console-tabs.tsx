@@ -3,8 +3,8 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LogsTab } from "./logs-tab";
 import { SpecTab } from "./spec-tab";
-import { PipelineSqlTab } from "./pipeline-sql-tab";
 import { SelectedSqlTab } from "./selected-sql-tab";
+import { SampleSqlTab } from "./sample-sql-tab";
 import { ApiCallsTab } from "./api-calls-tab";
 import { DataTab } from "./data-tab";
 
@@ -32,16 +32,16 @@ export function ConsoleTabs() {
             Pipeline Spec
           </TabsTrigger>
           <TabsTrigger
-            value="pipeline-sql"
-            className="px-3 py-1.5 h-7 text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm rounded-md"
-          >
-            Pipeline SQL
-          </TabsTrigger>
-          <TabsTrigger
             value="selected-sql"
             className="px-3 py-1.5 h-7 text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm rounded-md"
           >
             Selected SQL
+          </TabsTrigger>
+          <TabsTrigger
+            value="sample-sql"
+            className="px-3 py-1.5 h-7 text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm rounded-md"
+          >
+            Sample SQL
           </TabsTrigger>
           <TabsTrigger
             value="api"
@@ -60,11 +60,11 @@ export function ConsoleTabs() {
       <TabsContent value="spec" className="flex-1 m-0 overflow-hidden">
         <SpecTab />
       </TabsContent>
-      <TabsContent value="pipeline-sql" className="flex-1 m-0 overflow-hidden">
-        <PipelineSqlTab />
-      </TabsContent>
       <TabsContent value="selected-sql" className="flex-1 m-0 overflow-hidden">
         <SelectedSqlTab />
+      </TabsContent>
+      <TabsContent value="sample-sql" className="flex-1 m-0 overflow-hidden">
+        <SampleSqlTab />
       </TabsContent>
       <TabsContent value="api" className="flex-1 m-0 overflow-hidden">
         <ApiCallsTab />

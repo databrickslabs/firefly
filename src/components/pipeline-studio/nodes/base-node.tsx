@@ -1,8 +1,8 @@
 "use client";
 
-import { memo, useMemo, useCallback } from "react";
+import { memo, useMemo, useCallback, useState, useEffect } from "react";
 import { Handle, Position, NodeToolbar, NodeResizer, type NodeProps } from "@xyflow/react";
-import { AlertTriangle, Database, Table2, Loader2 } from "lucide-react";
+import { AlertTriangle, Database, Table2, Loader2, Rocket, RefreshCw, CheckCircle2, CloudOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { PipelineNode, NodeCategory } from "@/stores/pipeline-store";
 import { getNodeIcon } from "./index";
@@ -13,14 +13,16 @@ import {
   useNodeSampleDataActions,
   usePipelineNodes,
   usePipelineEdges,
+  usePipelineMetadata,
 } from "@/providers/pipeline-store-provider";
+import { useActiveOrganizationId, useUserEmail } from "@/providers/user-store-provider";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { generateSampleSQL } from "@/lib/pipeline-to-sql";
+import { generateSampleSQL, generateDestinationSQL, type FireflyMetadata } from "@/lib/pipeline-to-sql";
 import { loadWarehouse } from "@/lib/warehouse-storage";
 
 const categoryStyles: Record<NodeCategory, string> = {
@@ -61,8 +63,8 @@ function getNodeDisplayPath(data: PipelineNode["data"]): string | null {
     }
   }
 
-  // Destination delta/streaming: catalog.schema.table
-  if (category === "destination" && (subtype === "delta" || subtype === "streaming")) {
+  // Destination nodes: catalog.schema.table (or view name)
+  if (category === "destination" && (subtype === "materialized-view" || subtype === "view" || subtype === "streaming")) {
     const parts = [config.catalog, config.schema, config.table].filter(Boolean);
     if (parts.length > 0) {
       return parts.join(".");
@@ -104,12 +106,83 @@ function BaseNodeComponent({
   const { setNodeSampleLoading, setNodeSampleResult, setNodeSampleError } = useNodeSampleDataActions();
   const nodes = usePipelineNodes();
   const edges = usePipelineEdges();
+  const { pipelineId } = usePipelineMetadata();
+  const orgId = useActiveOrganizationId();
+  const userEmail = useUserEmail();
+
+  // Firefly metadata for table properties
+  const fireflyMetadata: FireflyMetadata = {
+    pipelineId,
+    orgId,
+    userId: userEmail,
+  };
+
+  // State for deploy and refresh operations (materialized views only)
+  const [isDeploying, setIsDeploying] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // State for destination table existence check
+  const [tableExistsStatus, setTableExistsStatus] = useState<"loading" | "exists" | "not-found" | "error" | null>(null);
+
+  // Check if this is a materialized view or view (destinations that can be checked)
+  const isMaterializedView = category === "destination" && data.subtype === "materialized-view";
+  const isView = category === "destination" && data.subtype === "view";
+  const isCheckableDestination = isMaterializedView || isView;
 
   // Validate node configuration
   const validation = useMemo(() => validateNode(data), [data]);
 
   // Get display path for nodes with catalog/schema/table config
   const displayPath = useMemo(() => getNodeDisplayPath(data), [data]);
+
+  // Check if destination table exists in Unity Catalog
+  useEffect(() => {
+    if (!isCheckableDestination) {
+      setTableExistsStatus(null);
+      return;
+    }
+
+    const config = data.config as { catalog?: string; schema?: string; table?: string };
+    const { catalog, schema, table } = config;
+
+    // Don't check if config is incomplete
+    if (!catalog || !schema || !table) {
+      setTableExistsStatus(null);
+      return;
+    }
+
+    const fullName = `${catalog}.${schema}.${table}`;
+    let cancelled = false;
+
+    const checkTableExists = async () => {
+      setTableExistsStatus("loading");
+      try {
+        const response = await fetch(
+          `/api/databricks/unity-catalog/table-details?full_name=${encodeURIComponent(fullName)}`
+        );
+
+        if (cancelled) return;
+
+        if (response.ok) {
+          setTableExistsStatus("exists");
+        } else if (response.status === 404) {
+          setTableExistsStatus("not-found");
+        } else {
+          setTableExistsStatus("error");
+        }
+      } catch {
+        if (!cancelled) {
+          setTableExistsStatus("error");
+        }
+      }
+    };
+
+    checkTableExists();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isCheckableDestination, data.config]);
 
   // Check sample data state
   const hasSampleData = nodeSampleData && !nodeSampleData.isLoading && !nodeSampleData.error && nodeSampleData.rows.length > 0;
@@ -282,6 +355,257 @@ function BaseNodeComponent({
     [addLog, addApiCall, data.label, id, nodes, edges, setNodeSampleLoading, setNodeSampleResult, setNodeSampleError]
   );
 
+  // Handle deploy action - creates the materialized view
+  const handleDeploy = useCallback(
+    async (e: React.MouseEvent) => {
+      e.stopPropagation();
+
+      if (!isMaterializedView) return;
+
+      // Get warehouse ID from storage
+      const warehouseData = loadWarehouse();
+      if (!warehouseData?.warehouseId) {
+        addLog("error", "No warehouse selected. Please select a warehouse in the SQL Editor first.");
+        return;
+      }
+
+      // Generate CREATE MATERIALIZED VIEW SQL using generateDestinationSQL
+      // This properly handles upstream MVs/views as source tables
+      const sqlResult = generateDestinationSQL(
+        id,
+        nodes.map((n) => ({
+          id: n.id,
+          type: n.type,
+          position: n.position,
+          data: n.data,
+        })),
+        edges.map((e) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          sourceHandle: e.sourceHandle,
+          targetHandle: e.targetHandle,
+        })),
+        fireflyMetadata
+      );
+
+      if (!sqlResult.isValid) {
+        const errorMsg = sqlResult.invalidNodes.length > 0
+          ? `Cannot deploy: ${sqlResult.invalidNodes.map(n => `"${n.label}" (${n.issues.join(", ")})`).join("; ")}`
+          : sqlResult.errors.join("; ");
+        addLog("error", `Cannot deploy: ${errorMsg}`);
+        return;
+      }
+
+      addLog("info", `Deploying materialized view: ${data.label}`);
+      setIsDeploying(true);
+
+      const startTime = Date.now();
+
+      try {
+        // Execute the CREATE statement
+        const executeResponse = await fetch("/api/databricks/sql/execute", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            warehouse_id: warehouseData.warehouseId,
+            statement: sqlResult.sql,
+            wait_timeout: "50s",
+            on_wait_timeout: "CONTINUE",
+          }),
+        });
+
+        if (!executeResponse.ok) {
+          const errorData = await executeResponse.json();
+          throw new Error(errorData.error || "Failed to deploy materialized view");
+        }
+
+        const executeData = await executeResponse.json();
+        const statementId = executeData.statement_id;
+
+        addApiCall({
+          method: "POST",
+          endpoint: "/api/2.0/sql/statements",
+          status: executeResponse.status,
+          duration: Date.now() - startTime,
+          request: { statement: sqlResult.sql.substring(0, 500) + "..." },
+          response: { statement_id: statementId, state: executeData.status?.state },
+        });
+
+        // Check if we got immediate success
+        if (executeData.status?.state === "SUCCEEDED") {
+          addLog("success", `Materialized view "${data.label}" deployed successfully in ${Date.now() - startTime}ms`);
+          setTableExistsStatus("exists");
+          setIsDeploying(false);
+          return;
+        }
+
+        // Need to poll for completion
+        const maxPolls = 120;
+        let pollCount = 0;
+
+        while (pollCount < maxPolls) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          pollCount++;
+
+          const statusResponse = await fetch(`/api/databricks/sql/status/${statementId}`);
+
+          if (!statusResponse.ok) {
+            const errorData = await statusResponse.json();
+            throw new Error(errorData.error || "Failed to get query status");
+          }
+
+          const statusData = await statusResponse.json();
+
+          switch (statusData.status.state) {
+            case "SUCCEEDED":
+              addLog("success", `Materialized view "${data.label}" deployed successfully in ${Date.now() - startTime}ms`);
+              setTableExistsStatus("exists");
+              setIsDeploying(false);
+              return;
+
+            case "FAILED":
+              throw new Error(statusData.status.error?.message || "Deploy failed");
+
+            case "CANCELED":
+              throw new Error("Deploy was cancelled");
+
+            case "CLOSED":
+              throw new Error("Deploy session closed");
+
+            case "PENDING":
+            case "RUNNING":
+              // Continue polling
+              break;
+          }
+        }
+
+        throw new Error("Deploy timed out after 120 seconds");
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : "Unknown error during deploy";
+        addLog("error", `Deploy failed: ${errorMessage}`);
+      } finally {
+        setIsDeploying(false);
+      }
+    },
+    [addLog, addApiCall, data.label, id, nodes, edges, isMaterializedView]
+  );
+
+  // Handle refresh action - refreshes the materialized view
+  const handleRefresh = useCallback(
+    async (e: React.MouseEvent) => {
+      e.stopPropagation();
+
+      if (!isMaterializedView) return;
+
+      // Get warehouse ID from storage
+      const warehouseData = loadWarehouse();
+      if (!warehouseData?.warehouseId) {
+        addLog("error", "No warehouse selected. Please select a warehouse in the SQL Editor first.");
+        return;
+      }
+
+      const config = data.config as { catalog?: string; schema?: string; table?: string };
+      if (!config.catalog || !config.schema || !config.table) {
+        addLog("error", "Materialized view must have catalog, schema, and name configured before refresh.");
+        return;
+      }
+
+      const viewName = `\`${config.catalog}\`.\`${config.schema}\`.\`${config.table}\``;
+      const refreshSql = `REFRESH MATERIALIZED VIEW ${viewName} FULL`;
+
+      addLog("info", `Refreshing materialized view: ${viewName}`);
+      setIsRefreshing(true);
+
+      const startTime = Date.now();
+
+      try {
+        // Execute the REFRESH statement
+        const executeResponse = await fetch("/api/databricks/sql/execute", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            warehouse_id: warehouseData.warehouseId,
+            statement: refreshSql,
+            wait_timeout: "50s",
+            on_wait_timeout: "CONTINUE",
+          }),
+        });
+
+        if (!executeResponse.ok) {
+          const errorData = await executeResponse.json();
+          throw new Error(errorData.error || "Failed to refresh materialized view");
+        }
+
+        const executeData = await executeResponse.json();
+        const statementId = executeData.statement_id;
+
+        addApiCall({
+          method: "POST",
+          endpoint: "/api/2.0/sql/statements",
+          status: executeResponse.status,
+          duration: Date.now() - startTime,
+          request: { statement: refreshSql },
+          response: { statement_id: statementId, state: executeData.status?.state },
+        });
+
+        // Check if we got immediate success
+        if (executeData.status?.state === "SUCCEEDED") {
+          addLog("success", `Materialized view "${data.label}" refreshed successfully in ${Date.now() - startTime}ms`);
+          setIsRefreshing(false);
+          return;
+        }
+
+        // Need to poll for completion
+        const maxPolls = 300; // 5 minutes for refresh
+        let pollCount = 0;
+
+        while (pollCount < maxPolls) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          pollCount++;
+
+          const statusResponse = await fetch(`/api/databricks/sql/status/${statementId}`);
+
+          if (!statusResponse.ok) {
+            const errorData = await statusResponse.json();
+            throw new Error(errorData.error || "Failed to get query status");
+          }
+
+          const statusData = await statusResponse.json();
+
+          switch (statusData.status.state) {
+            case "SUCCEEDED":
+              addLog("success", `Materialized view "${data.label}" refreshed successfully in ${Date.now() - startTime}ms`);
+              setIsRefreshing(false);
+              return;
+
+            case "FAILED":
+              throw new Error(statusData.status.error?.message || "Refresh failed");
+
+            case "CANCELED":
+              throw new Error("Refresh was cancelled");
+
+            case "CLOSED":
+              throw new Error("Refresh session closed");
+
+            case "PENDING":
+            case "RUNNING":
+              // Continue polling
+              break;
+          }
+        }
+
+        throw new Error("Refresh timed out after 5 minutes");
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : "Unknown error during refresh";
+        addLog("error", `Refresh failed: ${errorMessage}`);
+      } finally {
+        setIsRefreshing(false);
+      }
+    },
+    [addLog, addApiCall, data, isMaterializedView]
+  );
+
   return (
     <>
       {/* Node Resizer - only visible when selected */}
@@ -293,30 +617,85 @@ function BaseNodeComponent({
         handleClassName="!w-2 !h-2 !bg-blue-500 !border-white !border-2 !rounded-sm"
       />
 
-      {/* Floating toolbar - appears above node when selected */}
-      <NodeToolbar
-        isVisible={selected}
-        position={Position.Top}
-        offset={8}
-        className="flex items-center bg-white rounded-lg shadow-lg border border-slate-200 px-1"
-      >
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 px-2 text-xs text-slate-600 hover:text-blue-600 hover:bg-blue-50 gap-1.5"
-              onClick={handleSample}
-            >
-              <Database className="h-3.5 w-3.5" />
-              Sample
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="top" className="text-xs">
-            Sample data up to this node
-          </TooltipContent>
-        </Tooltip>
-      </NodeToolbar>
+      {/* Floating toolbar - appears above node when selected (not for streaming table destinations) */}
+      {!(category === "destination" && data.subtype === "streaming") && (
+        <NodeToolbar
+          isVisible={selected}
+          position={Position.Top}
+          offset={8}
+          className="flex items-center bg-white rounded-lg shadow-lg border border-slate-200 px-1"
+        >
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs text-slate-600 hover:text-blue-600 hover:bg-blue-50 gap-1.5"
+                onClick={handleSample}
+              >
+                <Database className="h-3.5 w-3.5" />
+                Sample
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="text-xs">
+              Sample data up to this node
+            </TooltipContent>
+          </Tooltip>
+
+          {/* Deploy and Refresh buttons for materialized views */}
+          {isMaterializedView && (
+            <>
+              <div className="w-px h-4 bg-slate-200 mx-1" />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs text-slate-600 hover:text-green-600 hover:bg-green-50 gap-1.5"
+                    onClick={handleDeploy}
+                    disabled={isDeploying || !validation.isValid}
+                  >
+                    {isDeploying ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Rocket className="h-3.5 w-3.5" />
+                    )}
+                    {isDeploying ? "Deploying..." : "Deploy"}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-xs">
+                  {!validation.isValid
+                    ? "Complete required fields before deploying"
+                    : "Create or replace the materialized view"}
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs text-slate-600 hover:text-amber-600 hover:bg-amber-50 gap-1.5"
+                    onClick={handleRefresh}
+                    disabled={isRefreshing || !validation.isValid}
+                  >
+                    {isRefreshing ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-3.5 w-3.5" />
+                    )}
+                    {isRefreshing ? "Refreshing..." : "Refresh"}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-xs">
+                  {!validation.isValid
+                    ? "Complete required fields before refreshing"
+                    : "Refresh the materialized view data"}
+                </TooltipContent>
+              </Tooltip>
+            </>
+          )}
+        </NodeToolbar>
+      )}
 
       <div
         className={cn(
@@ -343,6 +722,43 @@ function BaseNodeComponent({
                 </li>
               ))}
             </ul>
+          </TooltipContent>
+        </Tooltip>
+      )}
+
+      {/* Destination deployment status indicator */}
+      {isCheckableDestination && tableExistsStatus && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div
+              className={cn(
+                "absolute -top-2 w-5 h-5 rounded-full flex items-center justify-center shadow-sm",
+                !validation.isValid ? "-right-8" : "-right-2",
+                tableExistsStatus === "loading" && "bg-slate-400",
+                tableExistsStatus === "exists" && "bg-green-500",
+                tableExistsStatus === "not-found" && "bg-amber-500",
+                tableExistsStatus === "error" && "bg-red-500"
+              )}
+            >
+              {tableExistsStatus === "loading" && (
+                <Loader2 className="h-3 w-3 text-white animate-spin" />
+              )}
+              {tableExistsStatus === "exists" && (
+                <CheckCircle2 className="h-3 w-3 text-white" />
+              )}
+              {tableExistsStatus === "not-found" && (
+                <CloudOff className="h-3 w-3 text-white" />
+              )}
+              {tableExistsStatus === "error" && (
+                <AlertTriangle className="h-3 w-3 text-white" />
+              )}
+            </div>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="text-xs">
+            {tableExistsStatus === "loading" && "Checking if table exists..."}
+            {tableExistsStatus === "exists" && "Table exists in Unity Catalog"}
+            {tableExistsStatus === "not-found" && "Table not yet deployed to Unity Catalog"}
+            {tableExistsStatus === "error" && "Error checking table status"}
           </TooltipContent>
         </Tooltip>
       )}

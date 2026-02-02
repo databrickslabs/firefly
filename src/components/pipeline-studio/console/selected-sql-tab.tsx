@@ -6,44 +6,27 @@ import {
   usePipelineNodes,
   usePipelineEdges,
   useSelectedNodeIds,
+  usePipelineMetadata,
 } from "@/providers/pipeline-store-provider";
-import { generateSQLPreview } from "@/lib/pipeline-to-sql";
-import type { PipelineNode, PipelineEdge } from "@/lib/pipeline-to-sql";
-
-/**
- * Get all upstream dependencies for a given node (recursively)
- */
-function getUpstreamDependencies(
-  nodeId: string,
-  nodes: PipelineNode[],
-  edges: PipelineEdge[]
-): Set<string> {
-  const dependencies = new Set<string>();
-  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
-
-  function traverse(id: string) {
-    if (dependencies.has(id)) return;
-    dependencies.add(id);
-
-    // Find all edges where this node is the target (incoming edges)
-    const incomingEdges = edges.filter((e) => e.target === id);
-    for (const edge of incomingEdges) {
-      if (nodeMap.has(edge.source)) {
-        traverse(edge.source);
-      }
-    }
-  }
-
-  traverse(nodeId);
-  return dependencies;
-}
+import { useActiveOrganizationId, useUserEmail } from "@/providers/user-store-provider";
+import { generateSampleSQL, generateDestinationSQL, type FireflyMetadata } from "@/lib/pipeline-to-sql";
 
 export function SelectedSqlTab() {
   const nodes = usePipelineNodes();
   const edges = usePipelineEdges();
   const selectedNodeIds = useSelectedNodeIds();
+  const { pipelineId } = usePipelineMetadata();
+  const orgId = useActiveOrganizationId();
+  const userEmail = useUserEmail();
 
-  const sql = useMemo(() => {
+  // Firefly metadata for table properties
+  const fireflyMetadata: FireflyMetadata = useMemo(() => ({
+    pipelineId,
+    orgId,
+    userId: userEmail,
+  }), [pipelineId, orgId, userEmail]);
+
+  const sqlResult = useMemo(() => {
     // Need at least one selected node
     if (selectedNodeIds.length === 0) {
       return null;
@@ -57,49 +40,93 @@ export function SelectedSqlTab() {
       return null;
     }
 
-    // Get all upstream dependencies including the selected node
-    const dependencyIds = getUpstreamDependencies(selectedNodeId, nodes, edges);
+    // Check if selected node is a destination (MV or View)
+    // If so, generate the full CREATE statement (stopping at upstream MVs/views)
+    const isDestination = selectedNode.data.category === "destination";
+    const isViewType = selectedNode.data.subtype === "materialized-view" ||
+                       selectedNode.data.subtype === "view";
 
-    // Filter nodes and edges to only include dependencies
-    const filteredNodes = nodes.filter((n) => dependencyIds.has(n.id));
-    const filteredEdges = edges.filter(
-      (e) => dependencyIds.has(e.source) && dependencyIds.has(e.target)
-    );
-
-    if (filteredNodes.length === 0) {
-      return null;
+    if (isDestination && isViewType) {
+      // For MV/View destinations, generate CREATE statement
+      // This uses the same traversal logic as generateSampleSQL - stops at upstream MVs/views
+      return generateDestinationSQL(selectedNodeId, nodes, edges, fireflyMetadata);
     }
 
-    return generateSQLPreview(filteredNodes, filteredEdges);
-  }, [nodes, edges, selectedNodeIds]);
+    // For non-destination nodes, use generateSampleSQL with limit=0
+    // This properly handles MV/views as terminal sources and generates SELECT queries
+    return generateSampleSQL(selectedNodeId, nodes, edges, 0);
+  }, [nodes, edges, selectedNodeIds, fireflyMetadata]);
 
   // Find the selected node label for display
   const selectedNode = selectedNodeIds.length > 0
     ? nodes.find((n) => n.id === selectedNodeIds[0])
     : null;
 
+  // Build display content based on result
+  const renderContent = () => {
+    if (selectedNodeIds.length === 0) {
+      return (
+        <span className="text-slate-400">
+          Select a node to see its SQL and dependencies.
+        </span>
+      );
+    }
+
+    if (!sqlResult) {
+      return (
+        <span className="text-slate-400">
+          No SQL generated for the selected node.
+        </span>
+      );
+    }
+
+    if (!sqlResult.isValid) {
+      return (
+        <>
+          <span className="text-red-500 block mb-2">
+            -- Cannot generate SQL for: {selectedNode?.data.label ?? "Unknown"}
+          </span>
+          {sqlResult.errors.map((error, i) => (
+            <span key={i} className="text-red-400 block">-- Error: {error}</span>
+          ))}
+          {sqlResult.invalidNodes.length > 0 && (
+            <>
+              <span className="text-red-400 block mt-2">-- Nodes with missing fields:</span>
+              {sqlResult.invalidNodes.map((node, i) => (
+                <span key={i} className="text-red-400 block">
+                  --   {node.label}: {node.issues.join(", ")}
+                </span>
+              ))}
+            </>
+          )}
+        </>
+      );
+    }
+
+    return (
+      <>
+        <span className="text-slate-400 block mb-2">
+          -- SQL for: {selectedNode?.data.label ?? "Unknown"} and its dependencies
+        </span>
+        {sqlResult.warnings.length > 0 && (
+          <>
+            {sqlResult.warnings.map((warning, i) => (
+              <span key={i} className="text-amber-500 block">-- Warning: {warning}</span>
+            ))}
+            <span className="block mb-2" />
+          </>
+        )}
+        {sqlResult.sql}
+      </>
+    );
+  };
+
   return (
     <div className="h-full w-full relative">
       <div className="absolute inset-0 overflow-hidden">
         <ScrollArea className="h-full w-full" type="always">
           <pre className="p-4 font-mono text-xs text-slate-700 whitespace-pre">
-            {sql ? (
-              <>
-                <span className="text-slate-400 block mb-2">
-                  -- SQL for: {selectedNode?.data.label ?? "Unknown"} and its
-                  dependencies
-                </span>
-                {sql}
-              </>
-            ) : selectedNodeIds.length === 0 ? (
-              <span className="text-slate-400">
-                Select a node to see its SQL and dependencies.
-              </span>
-            ) : (
-              <span className="text-slate-400">
-                No SQL generated for the selected node.
-              </span>
-            )}
+            {renderContent()}
           </pre>
           <ScrollBar orientation="horizontal" />
           <ScrollBar orientation="vertical" />

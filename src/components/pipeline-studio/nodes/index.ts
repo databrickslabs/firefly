@@ -14,7 +14,8 @@ import { InferenceNode } from "./ai-nodes/inference-node";
 import { AiParseNode } from "./ai-nodes/ai-parse-node";
 
 // Destination nodes
-import { DeltaTableNode } from "./destination-nodes/delta-table-node";
+import { MaterializedViewNode } from "./destination-nodes/materialized-view-node";
+import { ViewNode } from "./destination-nodes/view-node";
 import { StreamingTableNode } from "./destination-nodes/streaming-table-node";
 
 import type { NodeCategory, NodeSubtype } from "@/stores/pipeline-store";
@@ -30,6 +31,8 @@ import {
   ScanText,
   Database,
   ArrowUpToLine,
+  Layers,
+  Eye,
   type LucideIcon,
 } from "lucide-react";
 
@@ -50,7 +53,8 @@ export const nodeTypes = {
   "ai-inference": InferenceNode,
   "ai-ai-parse": AiParseNode,
   // Destinations
-  "destination-delta": DeltaTableNode,
+  "destination-materialized-view": MaterializedViewNode,
+  "destination-view": ViewNode,
   "destination-streaming": StreamingTableNode,
 };
 
@@ -144,10 +148,17 @@ export const nodeDefinitions: NodeDefinition[] = [
   // Destinations
   {
     category: "destination",
-    subtype: "delta",
-    label: "Delta Table",
-    icon: Database,
-    description: "Write data to a Delta table",
+    subtype: "materialized-view",
+    label: "Materialized View",
+    icon: Layers,
+    description: "Create a materialized view that can be used as input",
+  },
+  {
+    category: "destination",
+    subtype: "view",
+    label: "View",
+    icon: Eye,
+    description: "Create a view that can be used as input",
   },
   {
     category: "destination",

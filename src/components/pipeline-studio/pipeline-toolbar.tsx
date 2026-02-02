@@ -2,7 +2,6 @@
 
 import { useState, useRef, useEffect } from "react";
 import {
-  Play,
   FlaskConical,
   Save,
   ZoomIn,
@@ -13,6 +12,7 @@ import {
   XCircle,
   Pencil,
   Loader2,
+  Rocket,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { usePipelineStore, usePipelineMetadata, usePipelineNodes, usePipelineEdges, useSampleDataByNode, useNodeSampleDataActions } from "@/providers/pipeline-store-provider";
+import { useActiveOrganizationId, useUserEmail } from "@/providers/user-store-provider";
 import { useReactFlow } from "@xyflow/react";
 import { cn } from "@/lib/utils";
 import { CompactWarehouseSelector } from "./compact-warehouse-selector";
@@ -42,6 +43,9 @@ import { useBeforeUnload } from "@/hooks/use-before-unload";
 import { toast } from "sonner";
 import { generateSampleSQL } from "@/lib/pipeline-to-sql";
 import { loadWarehouse } from "@/lib/warehouse-storage";
+import { DeployAllDialog } from "./deploy-all-dialog";
+import type { Edge } from "@xyflow/react";
+import type { FireflyMetadata } from "@/lib/pipeline-to-sql";
 
 interface ToolbarButtonProps {
   icon: React.ReactNode;
@@ -88,12 +92,22 @@ export function PipelineToolbar() {
   const edges = usePipelineEdges();
   const sampleDataByNode = useSampleDataByNode();
   const { clearAllNodeSamples, setNodeSampleLoading, setNodeSampleResult, setNodeSampleError } = useNodeSampleDataActions();
+  const orgId = useActiveOrganizationId();
+  const userEmail = useUserEmail();
   const { zoomIn, zoomOut, fitView } = useReactFlow();
+
+  // Firefly metadata for table properties
+  const fireflyMetadata: FireflyMetadata = {
+    pipelineId,
+    orgId,
+    userId: userEmail,
+  };
   const [showClearDialog, setShowClearDialog] = useState(false);
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState(pipelineName);
   const [isSampling, setIsSampling] = useState(false);
   const [sampleProgress, setSampleProgress] = useState({ completed: 0, total: 0 });
+  const [showDeployDialog, setShowDeployDialog] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   // Persistence hook
@@ -123,10 +137,12 @@ export function PipelineToolbar() {
   // Count nodes with sample data
   const sampledNodeCount = Object.keys(sampleDataByNode).length;
 
-  const handleRun = () => {
-    addLog("info", "Starting pipeline execution...");
-    // TODO: Implement pipeline run
-  };
+  // Count deployable destination nodes (MVs and views)
+  const destinationNodes = nodes.filter(n =>
+    n.data.category === "destination" &&
+    (n.data.subtype === "materialized-view" || n.data.subtype === "view")
+  );
+  const destinationNodeCount = destinationNodes.length;
 
   // Helper function to sample a single node - returns success/failure
   const sampleSingleNode = async (
@@ -272,8 +288,10 @@ export function PipelineToolbar() {
   };
 
   const handleSample = async () => {
-    // Filter out destination nodes - we only sample source/transform/AI nodes
-    const sampleableNodes = nodes.filter(n => n.data.category !== "destination");
+    // Filter out streaming table destinations - materialized views and views can be sampled
+    const sampleableNodes = nodes.filter(n =>
+      !(n.data.category === "destination" && n.data.subtype === "streaming")
+    );
 
     if (sampleableNodes.length === 0) {
       addLog("info", "No nodes to sample");
@@ -478,19 +496,34 @@ export function PipelineToolbar() {
 
           <Separator orientation="vertical" className="h-6 mx-1" />
 
-          {/* Run Controls */}
-          <ToolbarButton
-            icon={<Play className="h-4 w-4" />}
-            label="Run Pipeline"
-            onClick={handleRun}
-          />
+          {/* Deploy and Sample Controls */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowDeployDialog(true)}
+                disabled={destinationNodeCount === 0}
+                className="h-8 w-8 p-0"
+              >
+                <Rocket className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p>
+                {destinationNodeCount > 0
+                  ? `Deploy All (${destinationNodeCount})`
+                  : "No destinations to deploy"}
+              </p>
+            </TooltipContent>
+          </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={handleSample}
-                disabled={isSampling || nodes.filter(n => n.data.category !== "destination").length === 0}
+                disabled={isSampling || nodes.filter(n => !(n.data.category === "destination" && n.data.subtype === "streaming")).length === 0}
                 className={cn("h-8 p-0", isSampling ? "w-auto px-2 gap-1.5" : "w-8")}
               >
                 {isSampling ? (
@@ -613,6 +646,16 @@ export function PipelineToolbar() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Deploy All Dialog */}
+      <DeployAllDialog
+        open={showDeployDialog}
+        onOpenChange={setShowDeployDialog}
+        nodes={nodes}
+        edges={edges as Edge[]}
+        onLog={addLog}
+        fireflyMetadata={fireflyMetadata}
+      />
     </TooltipProvider>
   );
 }

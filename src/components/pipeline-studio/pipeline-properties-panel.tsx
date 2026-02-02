@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { Trash2, Copy, Layers } from "lucide-react";
+import { Trash2, Copy, Layers, Settings, Columns } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   useSelectedNode,
   useSelectedNodeIds,
@@ -21,6 +22,7 @@ import {
   FilterProperties,
   AIProperties,
   DestinationProperties,
+  ColumnMappingProperties,
 } from "./properties";
 import { getNodeIcon } from "./nodes";
 import { DeleteConfirmDialog } from "./delete-confirm-dialog";
@@ -40,6 +42,14 @@ export function PipelinePropertiesPanel() {
       updateNodeData(selectedNode.id, {
         config: { ...selectedNode.data.config, ...updates },
       });
+    },
+    [selectedNode, updateNodeData]
+  );
+
+  const handleUpdateNodeData = useCallback(
+    (updates: Partial<PipelineNodeData>) => {
+      if (!selectedNode) return;
+      updateNodeData(selectedNode.id, updates);
     },
     [selectedNode, updateNodeData]
   );
@@ -190,6 +200,9 @@ export function PipelinePropertiesPanel() {
     </>
   );
 
+  // Check if node supports column mapping (all node types except we show different UI for sources)
+  const supportsColumnMapping = selectedNode !== null;
+
   // Render single node panel
   const renderSingleNodePanel = () => (
     <>
@@ -210,53 +223,96 @@ export function PipelinePropertiesPanel() {
         </div>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 min-h-0">
-        <ScrollArea className="h-full">
-          <div className="p-4 space-y-6">
-            {/* Node Name */}
-            <div className="space-y-2">
-              <Label htmlFor="nodeName">Node Name</Label>
-              <Input
-                id="nodeName"
-                value={selectedNode!.data.label}
-                onChange={(e) => handleUpdateLabel(e.target.value)}
-                placeholder="Enter node name"
-              />
-            </div>
-
-            <Separator />
-
-            {/* Category-specific properties */}
-            {renderPropertiesForm()}
-
-            <Separator />
-
-            {/* Delete Button */}
-            <Button
-              variant="outline"
-              className="w-full text-red-600 hover:text-red-700 hover:bg-red-50 hover:border-red-200"
-              onClick={handleDelete}
-            >
-              <Trash2 className="h-4 w-4 mr-2" />
-              Delete Node
-            </Button>
+      {/* Tabbed Content */}
+      <div className="flex-1 min-h-0 flex flex-col">
+        <Tabs defaultValue="settings" className="flex-1 flex flex-col min-h-0">
+          <div className="flex-shrink-0 px-4 pt-2">
+            <TabsList className="w-full">
+              <TabsTrigger value="settings" className="flex-1 gap-1.5">
+                <Settings className="h-3.5 w-3.5" />
+                Settings
+              </TabsTrigger>
+              {supportsColumnMapping && (
+                <TabsTrigger value="columns" className="flex-1 gap-1.5">
+                  <Columns className="h-3.5 w-3.5" />
+                  Columns
+                </TabsTrigger>
+              )}
+            </TabsList>
           </div>
-        </ScrollArea>
+
+          <TabsContent value="settings" className="flex-1 min-h-0 mt-0">
+            <ScrollArea className="h-full">
+              <div className="p-4 space-y-6">
+                {/* Node Name */}
+                <div className="space-y-2">
+                  <Label htmlFor="nodeName">Node Name</Label>
+                  <Input
+                    id="nodeName"
+                    value={selectedNode!.data.label}
+                    onChange={(e) => handleUpdateLabel(e.target.value)}
+                    placeholder="Enter node name"
+                  />
+                </div>
+
+                <Separator />
+
+                {/* Category-specific properties */}
+                {renderPropertiesForm()}
+
+                <Separator />
+
+                {/* Delete Button */}
+                <Button
+                  variant="outline"
+                  className="w-full text-red-600 hover:text-red-700 hover:bg-red-50 hover:border-red-200"
+                  onClick={handleDelete}
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete Node
+                </Button>
+              </div>
+            </ScrollArea>
+          </TabsContent>
+
+          {supportsColumnMapping && (
+            <TabsContent value="columns" className="flex-1 min-h-0 mt-0">
+              <ScrollArea className="h-full">
+                <div className="p-4">
+                  <ColumnMappingProperties
+                    data={selectedNode!.data}
+                    nodeId={selectedNode!.id}
+                    onUpdate={handleUpdateNodeData}
+                  />
+                </div>
+              </ScrollArea>
+            </TabsContent>
+          )}
+        </Tabs>
       </div>
     </>
   );
 
+  // Determine what to render
+  const renderContent = () => {
+    // If no nodes selected, show no selection panel
+    if (selectedNodeIds.length === 0 || (!isMultiSelect && !selectedNode)) {
+      return <NoSelectionPanel />;
+    }
+
+    // If multiple nodes selected, show multi-select panel
+    if (isMultiSelect) {
+      return renderMultiSelectPanel();
+    }
+
+    // Single node selected
+    return renderSingleNodePanel();
+  };
+
   // Always render the same container structure for consistent reconciliation
   return (
     <div className="h-full flex flex-col border-l border-slate-200 bg-white overflow-hidden">
-      {selectedNodeIds.length === 0 || (!isMultiSelect && !selectedNode) ? (
-        <NoSelectionPanel />
-      ) : isMultiSelect ? (
-        renderMultiSelectPanel()
-      ) : (
-        renderSingleNodePanel()
-      )}
+      {renderContent()}
 
       <DeleteConfirmDialog
         open={showDeleteDialog}

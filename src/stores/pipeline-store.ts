@@ -10,13 +10,21 @@ export type NodeCategory = "source" | "transform" | "ai" | "destination";
 export type SourceSubtype = "table" | "volume" | "stream";
 export type TransformSubtype = "sql" | "python" | "join" | "filter";
 export type AISubtype = "inference" | "ai-parse";
-export type DestinationSubtype = "delta" | "streaming";
+export type DestinationSubtype = "materialized-view" | "view" | "streaming";
 
 export type NodeSubtype =
   | SourceSubtype
   | TransformSubtype
   | AISubtype
   | DestinationSubtype;
+
+// Column mapping configuration for nodes
+export interface ColumnMappingConfig {
+  name: string;
+  selected: boolean;
+  alias?: string;
+  side?: "a" | "b"; // For join nodes, which side the column came from
+}
 
 // Node data structure
 // Index signature makes this compatible with React Flow's Record<string, unknown> constraint
@@ -25,6 +33,8 @@ export interface PipelineNodeData extends Record<string, unknown> {
   category: NodeCategory;
   subtype: NodeSubtype;
   config: Record<string, unknown>;
+  // Column mapping for the node's output - if not set, uses SELECT *
+  columnMapping?: ColumnMappingConfig[];
 }
 
 // Log entry for console
@@ -296,7 +306,9 @@ export const createPipelineStore = () => {
           })),
 
         // Selection
-        selectNode: (nodeId) => set({ selectedNodeIds: nodeId ? [nodeId] : [] }),
+        selectNode: (nodeId) => set({
+          selectedNodeIds: nodeId ? [nodeId] : [],
+        }),
 
         selectNodes: (nodeIds) => set({ selectedNodeIds: nodeIds }),
 

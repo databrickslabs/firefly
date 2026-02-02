@@ -88,10 +88,15 @@ const nodeRequiredFields: Record<string, FieldRequirement[]> = {
     { path: "parseType", label: "Parse Type" },
   ],
   // Destinations
-  "destination-delta": [
+  "destination-materialized-view": [
     { path: "catalog", label: "Catalog" },
     { path: "schema", label: "Schema" },
-    { path: "table", label: "Table" },
+    { path: "table", label: "View Name" },
+  ],
+  "destination-view": [
+    { path: "catalog", label: "Catalog" },
+    { path: "schema", label: "Schema" },
+    { path: "table", label: "View Name" },
   ],
   "destination-streaming": [
     { path: "catalog", label: "Catalog" },

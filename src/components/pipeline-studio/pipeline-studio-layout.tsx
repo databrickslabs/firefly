@@ -129,7 +129,7 @@ function PipelineStudioContent({ pipelineId }: { pipelineId?: string | null }) {
                   </div>
                 </Panel>
 
-                {/* Right Panel - Properties (only shown when node selected) */}
+                {/* Right Panel - Properties (shown when node is selected) */}
                 {hasSelection && (
                   <>
                     <HorizontalResizeHandle />

@@ -9,8 +9,10 @@ import {
   addEdge,
   type Connection,
   type OnSelectionChangeParams,
+  type DefaultEdgeOptions,
   BackgroundVariant,
   SelectionMode,
+  MarkerType,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import "./pipeline-canvas.css";
@@ -44,6 +46,19 @@ export function PipelineCanvas() {
     setEdges,
     addLog,
   } = usePipelineStore();
+
+  // Default edge options for better clickability and styling
+  const defaultEdgeOptions: DefaultEdgeOptions = {
+    style: { strokeWidth: 2, stroke: "#94a3b8" },
+    markerEnd: {
+      type: MarkerType.ArrowClosed,
+      width: 16,
+      height: 16,
+      color: "#94a3b8",
+    },
+    interactionWidth: 20, // Makes edges easier to click
+  };
+
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -228,6 +243,7 @@ export function PipelineCanvas() {
         onPaneClick={onPaneClick}
         onSelectionChange={onSelectionChange}
         nodeTypes={nodeTypes}
+        defaultEdgeOptions={defaultEdgeOptions}
         selectionMode={SelectionMode.Partial}
         selectionOnDrag
         panOnDrag={[1, 2]} // Pan with middle or right mouse button

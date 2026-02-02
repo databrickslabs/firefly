@@ -18,6 +18,10 @@ export function SpecTab() {
         category: node.data.category,
         subtype: node.data.subtype,
         config: node.data.config,
+        // Include column mapping if configured (not SELECT *)
+        ...(node.data.columnMapping && node.data.columnMapping.length > 0
+          ? { columnMapping: node.data.columnMapping }
+          : {}),
         position: node.position,
       })),
       edges: edges.map((edge) => ({
