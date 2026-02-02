@@ -1,0 +1,74 @@
+flowchart TB
+    subgraph Traffic["Incoming Traffic"]
+        Req["HTTP Requests"]
+    end
+
+    subgraph LoadBalancer["Load Balancer"]
+        LB["Round Robin / Least Connections"]
+        Health["Health Checks"]
+    end
+
+    subgraph NextJS["Next.js Application"]
+        direction TB
+
+        subgraph ServerlessMode["Serverless Mode"]
+            Edge["Edge Functions<br/>(Vercel/Cloudflare)"]
+            SSR["SSR Functions<br/>(AWS Lambda)"]
+        end
+
+        subgraph ContainerMode["Container Mode"]
+            K8s["Kubernetes Pods"]
+            HPA["Horizontal Pod Autoscaler"]
+            Metrics["CPU/Memory Metrics"]
+        end
+
+        subgraph Features["Scaling Features"]
+            Stateless["Stateless Design"]
+            NoSession["No In-Memory Sessions"]
+            DBSession["Database Sessions"]
+        end
+    end
+
+    subgraph GoProxy["Go Proxy"]
+        direction TB
+
+        subgraph ProxyScale["Scaling"]
+            ProxyK8s["Kubernetes Deployment"]
+            ProxyHPA["HPA: 2-20 replicas"]
+        end
+
+        subgraph ProxyFeatures["Features"]
+            Light["Lightweight: ~15MB"]
+            Fast["<1ms Token Decrypt"]
+            Concurrent["10K+ Concurrent Conns"]
+        end
+    end
+
+    subgraph Metrics["Scaling Triggers"]
+        CPU["CPU > 70%"]
+        Memory["Memory > 80%"]
+        ReqRate["Request Rate"]
+        Latency["P99 Latency"]
+    end
+
+    Req --> LB
+    LB --> Health
+    Health --> Edge
+    Health --> SSR
+    Health --> K8s
+
+    K8s --> HPA
+    HPA --> Metrics
+    Metrics --> CPU
+    Metrics --> Memory
+
+    K8s --> Stateless
+    Stateless --> NoSession
+    NoSession --> DBSession
+
+    K8s --> ProxyK8s
+    ProxyK8s --> ProxyHPA
+
+    style LB fill:#f97316,stroke:#ea580c,color:#fff
+    style HPA fill:#3b82f6,stroke:#2563eb,color:#fff
+    style ProxyHPA fill:#22c55e,stroke:#16a34a,color:#fff

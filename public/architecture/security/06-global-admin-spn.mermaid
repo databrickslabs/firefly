@@ -1,0 +1,67 @@
+flowchart TB
+    subgraph Application["FireFly Application"]
+        direction TB
+        API["API Routes"]
+        EnvVars["Environment Variables<br/>(Global Admin Credentials)"]
+    end
+
+    subgraph GlobalAdminSPN["Global Admin SPN"]
+        direction TB
+        AdminToken["Admin Token<br/>(all-apis scope)"]
+
+        subgraph AdminOps["Administrative Operations"]
+            CreateCatalog["Create Delta Sharing Catalogs"]
+            DeleteCatalog["Delete/Unmount Catalogs"]
+            GrantPerms["Grant Permissions to User SPNs"]
+            ListProviders["List Providers & Shares"]
+            ValidateCatalogs["Validate Catalog Configurations"]
+        end
+
+        subgraph SCIMOps["SCIM Operations"]
+            VerifyGroups["Verify Group Membership"]
+            CheckStorageSettings["Check Storage Settings"]
+        end
+
+        subgraph UCOps["Unity Catalog Operations"]
+            ListVolumes["List Volumes"]
+            CheckSchemas["Check Schema Existence"]
+            GetPermissions["Query Catalog Permissions"]
+        end
+    end
+
+    subgraph UserSPN["User Service Principal"]
+        UserToken["User Token<br/>(limited scope)"]
+
+        subgraph UserOps["Data Operations"]
+            QueryData["Execute SQL Queries"]
+            ReadVolumes["Read from Volumes"]
+            BrowseCatalogs["Browse Assigned Catalogs"]
+        end
+    end
+
+    subgraph Databricks["Databricks Workspace"]
+        UnityCatalog["Unity Catalog"]
+        SCIM["SCIM API"]
+        SQLWarehouse["Serverless SQL"]
+    end
+
+    API --> EnvVars
+    EnvVars --> AdminToken
+    AdminToken --> AdminOps
+    AdminToken --> SCIMOps
+    AdminToken --> UCOps
+
+    AdminOps --> UnityCatalog
+    SCIMOps --> SCIM
+    UCOps --> UnityCatalog
+
+    GrantPerms -.->|"Grants permissions to"| UserSPN
+
+    UserToken --> UserOps
+    UserOps --> SQLWarehouse
+    SQLWarehouse --> UnityCatalog
+
+    style GlobalAdminSPN fill:#ef4444,stroke:#dc2626,color:#fff
+    style UserSPN fill:#22c55e,stroke:#16a34a,color:#fff
+    style AdminOps fill:#fecaca,stroke:#dc2626
+    style UserOps fill:#bbf7d0,stroke:#16a34a

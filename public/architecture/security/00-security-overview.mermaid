@@ -1,0 +1,61 @@
+flowchart TB
+    subgraph Users["End Users"]
+        U1["Browser"]
+    end
+
+    subgraph Security["Security Layers"]
+        direction TB
+
+        subgraph Auth["Authentication Layer"]
+            SSO["SSO/OIDC Provider"]
+            Session["Session Management"]
+            PKCE["OAuth PKCE"]
+        end
+
+        subgraph Encryption["Encryption Layer"]
+            TLS["TLS 1.3 In Transit"]
+            AES["AES-256-GCM At Rest"]
+            Keys["Key Management"]
+        end
+
+        subgraph Access["Access Control Layer"]
+            RBAC["Role-Based Access"]
+            OrgIsolation["Organization Isolation"]
+            UC["Unity Catalog Permissions"]
+        end
+
+        subgraph Audit["Audit Layer"]
+            Logs["Activity Logging"]
+            Trail["Audit Trail"]
+        end
+    end
+
+    subgraph Platform["FireFly Platform"]
+        API["Next.js API Routes"]
+        DB["PostgreSQL"]
+    end
+
+    subgraph Databricks["Databricks"]
+        SPN["Service Principal"]
+        UCat["Unity Catalog"]
+    end
+
+    U1 --> SSO
+    SSO --> Session
+    Session --> PKCE
+    PKCE --> TLS
+    TLS --> API
+    API --> AES
+    AES --> DB
+    API --> RBAC
+    RBAC --> OrgIsolation
+    OrgIsolation --> SPN
+    SPN --> UC
+    UC --> UCat
+    API --> Logs
+    Logs --> Trail
+
+    style Auth fill:#22c55e,stroke:#16a34a,color:#fff
+    style Encryption fill:#3b82f6,stroke:#2563eb,color:#fff
+    style Access fill:#f97316,stroke:#ea580c,color:#fff
+    style Audit fill:#8b5cf6,stroke:#7c3aed,color:#fff

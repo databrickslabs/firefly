@@ -1,0 +1,37 @@
+sequenceDiagram
+    participant User
+    participant App as Your Application
+    participant BetterAuth as Better Auth<br/>(Session)
+    participant DB as PostgreSQL
+    participant Okta as Okta IdP
+    participant Databricks as Databricks<br/>Workspace
+
+    rect rgb(240, 248, 255)
+        Note over User,Okta: Phase 1: User SSO Login
+        User->>App: Login Request
+        App->>Okta: OAuth 2.0 Authorization
+        Okta->>User: Authenticate (MFA, etc.)
+        Okta-->>App: ID Token + Access Token
+        App->>BetterAuth: Create Session
+        BetterAuth->>DB: Store session
+    end
+
+    rect rgb(255, 248, 240)
+        Note over App,Databricks: Phase 2: SPN Token Acquisition
+        User->>App: Access Databricks Feature
+        App->>BetterAuth: Validate Session
+        BetterAuth-->>App: User Identity (email)
+        App->>DB: Query userSpns table<br/>(lookup by email)
+        DB-->>App: SPN Credentials<br/>(clientId, clientSecret)
+        App->>Databricks: POST /oidc/v1/token<br/>grant_type=client_credentials<br/>scope=all-apis
+        Databricks-->>App: Workspace Access Token
+    end
+
+    rect rgb(240, 255, 240)
+        Note over App,Databricks: Phase 3: API Calls with SPN Token
+        App->>Databricks: API Request<br/>Authorization: Bearer {token}
+        Databricks-->>App: API Response
+        App-->>User: Render Data
+    end
+
+    Note over User,Databricks: User never sees Databricks login<br/>All API calls use mapped SPN

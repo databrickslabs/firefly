@@ -1,0 +1,39 @@
+sequenceDiagram
+    participant User
+    participant Browser
+    participant NextJS as Next.js Server
+    participant DB as Database
+    participant GoProxy as Go Proxy
+    participant Marimo as Marimo App<br/>(Databricks)
+
+    User->>Browser: Navigate to /notebook-editor
+    Browser->>NextJS: Request page
+
+    rect rgb(240, 248, 255)
+        Note over NextJS,DB: SSO-SPN Token Acquisition
+        NextJS->>DB: Lookup user's SPN mapping
+        DB-->>NextJS: SPN credentials (clientId, secret)
+        NextJS->>Marimo: POST /oidc/v1/token<br/>(client_credentials)
+        Marimo-->>NextJS: Workspace access token
+    end
+
+    rect rgb(255, 248, 240)
+        Note over NextJS: Token Encryption
+        NextJS->>NextJS: Encrypt token with AES-256-GCM
+        NextJS->>NextJS: Generate proxy URL
+    end
+
+    NextJS-->>Browser: Render page with iframe src
+    Browser->>GoProxy: Request notebook app (encrypted token in URL)
+
+    rect rgb(240, 255, 240)
+        Note over GoProxy: Token Handling
+        GoProxy->>GoProxy: Decrypt token from URL
+        GoProxy->>Marimo: Forward request with Bearer token
+    end
+
+    Marimo-->>GoProxy: Notebook interface
+    GoProxy-->>Browser: Proxied response
+    Browser->>User: Display Marimo notebook editor
+
+    Note over Browser,Marimo: WebSocket connections for<br/>interactive cell execution

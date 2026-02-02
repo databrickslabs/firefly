@@ -1,0 +1,37 @@
+sequenceDiagram
+    participant User as User
+    participant App as FireFly App
+    participant Log as Audit Logger
+    participant DB as PostgreSQL
+    participant Databricks as Databricks
+    participant UCLogs as Unity Catalog Audit
+
+    rect rgb(139, 92, 246)
+        Note over User,Log: Application-Level Audit
+        User->>App: Action Request
+        App->>Log: Log: User ID, Action, Timestamp
+        App->>Log: Log: Organization Context
+        App->>Log: Log: IP Address, User Agent
+        Log->>DB: Store Audit Record
+    end
+
+    rect rgb(249, 115, 22)
+        Note over App,Databricks: API-Level Audit
+        App->>Databricks: API Call (SPN Token)
+        App->>Log: Log: API Endpoint, Parameters
+        App->>Log: Log: Response Status, Duration
+        Databricks->>App: Response
+    end
+
+    rect rgb(59, 130, 246)
+        Note over Databricks,UCLogs: Databricks-Level Audit
+        Databricks->>UCLogs: Log: SPN Identity
+        Databricks->>UCLogs: Log: Data Access (Table, Query)
+        Databricks->>UCLogs: Log: Unity Catalog Operations
+    end
+
+    rect rgb(34, 197, 94)
+        Note over Log,UCLogs: Audit Correlation
+        Log-->>UCLogs: Correlate via Timestamp + SPN
+        Note over Log,UCLogs: Full traceability:<br/>User -> Action -> SPN -> Data Access
+    end

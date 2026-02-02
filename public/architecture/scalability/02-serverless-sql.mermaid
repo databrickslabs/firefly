@@ -1,0 +1,61 @@
+flowchart TB
+    subgraph Queries["Query Workload"]
+        Q1["Light Query<br/>(Metadata)"]
+        Q2["Medium Query<br/>(Aggregation)"]
+        Q3["Heavy Query<br/>(Full Scan)"]
+    end
+
+    subgraph ServerlessSQL["Serverless SQL Warehouse"]
+        direction TB
+
+        subgraph AutoScale["Auto-Scaling Engine"]
+            Monitor["Workload Monitor"]
+            Scaler["Cluster Scaler"]
+        end
+
+        subgraph Clusters["Compute Clusters (Fixed Nodes Each)"]
+            C0["0 Clusters<br/>(Scale to Zero)"]
+            C1["1 Cluster<br/>(Light Load)"]
+            C2["2 Clusters<br/>(Medium Load)"]
+            C3["4+ Clusters<br/>(Heavy Load)"]
+        end
+
+        subgraph Features["Features"]
+            ColdStart["Cold Start: ~5s"]
+            PayPerUse["Pay Per Query"]
+            Isolation["Query Isolation"]
+            FixedNodes["Fixed Nodes/Cluster"]
+        end
+    end
+
+    subgraph Benefits["Scaling Benefits"]
+        Cost["Cost Optimization"]
+        Performance["Performance"]
+        Reliability["Reliability"]
+    end
+
+    Q1 --> Monitor
+    Q2 --> Monitor
+    Q3 --> Monitor
+
+    Monitor --> Scaler
+
+    Scaler --> |"No queries"| C0
+    Scaler --> |"Light"| C1
+    Scaler --> |"Medium"| C2
+    Scaler --> |"Heavy"| C3
+
+    C0 --> ColdStart
+    C1 --> PayPerUse
+    C2 --> Isolation
+    C3 --> FixedNodes
+
+    ColdStart --> Cost
+    PayPerUse --> Cost
+    Isolation --> Performance
+    FixedNodes --> Reliability
+
+    style C0 fill:#94a3b8,stroke:#64748b,color:#fff
+    style C1 fill:#22c55e,stroke:#16a34a,color:#fff
+    style C2 fill:#f59e0b,stroke:#d97706,color:#fff
+    style C3 fill:#ef4444,stroke:#dc2626,color:#fff

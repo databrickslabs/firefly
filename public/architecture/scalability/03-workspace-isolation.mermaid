@@ -1,0 +1,74 @@
+flowchart TB
+    subgraph Organizations["Organizations"]
+        Org1["Organization A<br/>(Enterprise)"]
+        Org2["Organization B<br/>(Startup)"]
+        Org3["Organization C<br/>(Research)"]
+    end
+
+    subgraph FireFly["FireFly Platform"]
+        direction TB
+
+        subgraph Sessions["Session Management"]
+            S1["Sessions: Org A"]
+            S2["Sessions: Org B"]
+            S3["Sessions: Org C"]
+        end
+
+        subgraph Data["Data Isolation"]
+            D1["Data: Org A"]
+            D2["Data: Org B"]
+            D3["Data: Org C"]
+        end
+    end
+
+    subgraph Databricks["Databricks Workspaces"]
+        direction TB
+
+        subgraph WS1["Workspace 1 (Production)"]
+            UC1["Unity Catalog<br/>Catalogs: prod_*"]
+            SQL1["Serverless SQL"]
+            Apps1["Apps: Code Editor"]
+        end
+
+        subgraph WS2["Workspace 2 (Dev/Test)"]
+            UC2["Unity Catalog<br/>Catalogs: dev_*"]
+            SQL2["Serverless SQL"]
+            Apps2["Apps: Notebook"]
+        end
+    end
+
+    subgraph Isolation["Isolation Guarantees"]
+        Network["Network Isolation"]
+        Compute["Compute Isolation"]
+        Storage["Storage Isolation"]
+        Identity["Identity Isolation"]
+    end
+
+    Org1 --> S1
+    Org2 --> S2
+    Org3 --> S3
+
+    S1 --> D1
+    S2 --> D2
+    S3 --> D3
+
+    D1 --> UC1
+    D2 --> UC2
+    D3 --> UC1
+
+    UC1 --> SQL1
+    UC2 --> SQL2
+
+    SQL1 --> Apps1
+    SQL2 --> Apps2
+
+    WS1 --> Network
+    WS1 --> Compute
+    WS2 --> Storage
+    WS2 --> Identity
+
+    style WS1 fill:#3b82f6,stroke:#2563eb,color:#fff
+    style WS2 fill:#22c55e,stroke:#16a34a,color:#fff
+    style Org1 fill:#f97316,stroke:#ea580c,color:#fff
+    style Org2 fill:#8b5cf6,stroke:#7c3aed,color:#fff
+    style Org3 fill:#ec4899,stroke:#db2777,color:#fff

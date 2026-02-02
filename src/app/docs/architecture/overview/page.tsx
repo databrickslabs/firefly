@@ -474,6 +474,28 @@ export default async function ArchitectureOverviewPage() {
             </Link>
 
             <Link
+              href="/docs/architecture/security"
+              className="block border rounded-lg p-4 hover:border-orange-500 hover:bg-orange-50 transition-colors group"
+            >
+              <h4 className="font-semibold mb-2 group-hover:text-orange-600">Security</h4>
+              <p className="text-sm text-muted-foreground">
+                Deep dive into authentication, encryption, multi-tenant isolation,
+                access control, and comprehensive audit trails.
+              </p>
+            </Link>
+
+            <Link
+              href="/docs/architecture/scalability"
+              className="block border rounded-lg p-4 hover:border-orange-500 hover:bg-orange-50 transition-colors group"
+            >
+              <h4 className="font-semibold mb-2 group-hover:text-orange-600">Scalability</h4>
+              <p className="text-sm text-muted-foreground">
+                Learn how FireFly scales with auto-scaling apps, Serverless SQL,
+                workspace isolation, and intelligent caching.
+              </p>
+            </Link>
+
+            <Link
               href="/docs/architecture/lakehouse-apps-proxy"
               className="block border rounded-lg p-4 hover:border-orange-500 hover:bg-orange-50 transition-colors group"
             >

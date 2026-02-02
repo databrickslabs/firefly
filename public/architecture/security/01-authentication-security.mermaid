@@ -1,0 +1,41 @@
+sequenceDiagram
+    participant User as User Browser
+    participant App as FireFly App
+    participant IDP as Identity Provider
+    participant DB as PostgreSQL
+    participant Databricks as Databricks APIs
+
+    rect rgb(34, 197, 94)
+        Note over User,IDP: OAuth 2.0 + PKCE Authentication
+        User->>App: Login Request
+        App->>App: Generate PKCE Code Verifier
+        App->>App: Create Code Challenge (SHA-256)
+        App->>IDP: Redirect with Code Challenge
+        IDP->>User: SSO Login Page
+        User->>IDP: Credentials
+        IDP->>App: Authorization Code
+        App->>IDP: Exchange Code + Verifier
+        IDP->>App: ID Token + Access Token
+    end
+
+    rect rgb(59, 130, 246)
+        Note over App,DB: Secure Session Creation
+        App->>App: Validate ID Token
+        App->>App: Extract User Claims
+        App->>DB: Create/Update User
+        App->>App: Generate Session Token (32 bytes)
+        App->>DB: Store Session (encrypted)
+        App->>User: Set HttpOnly Cookie
+    end
+
+    rect rgb(249, 115, 22)
+        Note over App,Databricks: API Request Flow
+        User->>App: API Request + Session Cookie
+        App->>DB: Validate Session
+        DB->>App: User + Organization Context
+        App->>DB: Get Encrypted SPN Credentials
+        App->>App: Decrypt SPN Secret
+        App->>Databricks: API Call with SPN Token
+        Databricks->>App: Response
+        App->>User: Data
+    end

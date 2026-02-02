@@ -1,0 +1,62 @@
+flowchart TB
+    subgraph Users["Users"]
+        U1["User A (Org 1)"]
+        U2["User B (Org 1)"]
+        U3["User C (Org 2)"]
+    end
+
+    subgraph FireFly["FireFly Platform"]
+        direction TB
+
+        subgraph AuthLayer["Authentication"]
+            Session1["Session: Org 1"]
+            Session2["Session: Org 2"]
+        end
+
+        subgraph DataLayer["Data Isolation"]
+            DB1["Org 1 Data"]
+            DB2["Org 2 Data"]
+        end
+
+        subgraph SPNLayer["Service Principals"]
+            SPN1["SPN: Org 1<br/>Unity Catalog: catalog_a"]
+            SPN2["SPN: Org 2<br/>Unity Catalog: catalog_b"]
+        end
+    end
+
+    subgraph Databricks["Databricks Workspace"]
+        direction TB
+
+        subgraph UC["Unity Catalog"]
+            Cat1["Catalog A<br/>(Org 1 only)"]
+            Cat2["Catalog B<br/>(Org 2 only)"]
+        end
+
+        subgraph Compute["Serverless SQL"]
+            SQL1["Warehouse 1"]
+            SQL2["Warehouse 2"]
+        end
+    end
+
+    U1 --> Session1
+    U2 --> Session1
+    U3 --> Session2
+
+    Session1 --> DB1
+    Session2 --> DB2
+
+    DB1 --> SPN1
+    DB2 --> SPN2
+
+    SPN1 --> Cat1
+    SPN2 --> Cat2
+
+    Cat1 --> SQL1
+    Cat2 --> SQL2
+
+    style Session1 fill:#22c55e,stroke:#16a34a,color:#fff
+    style Session2 fill:#3b82f6,stroke:#2563eb,color:#fff
+    style SPN1 fill:#22c55e,stroke:#16a34a,color:#fff
+    style SPN2 fill:#3b82f6,stroke:#2563eb,color:#fff
+    style Cat1 fill:#22c55e,stroke:#16a34a,color:#fff
+    style Cat2 fill:#3b82f6,stroke:#2563eb,color:#fff

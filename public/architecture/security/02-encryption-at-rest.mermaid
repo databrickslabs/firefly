@@ -1,0 +1,48 @@
+flowchart TB
+    subgraph Sensitive["Sensitive Data"]
+        OAuth["OAuth Tokens"]
+        SPN["SPN Credentials"]
+        Session["Session Tokens"]
+    end
+
+    subgraph Encryption["AES-256-GCM Encryption"]
+        Key["256-bit Key"]
+        IV["12-byte IV (unique per encryption)"]
+        Tag["16-byte Auth Tag"]
+
+        Key --> Encrypt["Encrypt"]
+        IV --> Encrypt
+        OAuth --> Encrypt
+        SPN --> Encrypt
+
+        Encrypt --> Ciphertext["Encrypted Data"]
+        Encrypt --> Tag
+    end
+
+    subgraph Storage["PostgreSQL Storage"]
+        EncData["Encrypted Blob"]
+        IVStore["IV (stored with data)"]
+        TagStore["Auth Tag (stored with data)"]
+
+        Ciphertext --> EncData
+        IV --> IVStore
+        Tag --> TagStore
+    end
+
+    subgraph Retrieval["Decryption Process"]
+        Read["Read from DB"]
+        Decrypt["Decrypt with Key + IV"]
+        Verify["Verify Auth Tag"]
+        Plain["Plain Text"]
+
+        EncData --> Read
+        IVStore --> Read
+        TagStore --> Read
+        Read --> Decrypt
+        Decrypt --> Verify
+        Verify --> Plain
+    end
+
+    style Encryption fill:#3b82f6,stroke:#2563eb,color:#fff
+    style Storage fill:#f59e0b,stroke:#d97706,color:#fff
+    style Retrieval fill:#22c55e,stroke:#16a34a,color:#fff

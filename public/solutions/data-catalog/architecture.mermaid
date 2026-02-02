@@ -1,0 +1,52 @@
+flowchart TB
+    subgraph Client["Browser (React Application)"]
+        direction TB
+        TreeView["CatalogTreeView Component"]
+        MetadataPanel["Metadata Display Panel"]
+        CacheLayer["Client-side Metadata Cache"]
+        SearchBar["Search & Filter"]
+    end
+
+    subgraph APIs["Next.js API Routes"]
+        CatalogsAPI["/api/databricks/unity-catalog/catalogs"]
+        SchemasAPI["/api/databricks/unity-catalog/schemas"]
+        TablesAPI["/api/databricks/unity-catalog/tables"]
+        DetailsAPI["/api/databricks/unity-catalog/table-details"]
+    end
+
+    subgraph Auth["SSO-SPN Authentication"]
+        TokenFn["getDatabricksWorkspaceToken()"]
+        SPNTable["userSpns Database"]
+    end
+
+    subgraph Unity["Unity Catalog (Databricks)"]
+        UCCatalogs["List Catalogs API"]
+        UCSchemas["List Schemas API"]
+        UCTables["List Tables API"]
+        UCColumns["Get Table API"]
+    end
+
+    TreeView -->|"1. Load Catalogs"| CatalogsAPI
+    TreeView -->|"2. Expand Catalog"| SchemasAPI
+    TreeView -->|"3. Expand Schema"| TablesAPI
+    TreeView -->|"4. Select Table"| DetailsAPI
+
+    CatalogsAPI --> TokenFn
+    SchemasAPI --> TokenFn
+    TablesAPI --> TokenFn
+    DetailsAPI --> TokenFn
+
+    TokenFn --> SPNTable
+
+    CatalogsAPI -->|"Bearer Token"| UCCatalogs
+    SchemasAPI -->|"Bearer Token"| UCSchemas
+    TablesAPI -->|"Bearer Token"| UCTables
+    DetailsAPI -->|"Bearer Token"| UCColumns
+
+    UCCatalogs --> CacheLayer
+    UCSchemas --> CacheLayer
+    UCTables --> CacheLayer
+    UCColumns --> MetadataPanel
+
+    CacheLayer -->|"Cached Metadata"| TreeView
+    SearchBar -->|"Filter Results"| TreeView

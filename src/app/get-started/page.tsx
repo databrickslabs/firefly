@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 const LOGIN_OPTIONS = [
   {
     id: "sso-spn",
-    title: "SSO Mapped to SPN",
+    title: "Login With Okta",
     description: "IDP User with SPN Mapping",
     href: "/sso-spn-login",
   },
@@ -21,9 +21,16 @@ const LOGIN_OPTIONS = [
   },
   {
     id: "databricks-idp",
-    title: "Databricks Identity",
+    title: "Login With Databricks",
     description: "Per-workspace authentication",
     href: "/databricks-idp",
+  },
+  {
+    id: "guest-user",
+    title: "Login With Guest User",
+    description: "Coming Soon",
+    href: "#",
+    disabled: true,
   },
 ];
 
@@ -106,7 +113,8 @@ export default function GetStartedPage() {
                     key={option.id}
                     variant="outline"
                     className="w-full h-auto py-4 px-6 justify-start"
-                    onClick={() => handleLoginClick(option.id, option.href)}
+                    onClick={() => !("disabled" in option && option.disabled) && handleLoginClick(option.id, option.href)}
+                    disabled={"disabled" in option && option.disabled}
                   >
                     <div className="flex flex-col items-start">
                       <span className="font-semibold">{option.title}</span>

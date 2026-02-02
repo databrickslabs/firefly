@@ -1,0 +1,64 @@
+flowchart TB
+    subgraph Client["Client Layer"]
+        Browser["Browser"]
+        TQ["TanStack Query Cache"]
+    end
+
+    subgraph Server["Server Layer"]
+        API["Next.js API Routes"]
+        UC["unstable_cache"]
+        Tags["Cache Tags"]
+    end
+
+    subgraph External["External Services"]
+        DB["PostgreSQL"]
+        Databricks["Databricks APIs"]
+    end
+
+    subgraph Strategy["Caching Strategy"]
+        direction TB
+
+        subgraph ClientCache["Client-Side (TanStack Query)"]
+            Stale["staleTime: 0"]
+            Refetch["refetchOnWindowFocus: true"]
+            Optimistic["Optimistic Updates"]
+        end
+
+        subgraph ServerCache["Server-Side (unstable_cache)"]
+            TagBased["Tag-Based Invalidation"]
+            Revalidate["revalidateTag()"]
+            NoExpiry["No Time-Based Expiry"]
+        end
+    end
+
+    subgraph CacheTypes["Cache by Data Type"]
+        Static["Static Data<br/>(Long Cache)"]
+        Dynamic["Dynamic Data<br/>(Short Cache)"]
+        Realtime["Real-time Data<br/>(No Cache)"]
+    end
+
+    Browser --> TQ
+    TQ --> |"Miss"| API
+    TQ --> |"Hit"| Browser
+
+    API --> UC
+    UC --> |"Miss"| DB
+    UC --> |"Miss"| Databricks
+    UC --> |"Hit"| API
+
+    Tags --> Revalidate
+
+    Stale --> TQ
+    Refetch --> TQ
+    Optimistic --> TQ
+
+    TagBased --> UC
+    NoExpiry --> UC
+
+    Static --> |"Catalog Metadata"| UC
+    Dynamic --> |"User Sessions"| TQ
+    Realtime --> |"Query Results"| API
+
+    style TQ fill:#f97316,stroke:#ea580c,color:#fff
+    style UC fill:#3b82f6,stroke:#2563eb,color:#fff
+    style Tags fill:#22c55e,stroke:#16a34a,color:#fff

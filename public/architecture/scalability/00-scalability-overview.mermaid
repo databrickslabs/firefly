@@ -1,0 +1,90 @@
+flowchart TB
+    subgraph Users["Users"]
+        U1["100s of Users"]
+        U2["1,000s of Users"]
+        U3["10,000s of Users"]
+    end
+
+    subgraph AppTier["Application Tier (Auto-scaling)"]
+        direction TB
+
+        LB["Load Balancer"]
+
+        subgraph Replicas["Next.js Replicas"]
+            R1["Instance 1"]
+            R2["Instance 2"]
+            R3["Instance N"]
+        end
+
+        subgraph Proxy["Go Proxy Replicas"]
+            P1["Proxy 1"]
+            P2["Proxy 2"]
+            P3["Proxy N"]
+        end
+    end
+
+    subgraph DataTier["Data Tier (Managed Scaling)"]
+        direction TB
+
+        subgraph Postgres["PostgreSQL"]
+            PG["Serverless Postgres<br/>Auto-scaling"]
+        end
+
+        subgraph Cache["Caching Layer"]
+            ServerCache["Server Cache<br/>(unstable_cache)"]
+            ClientCache["Client Cache<br/>(TanStack Query)"]
+        end
+    end
+
+    subgraph DatabricksTier["Databricks (Elastic Compute)"]
+        direction TB
+
+        subgraph SQL["Serverless SQL"]
+            SQLWh["Serverless Warehouses<br/>Scale: 0 to N nodes"]
+        end
+
+        subgraph Apps["Databricks Apps"]
+            App1["Code Editor<br/>(Isolated Container)"]
+            App2["Notebook Viewer<br/>(Isolated Container)"]
+        end
+
+        subgraph UC["Unity Catalog"]
+            UCat["Metadata & Governance<br/>(Managed Service)"]
+        end
+    end
+
+    U1 --> LB
+    U2 --> LB
+    U3 --> LB
+
+    LB --> R1
+    LB --> R2
+    LB --> R3
+
+    R1 --> P1
+    R2 --> P2
+    R3 --> P3
+
+    R1 --> PG
+    R2 --> PG
+    R3 --> PG
+
+    R1 --> ServerCache
+    R2 --> ServerCache
+    R3 --> ServerCache
+
+    ServerCache --> ClientCache
+
+    R1 --> SQLWh
+    R2 --> SQLWh
+    R3 --> SQLWh
+
+    P1 --> App1
+    P2 --> App1
+    P3 --> App2
+
+    SQLWh --> UCat
+
+    style LB fill:#f97316,stroke:#ea580c,color:#fff
+    style SQLWh fill:#3b82f6,stroke:#2563eb,color:#fff
+    style PG fill:#22c55e,stroke:#16a34a,color:#fff

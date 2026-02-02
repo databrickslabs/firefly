@@ -1,0 +1,48 @@
+flowchart TB
+    subgraph Client["Browser (React Application)"]
+        SQLEditor["SQL Editor Component"]
+        CatalogTree["Catalog Tree Sidebar"]
+        ResultsPanel["Results Panel"]
+        WarehouseSelector["Warehouse Selector"]
+    end
+
+    subgraph NextJS["Next.js API Routes"]
+        ExecuteAPI["/api/databricks/sql/execute"]
+        StatusAPI["/api/databricks/sql/status/{id}"]
+        CancelAPI["/api/databricks/sql/cancel/{id}"]
+        CatalogAPI["/api/databricks/unity-catalog/*"]
+        WarehouseAPI["/api/databricks/warehouses/*"]
+    end
+
+    subgraph Auth["SSO-SPN Auth Layer"]
+        TokenService["getDatabricksWorkspaceToken()"]
+        SPNLookup["userSpns Table Lookup"]
+    end
+
+    subgraph Databricks["Databricks Workspace"]
+        SQLWarehouse["SQL Warehouse"]
+        UnityCatalog["Unity Catalog"]
+    end
+
+    SQLEditor -->|"Run Query"| ExecuteAPI
+    SQLEditor -->|"Poll Status"| StatusAPI
+    SQLEditor -->|"Cancel Query"| CancelAPI
+    CatalogTree -->|"Browse Metadata"| CatalogAPI
+    WarehouseSelector -->|"Start/Stop"| WarehouseAPI
+
+    ExecuteAPI --> TokenService
+    StatusAPI --> TokenService
+    CancelAPI --> TokenService
+    CatalogAPI --> TokenService
+    WarehouseAPI --> TokenService
+
+    TokenService --> SPNLookup
+    SPNLookup -->|"SPN Credentials"| Databricks
+
+    ExecuteAPI -->|"POST /sql/statements"| SQLWarehouse
+    StatusAPI -->|"GET /sql/statements/{id}"| SQLWarehouse
+    CancelAPI -->|"POST /sql/statements/{id}/cancel"| SQLWarehouse
+    CatalogAPI -->|"GET /catalogs, /schemas, /tables"| UnityCatalog
+    WarehouseAPI -->|"POST /start, /stop"| SQLWarehouse
+
+    SQLWarehouse -->|"Query Results"| ResultsPanel

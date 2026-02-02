@@ -30,29 +30,43 @@ import { cn } from "@/lib/utils";
 
 const solutions: { title: string; href: string; description: string; comingSoon?: boolean }[] = [
   {
-    title: "Notebooks",
-    href: "/databricks-idp/notebooks",
+    title: "Notebook Editor",
+    href: "/docs/solutions/notebook-editor",
     description:
-      "Interactive notebooks with full Databricks functionality and custom UI.",
-    comingSoon: true,
+      "Interactive Python notebooks powered by Marimo with full Databricks integration.",
+    comingSoon: false,
+  },
+  {
+    title: "Code Editor",
+    href: "/docs/solutions/code-editor",
+    description:
+      "VS Code-style development environment with terminal and Git support.",
+    comingSoon: false,
   },
   {
     title: "SQL Editor",
-    href: "/databricks-idp/sql",
+    href: "/docs/solutions/sql-editor",
     description:
-      "Query your data with an advanced SQL editor and visual query builder.",
-    comingSoon: true,
+      "Query your data with an advanced SQL editor and warehouse integration.",
+    comingSoon: false,
   },
   {
     title: "Data Catalog",
-    href: "/databricks-idp/catalog",
+    href: "/docs/solutions/data-catalog",
     description:
-      "Explore your Unity Catalog with a modern, intuitive interface.",
-    comingSoon: true,
+      "Explore your Unity Catalog with a modern, hierarchical interface.",
+    comingSoon: false,
+  },
+  {
+    title: "Pipeline Editor",
+    href: "/docs/solutions/pipeline-editor",
+    description:
+      "Visual node-based pipeline design with Delta Live Tables integration.",
+    comingSoon: false,
   },
   {
     title: "Embedding Databricks Apps w/o SSO",
-    href: "/docs/architecture/lakehouse-apps-proxy",
+    href: "/docs/solutions/embedding-apps",
     description:
       "Embed Databricks apps without exposing Databricks SSO login flows to end users.",
     comingSoon: false,
@@ -79,7 +93,7 @@ const iamOnboardingOptions: { title: string; href: string; description: string; 
 
 const authenticationOptions: { title: string; href: string; description: string; comingSoon?: boolean }[] = [
   {
-    title: "SSO Mapped to SPN",
+    title: "Login With Okta",
     href: "/docs/architecture/authentication/sso-mapped-spn",
     description:
       "Tenant-based authentication with service principal identity mapping. Users share a common SPN per organization.",
@@ -93,7 +107,7 @@ const authenticationOptions: { title: string; href: string; description: string;
     comingSoon: true,
   },
   {
-    title: "Databricks Identity",
+    title: "Login With Databricks",
     href: "/docs/architecture/authentication/databricks-identity",
     description:
       "Per-workspace authentication using Databricks native OAuth. Direct integration with Databricks accounts.",
@@ -136,17 +150,17 @@ const architecture: {
   },
   {
     title: "Security",
-    href: "#",
+    href: "/docs/architecture/security",
     description:
       "Enterprise-grade security with OAuth, RBAC, and data encryption.",
-    comingSoon: true,
+    comingSoon: false,
   },
   {
     title: "Scalability",
-    href: "#",
+    href: "/docs/architecture/scalability",
     description:
       "Built on Databricks for unlimited scale and performance.",
-    comingSoon: true,
+    comingSoon: false,
   },
 ];
 

@@ -358,9 +358,10 @@ Update `NEXT_PUBLIC_PROXY_URL` in Vercel environment variables to point to your 
 
 This application supports multiple authentication strategies:
 
-1. **Databricks Identity**: Per-workspace authentication using Databricks native OAuth
+1. **Login With Databricks**: Per-workspace authentication using Databricks native OAuth
 2. **Custom Federation**: Multi-tenant authentication with custom identity providers
-3. **SSO Mapped to SPN**: Tenant-based authentication with service principal identity mapping
+3. **Login With Okta**: Tenant-based authentication with service principal identity mapping
+4. **Login With Guest User**: Coming Soon
 
 ### Key Features
 
@@ -383,7 +384,7 @@ This application supports multiple authentication strategies:
 
 For detailed architectural documentation, visit:
 - [Embedding Databricks Apps w/o SSO](http://localhost:3000/docs/architecture/lakehouse-apps-proxy)
-- [Databricks Identity Authentication](http://localhost:3000/docs/architecture/authentication/databricks-identity)
+- [Login With Databricks Authentication](http://localhost:3000/docs/architecture/authentication/databricks-identity)
 
 ## Project Support
 

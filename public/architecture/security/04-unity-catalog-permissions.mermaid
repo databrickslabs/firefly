@@ -1,0 +1,59 @@
+flowchart TB
+    subgraph Organization["Organization Permissions"]
+        Admin["Org Admin"]
+        Member["Org Member"]
+    end
+
+    subgraph SPN["Service Principal Access"]
+        SPNGrant["SPN Grants"]
+    end
+
+    subgraph UnityCatalog["Unity Catalog Hierarchy"]
+        direction TB
+
+        Catalog["Catalog"]
+        Schema["Schema"]
+        Table["Table"]
+        Volume["Volume"]
+
+        Catalog --> Schema
+        Schema --> Table
+        Schema --> Volume
+    end
+
+    subgraph Permissions["Permission Levels"]
+        direction TB
+
+        CatPerms["Catalog Permissions<br/>USE_CATALOG, CREATE_SCHEMA"]
+        SchemaPerms["Schema Permissions<br/>USE_SCHEMA, CREATE_TABLE"]
+        TablePerms["Table Permissions<br/>SELECT, MODIFY, ALL_PRIVILEGES"]
+        VolumePerms["Volume Permissions<br/>READ_VOLUME, WRITE_VOLUME"]
+    end
+
+    subgraph DataAccess["Data Access"]
+        Read["Read Data"]
+        Write["Write Data"]
+        Browse["Browse Metadata"]
+    end
+
+    Admin --> SPNGrant
+    Member --> |"inherits"| SPNGrant
+
+    SPNGrant --> CatPerms
+    SPNGrant --> SchemaPerms
+    SPNGrant --> TablePerms
+    SPNGrant --> VolumePerms
+
+    CatPerms --> Catalog
+    SchemaPerms --> Schema
+    TablePerms --> Table
+    VolumePerms --> Volume
+
+    Table --> Read
+    Table --> Write
+    Volume --> Browse
+
+    style Catalog fill:#f97316,stroke:#ea580c,color:#fff
+    style Schema fill:#f59e0b,stroke:#d97706,color:#fff
+    style Table fill:#22c55e,stroke:#16a34a,color:#fff
+    style Volume fill:#3b82f6,stroke:#2563eb,color:#fff

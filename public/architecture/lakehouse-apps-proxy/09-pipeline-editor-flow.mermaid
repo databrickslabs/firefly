@@ -1,0 +1,55 @@
+flowchart TB
+    subgraph Client["Browser (React Application)"]
+        Canvas["Pipeline Canvas<br/>(React Flow)"]
+        Palette["Node Palette<br/>(Drag & Drop)"]
+        Properties["Properties Panel"]
+        Console["Execution Console"]
+        Toolbar["Pipeline Toolbar"]
+    end
+
+    subgraph State["State Management"]
+        Zustand["Zustand Store"]
+        TanStack["TanStack Query"]
+    end
+
+    subgraph APIs["Next.js API Routes"]
+        PipelineAPI["/api/pipelines/{id}"]
+        DLTListAPI["/api/databricks/pipelines"]
+        DLTStartAPI["/api/databricks/pipelines/{id}/start"]
+        DLTStopAPI["/api/databricks/pipelines/{id}/stop"]
+    end
+
+    subgraph DB["PostgreSQL Database"]
+        PipelinesTable["pipelines table<br/>(nodes, edges, metadata)"]
+    end
+
+    subgraph Auth["SSO-SPN Auth"]
+        TokenService["getDatabricksWorkspaceToken()"]
+    end
+
+    subgraph Databricks["Databricks Workspace"]
+        DLT["Delta Live Tables"]
+    end
+
+    Palette -->|"Add Node"| Canvas
+    Canvas -->|"Configure"| Properties
+    Canvas -->|"State Changes"| Zustand
+    Toolbar -->|"Save"| TanStack
+    Toolbar -->|"Run"| Console
+
+    Zustand -->|"Pipeline JSON"| TanStack
+    TanStack -->|"PUT"| PipelineAPI
+    PipelineAPI -->|"Persist"| PipelinesTable
+
+    Console -->|"Start Pipeline"| DLTStartAPI
+    Console -->|"Stop Pipeline"| DLTStopAPI
+
+    DLTStartAPI --> TokenService
+    DLTStopAPI --> TokenService
+    DLTListAPI --> TokenService
+
+    TokenService -->|"SPN Token"| Databricks
+
+    DLTStartAPI -->|"POST /pipelines/{id}/updates"| DLT
+    DLTStopAPI -->|"POST /pipelines/{id}/stop"| DLT
+    DLT -->|"Execution Status"| Console

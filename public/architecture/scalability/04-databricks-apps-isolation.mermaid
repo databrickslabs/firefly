@@ -1,0 +1,68 @@
+flowchart TB
+    subgraph Users["Users"]
+        U1["User 1"]
+        U2["User 2"]
+        U3["User 3"]
+    end
+
+    subgraph GoProxy["Go Proxy Layer"]
+        Proxy["Reverse Proxy<br/>Token Encryption"]
+    end
+
+    subgraph DatabricksApps["Databricks Apps (Fixed Resources)"]
+        direction TB
+
+        subgraph App1["Code Editor App"]
+            Container1["Container Instance<br/>2 vCPU, 6GB RAM"]
+            FS1["Ephemeral Filesystem<br/>(Data lost on restart)"]
+            Net1["Network Sandbox"]
+        end
+
+        subgraph App2["Notebook Viewer App"]
+            Container2["Container Instance<br/>2 vCPU, 6GB RAM"]
+            FS2["Ephemeral Filesystem<br/>(Data lost on restart)"]
+            Net2["Network Sandbox"]
+        end
+
+        subgraph App3["Custom App"]
+            Container3["Container Instance<br/>2 vCPU, 6GB RAM"]
+            FS3["Ephemeral Filesystem<br/>(Data lost on restart)"]
+            Net3["Network Sandbox"]
+        end
+    end
+
+    subgraph Isolation["Container Isolation"]
+        direction TB
+
+        Process["Process Isolation<br/>(Separate PIDs)"]
+        Network["Network Isolation<br/>(Sandboxed)"]
+        Storage["Ephemeral Storage<br/>(No Persistence)"]
+        Resource["Fixed Resources<br/>(2 vCPU, 6GB RAM)"]
+    end
+
+    subgraph Backend["Backend Access"]
+        UC["Unity Catalog Volumes<br/>(Read-Only Files)"]
+        SQL["Serverless SQL<br/>(Query Execution)"]
+    end
+
+    U1 --> Proxy
+    U2 --> Proxy
+    U3 --> Proxy
+
+    Proxy --> Container1
+    Proxy --> Container2
+    Proxy --> Container3
+
+    Container1 --> Process
+    Container2 --> Network
+    Container3 --> Storage
+
+    Process --> Resource
+
+    Container1 --> UC
+    Container2 --> UC
+    Container3 --> SQL
+
+    style Container1 fill:#3b82f6,stroke:#2563eb,color:#fff
+    style Container2 fill:#22c55e,stroke:#16a34a,color:#fff
+    style Container3 fill:#f97316,stroke:#ea580c,color:#fff
