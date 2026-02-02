@@ -595,7 +595,7 @@ export function FileView({
                         {item.isDirectory ? "-" : item.size ? formatFileSize(item.size) : "-"}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
-                        {item.modifiedAt?.toLocaleDateString() || "-"}
+                        {item.modifiedAt ? new Date(item.modifiedAt).toLocaleString() : "-"}
                       </TableCell>
                       <TableCell>
                         <DropdownMenu>

@@ -367,7 +367,7 @@ export function VolumeView({
                     </TableCell>
                     <TableCell className="text-muted-foreground">{volume.owner}</TableCell>
                     <TableCell className="text-muted-foreground">
-                      {volume.createdAt.toLocaleDateString()}
+                      {new Date(volume.createdAt).toLocaleString()}
                     </TableCell>
                     <TableCell>
                       <DropdownMenu>
