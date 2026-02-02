@@ -596,6 +596,149 @@ function generateFilterTransformSQL(
 }
 
 /**
+ * Aggregate column configuration
+ */
+interface AggregateColumn {
+  id: string;
+  column: string;
+  function: string;
+  alias: string;
+}
+
+/**
+ * Derived column for projection
+ */
+interface DerivedColumn {
+  id: string;
+  expression: string;
+  alias: string;
+}
+
+/**
+ * Generate SQL for an aggregate transform node
+ */
+function generateAggregateTransformSQL(
+  node: PipelineNode,
+  cteName: string,
+  upstreamCteNames: string[]
+): GeneratedCTE {
+  const config = node.data.config;
+  const upstream = upstreamCteNames[0] || "source";
+  const groupByColumns = (config.groupByColumns as string[]) || [];
+  const aggregates = (config.aggregates as AggregateColumn[]) || [];
+
+  // Build the SELECT clause with group by columns and aggregate functions
+  const selectParts: string[] = [];
+
+  // Add group by columns first
+  for (const col of groupByColumns) {
+    selectParts.push(col);
+  }
+
+  // Add aggregate functions with aliases
+  for (const agg of aggregates) {
+    if (agg.function && agg.alias) {
+      let aggExpr: string;
+      const col = agg.column || "*";
+
+      // Map function names to SQL
+      switch (agg.function.toLowerCase()) {
+        case "count_distinct":
+          aggExpr = `COUNT(DISTINCT ${col})`;
+          break;
+        case "collect_list":
+          aggExpr = `COLLECT_LIST(${col})`;
+          break;
+        case "collect_set":
+          aggExpr = `COLLECT_SET(${col})`;
+          break;
+        default:
+          aggExpr = `${agg.function.toUpperCase()}(${col})`;
+      }
+
+      selectParts.push(`${aggExpr} AS \`${agg.alias}\``);
+    }
+  }
+
+  // If no valid expressions, select everything
+  if (selectParts.length === 0) {
+    selectParts.push("*");
+  }
+
+  // Build the SQL
+  let sql = `SELECT ${selectParts.join(", ")} FROM ${upstream}`;
+
+  // Add GROUP BY clause if there are group by columns
+  if (groupByColumns.length > 0) {
+    sql += ` GROUP BY ${groupByColumns.join(", ")}`;
+  }
+
+  const comment = groupByColumns.length > 0
+    ? `Aggregate: GROUP BY ${groupByColumns.join(", ")}`
+    : "Aggregate: Overall aggregation";
+
+  return {
+    name: cteName,
+    sql,
+    comment,
+  };
+}
+
+/**
+ * Check if an expression requires an alias (contains special characters)
+ */
+function expressionRequiresAlias(expression: string): boolean {
+  const standardColumnPattern = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+  return !standardColumnPattern.test(expression);
+}
+
+/**
+ * Generate SQL for a projection transform node
+ */
+function generateProjectionTransformSQL(
+  node: PipelineNode,
+  cteName: string,
+  upstreamCteNames: string[]
+): GeneratedCTE {
+  const config = node.data.config;
+  const upstream = upstreamCteNames[0] || "source";
+  const selectedColumns = (config.columns as string[]) || [];
+  const derivedColumns = (config.derivedColumns as DerivedColumn[]) || [];
+
+  // Build the SELECT clause
+  const selectParts: string[] = [];
+
+  // Add selected columns
+  for (const col of selectedColumns) {
+    selectParts.push(col);
+  }
+
+  // Add derived columns with expressions and aliases
+  for (const dc of derivedColumns) {
+    if (dc.expression) {
+      if (dc.alias) {
+        selectParts.push(`${dc.expression} AS \`${dc.alias}\``);
+      } else if (!expressionRequiresAlias(dc.expression)) {
+        // Simple column reference without alias
+        selectParts.push(dc.expression);
+      }
+      // Skip derived columns that require alias but don't have one
+    }
+  }
+
+  // If no valid expressions, select everything
+  if (selectParts.length === 0) {
+    selectParts.push("*");
+  }
+
+  return {
+    name: cteName,
+    sql: `SELECT ${selectParts.join(", ")} FROM ${upstream}`,
+    comment: `Projection: ${selectParts.length} column(s)`,
+  };
+}
+
+/**
  * Generate SQL for a join transform node
  * Uses table aliases (a, b) to avoid ambiguous column references
  * Column mapping is on the join node itself (not on input edges)
@@ -921,6 +1064,12 @@ export function pipelineToSQL(
                 upstreamCteNames,
                 upstreamInfo
               );
+              break;
+            case "aggregate":
+              cte = generateAggregateTransformSQL(node, cteName, upstreamCteNames);
+              break;
+            case "projection":
+              cte = generateProjectionTransformSQL(node, cteName, upstreamCteNames);
               break;
             case "python":
               cte = generatePythonTransformSQL(node, cteName, upstreamCteNames);
@@ -1520,6 +1669,12 @@ export function generateSampleSQL(
                 upstreamInfo
               );
               break;
+            case "aggregate":
+              cte = generateAggregateTransformSQL(node, cteName, upstreamCteNames);
+              break;
+            case "projection":
+              cte = generateProjectionTransformSQL(node, cteName, upstreamCteNames);
+              break;
             case "python":
               cte = generatePythonTransformSQL(node, cteName, upstreamCteNames);
               result.warnings.push(
@@ -1778,6 +1933,12 @@ export function generateDestinationSQL(
                 upstreamCteNames,
                 upstreamInfo
               );
+              break;
+            case "aggregate":
+              cte = generateAggregateTransformSQL(node, cteName, upstreamCteNames);
+              break;
+            case "projection":
+              cte = generateProjectionTransformSQL(node, cteName, upstreamCteNames);
               break;
             case "python":
               cte = generatePythonTransformSQL(node, cteName, upstreamCteNames);

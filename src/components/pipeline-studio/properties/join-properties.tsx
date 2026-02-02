@@ -15,7 +15,7 @@ import {
 import { AutocompleteInput } from "@/components/ui/autocomplete-input";
 import { cn } from "@/lib/utils";
 import type { PipelineNodeData } from "@/stores/pipeline-store";
-import { usePipelineNodes, usePipelineEdges } from "@/providers/pipeline-store-provider";
+import { usePipelineNodes, usePipelineEdges, useSampleDataByNode } from "@/providers/pipeline-store-provider";
 import { getInputColumnsForNode, formatColumnOptions } from "../utils/column-utils";
 
 // Condition types
@@ -286,11 +286,12 @@ export function JoinProperties({ data, nodeId, onUpdate }: JoinPropertiesProps) 
   const config = data.config as JoinConfig;
   const nodes = usePipelineNodes();
   const edges = usePipelineEdges();
+  const sampleDataByNode = useSampleDataByNode();
 
-  // Get columns from upstream inputs
+  // Get columns from upstream inputs (including sample data)
   const inputColumns = useMemo(() => {
-    return getInputColumnsForNode(nodeId, nodes, edges);
-  }, [nodeId, nodes, edges]);
+    return getInputColumnsForNode(nodeId, nodes, edges, sampleDataByNode);
+  }, [nodeId, nodes, edges, sampleDataByNode]);
 
   // Format column options for dropdowns
   const leftColumnOptions = useMemo(() => {

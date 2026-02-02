@@ -8,6 +8,8 @@ import { SqlTransformNode } from "./transform-nodes/sql-transform-node";
 import { PythonTransformNode } from "./transform-nodes/python-transform-node";
 import { JoinNode } from "./transform-nodes/join-node";
 import { FilterNode } from "./transform-nodes/filter-node";
+import { AggregateNode } from "./transform-nodes/aggregate-node";
+import { ProjectionNode } from "./transform-nodes/projection-node";
 
 // AI nodes
 import { InferenceNode } from "./ai-nodes/inference-node";
@@ -33,6 +35,8 @@ import {
   ArrowUpToLine,
   Layers,
   Eye,
+  Calculator,
+  Columns,
   type LucideIcon,
 } from "lucide-react";
 
@@ -49,6 +53,8 @@ export const nodeTypes = {
   "transform-python": PythonTransformNode,
   "transform-join": JoinNode,
   "transform-filter": FilterNode,
+  "transform-aggregate": AggregateNode,
+  "transform-projection": ProjectionNode,
   // AI/ML
   "ai-inference": InferenceNode,
   "ai-ai-parse": AiParseNode,
@@ -129,6 +135,20 @@ export const nodeDefinitions: NodeDefinition[] = [
     label: "Filter",
     icon: Filter,
     description: "Filter rows based on conditions",
+  },
+  {
+    category: "transform",
+    subtype: "aggregate",
+    label: "Aggregate",
+    icon: Calculator,
+    description: "Group and aggregate data with functions like SUM, AVG, COUNT",
+  },
+  {
+    category: "transform",
+    subtype: "projection",
+    label: "Projection",
+    icon: Columns,
+    description: "Select specific columns from the input",
   },
   // AI/ML
   {

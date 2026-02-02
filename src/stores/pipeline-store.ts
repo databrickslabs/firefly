@@ -8,7 +8,7 @@ import type { Node, Edge, OnNodesChange, OnEdgesChange, applyNodeChanges, applyE
 export type NodeCategory = "source" | "transform" | "ai" | "destination";
 
 export type SourceSubtype = "table" | "volume" | "stream";
-export type TransformSubtype = "sql" | "python" | "join" | "filter";
+export type TransformSubtype = "sql" | "python" | "join" | "filter" | "aggregate" | "projection";
 export type AISubtype = "inference" | "ai-parse";
 export type DestinationSubtype = "materialized-view" | "view" | "streaming";
 

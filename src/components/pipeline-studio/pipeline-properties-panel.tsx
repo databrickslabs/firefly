@@ -20,6 +20,8 @@ import {
   TransformProperties,
   JoinProperties,
   FilterProperties,
+  AggregateProperties,
+  ProjectionProperties,
   AIProperties,
   DestinationProperties,
   ColumnMappingProperties,
@@ -99,6 +101,12 @@ export function PipelinePropertiesPanel() {
         }
         if (subtype === "filter") {
           return <FilterProperties data={data} onUpdate={handleUpdateConfig} />;
+        }
+        if (subtype === "aggregate") {
+          return <AggregateProperties data={data} nodeId={selectedNode.id} onUpdate={handleUpdateConfig} />;
+        }
+        if (subtype === "projection") {
+          return <ProjectionProperties data={data} nodeId={selectedNode.id} onUpdate={handleUpdateConfig} />;
         }
         return <TransformProperties data={data} onUpdate={handleUpdateConfig} />;
       case "ai":
@@ -200,9 +208,6 @@ export function PipelinePropertiesPanel() {
     </>
   );
 
-  // Check if node supports column mapping (all node types except we show different UI for sources)
-  const supportsColumnMapping = selectedNode !== null;
-
   // Render single node panel
   const renderSingleNodePanel = () => (
     <>
@@ -232,17 +237,15 @@ export function PipelinePropertiesPanel() {
                 <Settings className="h-3.5 w-3.5" />
                 Settings
               </TabsTrigger>
-              {supportsColumnMapping && (
-                <TabsTrigger value="columns" className="flex-1 gap-1.5">
-                  <Columns className="h-3.5 w-3.5" />
-                  Columns
-                </TabsTrigger>
-              )}
+              <TabsTrigger value="columns" className="flex-1 gap-1.5">
+                <Columns className="h-3.5 w-3.5" />
+                Columns
+              </TabsTrigger>
             </TabsList>
           </div>
 
-          <TabsContent value="settings" className="flex-1 min-h-0 mt-0">
-            <ScrollArea className="h-full">
+          <TabsContent value="settings" className="flex-1 min-h-0 mt-0 overflow-hidden">
+            <ScrollArea className="h-full w-full">
               <div className="p-4 space-y-6">
                 {/* Node Name */}
                 <div className="space-y-2">
@@ -275,19 +278,17 @@ export function PipelinePropertiesPanel() {
             </ScrollArea>
           </TabsContent>
 
-          {supportsColumnMapping && (
-            <TabsContent value="columns" className="flex-1 min-h-0 mt-0">
-              <ScrollArea className="h-full">
-                <div className="p-4">
-                  <ColumnMappingProperties
-                    data={selectedNode!.data}
-                    nodeId={selectedNode!.id}
-                    onUpdate={handleUpdateNodeData}
-                  />
-                </div>
-              </ScrollArea>
-            </TabsContent>
-          )}
+          <TabsContent value="columns" className="flex-1 min-h-0 mt-0 overflow-hidden">
+            <ScrollArea className="h-full w-full">
+              <div className="p-4">
+                <ColumnMappingProperties
+                  data={selectedNode!.data}
+                  nodeId={selectedNode!.id}
+                  onUpdate={handleUpdateNodeData}
+                />
+              </div>
+            </ScrollArea>
+          </TabsContent>
         </Tabs>
       </div>
     </>
@@ -311,7 +312,7 @@ export function PipelinePropertiesPanel() {
 
   // Always render the same container structure for consistent reconciliation
   return (
-    <div className="h-full flex flex-col border-l border-slate-200 bg-white overflow-hidden">
+    <div className="h-full w-full flex flex-col border-l border-slate-200 bg-white overflow-hidden">
       {renderContent()}
 
       <DeleteConfirmDialog

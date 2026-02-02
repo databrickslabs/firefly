@@ -76,6 +76,47 @@ const nodeRequiredFields: Record<string, FieldRequirement[]> = {
   "transform-filter": [
     { path: "condition", label: "Filter Condition" },
   ],
+  "transform-aggregate": [
+    {
+      path: "aggregates",
+      label: "Aggregate Functions",
+      validate: (value) => {
+        if (!Array.isArray(value) || value.length === 0) return false;
+        // Check that at least one aggregate has function and alias filled
+        return value.some((agg: { function?: string; alias?: string }) =>
+          agg.function && agg.alias?.trim()
+        );
+      },
+    },
+  ],
+  "transform-projection": [
+    {
+      path: "columns",
+      label: "Output Columns",
+      validate: (value, config) => {
+        // Check if there are selected columns
+        const hasSelectedColumns = Array.isArray(value) && value.length > 0;
+
+        // Check if there are valid derived columns
+        const derivedColumns = config.derivedColumns as Array<{
+          expression?: string;
+          alias?: string;
+        }> | undefined;
+
+        // Helper to check if expression requires alias
+        const requiresAlias = (expr: string) => !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(expr);
+
+        const hasValidDerivedColumns = Array.isArray(derivedColumns) && derivedColumns.some((dc) => {
+          if (!dc.expression?.trim()) return false;
+          // If expression requires alias, check that alias is provided
+          if (requiresAlias(dc.expression) && !dc.alias?.trim()) return false;
+          return true;
+        });
+
+        return hasSelectedColumns || hasValidDerivedColumns;
+      },
+    },
+  ],
   // AI/ML
   "ai-inference": [
     { path: "modelEndpoint", label: "Model Endpoint" },

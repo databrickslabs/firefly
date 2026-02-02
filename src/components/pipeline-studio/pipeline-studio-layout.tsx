@@ -134,7 +134,7 @@ function PipelineStudioContent({ pipelineId }: { pipelineId?: string | null }) {
                   <>
                     <HorizontalResizeHandle />
                     <Panel defaultSize={25} minSize={18} maxSize={40}>
-                      <div className="h-full overflow-hidden">
+                      <div className="h-full w-full overflow-hidden">
                         <PipelinePropertiesPanel />
                       </div>
                     </Panel>

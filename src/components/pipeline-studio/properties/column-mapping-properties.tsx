@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useCallback, useState } from "react";
-import { ArrowRight, Check, X, Play } from "lucide-react";
+import { ArrowRight, Check, X, Play, Info } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -18,9 +18,10 @@ interface ColumnRowProps {
   column: ColumnMappingConfig;
   onToggle: (name: string, selected: boolean) => void;
   onAliasChange: (name: string, alias: string) => void;
+  disabled?: boolean;
 }
 
-function ColumnRow({ column, onToggle, onAliasChange }: ColumnRowProps) {
+function ColumnRow({ column, onToggle, onAliasChange, disabled = false }: ColumnRowProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [aliasValue, setAliasValue] = useState(column.alias || "");
 
@@ -35,11 +36,12 @@ function ColumnRow({ column, onToggle, onAliasChange }: ColumnRowProps) {
   };
 
   return (
-    <div className="flex items-center gap-2 py-1.5 px-2 rounded-md hover:bg-slate-50 group">
+    <div className={`flex items-center gap-2 py-1.5 px-2 rounded-md group ${disabled ? "opacity-75" : "hover:bg-slate-50"}`}>
       <Checkbox
         id={`col-${column.name}`}
         checked={column.selected}
         onCheckedChange={(checked) => onToggle(column.name, checked === true)}
+        disabled={disabled}
       />
       <div className="flex-1 min-w-0 flex items-center gap-2">
         {column.side && (
@@ -68,36 +70,38 @@ function ColumnRow({ column, onToggle, onAliasChange }: ColumnRowProps) {
           </>
         )}
       </div>
-      {isEditing ? (
-        <div className="flex items-center gap-1">
-          <Input
-            value={aliasValue}
-            onChange={(e) => setAliasValue(e.target.value)}
-            placeholder="Alias"
-            className="h-6 w-24 text-xs"
-            autoFocus
-            onKeyDown={(e) => {
-              if (e.key === "Enter") handleSaveAlias();
-              if (e.key === "Escape") handleCancelAlias();
-            }}
-          />
-          <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={handleSaveAlias}>
-            <Check className="h-3 w-3 text-green-600" />
+      {!disabled && (
+        isEditing ? (
+          <div className="flex items-center gap-1">
+            <Input
+              value={aliasValue}
+              onChange={(e) => setAliasValue(e.target.value)}
+              placeholder="Alias"
+              className="h-6 w-24 text-xs"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleSaveAlias();
+                if (e.key === "Escape") handleCancelAlias();
+              }}
+            />
+            <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={handleSaveAlias}>
+              <Check className="h-3 w-3 text-green-600" />
+            </Button>
+            <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={handleCancelAlias}>
+              <X className="h-3 w-3 text-slate-400" />
+            </Button>
+          </div>
+        ) : (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+            onClick={() => setIsEditing(true)}
+            disabled={!column.selected}
+          >
+            {column.alias ? "Edit" : "Alias"}
           </Button>
-          <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={handleCancelAlias}>
-            <X className="h-3 w-3 text-slate-400" />
-          </Button>
-        </div>
-      ) : (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 px-2 text-xs opacity-0 group-hover:opacity-100 transition-opacity"
-          onClick={() => setIsEditing(true)}
-          disabled={!column.selected}
-        >
-          {column.alias ? "Edit" : "Alias"}
-        </Button>
+        )
       )}
     </div>
   );
@@ -116,6 +120,8 @@ export function ColumnMappingProperties({ data, nodeId, onUpdate }: ColumnMappin
 
   const isJoinNode = data.subtype === "join";
   const isSourceNode = data.category === "source";
+  const isAggregateNode = data.subtype === "aggregate";
+  const isProjectionNode = data.subtype === "projection";
 
   // For join nodes, find the input nodes
   const joinInputs = useMemo(() => {
@@ -347,6 +353,243 @@ export function ColumnMappingProperties({ data, nodeId, onUpdate }: ColumnMappin
     }
   } else if (availableColumns.length === 0 && upstreamNode) {
     needsSampling.push(upstreamNode.data.label);
+  }
+
+  // For aggregate nodes, show output columns (group by + aggregate aliases)
+  if (isAggregateNode) {
+    const config = data.config as {
+      groupByColumns?: string[];
+      aggregates?: { id: string; column: string; function: string; alias: string }[];
+    };
+
+    // Compute output columns: group by columns + aggregate aliases
+    const outputColumns: { name: string; type: "group" | "aggregate"; source?: string }[] = [];
+
+    // Add group by columns
+    if (config.groupByColumns) {
+      config.groupByColumns.forEach((col) => {
+        outputColumns.push({ name: col, type: "group" });
+      });
+    }
+
+    // Add aggregate columns (using alias as the output column name)
+    if (config.aggregates) {
+      config.aggregates.forEach((agg) => {
+        if (agg.alias) {
+          outputColumns.push({
+            name: agg.alias,
+            type: "aggregate",
+            source: `${agg.function.toUpperCase()}(${agg.column || "*"})`,
+          });
+        }
+      });
+    }
+
+    const hasOutputColumns = outputColumns.length > 0;
+    const groupByCount = config.groupByColumns?.length || 0;
+    const aggregateCount = config.aggregates?.filter((a) => a.alias)?.length || 0;
+
+    return (
+      <div className="space-y-3">
+        {/* Info banner */}
+        <div className="flex items-start gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <Info className="h-4 w-4 text-blue-500 flex-shrink-0 mt-0.5" />
+          <div className="space-y-0.5">
+            <p className="text-xs font-medium text-blue-900">
+              Output columns are automatic for Aggregate nodes
+            </p>
+            <p className="text-[11px] text-blue-700 leading-relaxed">
+              Columns are determined by Group By columns and Aggregate functions in Settings.
+            </p>
+          </div>
+        </div>
+
+        {/* Output columns header */}
+        <div className="flex items-center justify-between">
+          <Label className="text-slate-600">Output Columns (read-only)</Label>
+          {hasOutputColumns && (
+            <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+              {outputColumns.length} columns
+            </span>
+          )}
+        </div>
+
+        {/* Column type breakdown */}
+        {hasOutputColumns && (
+          <div className="flex gap-2 text-xs">
+            <span className="px-2 py-1 bg-emerald-50 text-emerald-600 rounded">
+              Group By: {groupByCount}
+            </span>
+            <span className="px-2 py-1 bg-purple-50 text-purple-600 rounded">
+              Aggregates: {aggregateCount}
+            </span>
+          </div>
+        )}
+
+        {/* Show output columns or configuration prompt */}
+        {hasOutputColumns ? (
+          <div className="border rounded-md max-h-64 overflow-y-auto">
+            {outputColumns.map((col, idx) => (
+              <div
+                key={`${col.name}-${idx}`}
+                className="flex items-center gap-2 py-1.5 px-2 rounded-md opacity-75"
+              >
+                <Checkbox checked={true} disabled={true} />
+                <div className="flex-1 min-w-0 flex items-center gap-2">
+                  <Badge
+                    variant="outline"
+                    className={`text-[10px] px-1.5 py-0 ${
+                      col.type === "group"
+                        ? "bg-emerald-50 text-emerald-600 border-emerald-200"
+                        : "bg-purple-50 text-purple-600 border-purple-200"
+                    }`}
+                  >
+                    {col.type === "group" ? "GROUP" : "AGG"}
+                  </Badge>
+                  <span className="text-sm font-mono text-slate-700 truncate">
+                    {col.name}
+                  </span>
+                  {col.source && (
+                    <>
+                      <ArrowRight className="h-3 w-3 text-slate-400 flex-shrink-0" />
+                      <span className="text-xs text-slate-500 font-mono truncate">
+                        {col.source}
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-4 text-sm text-slate-500 border rounded-lg bg-slate-50">
+            <p className="font-medium">No output columns configured</p>
+            <p className="text-xs mt-1">
+              Add Group By columns or Aggregate functions in the Settings tab.
+            </p>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // For projection nodes, show output columns (selected + derived) read-only
+  if (isProjectionNode) {
+    const projConfig = data.config as {
+      columns?: string[];
+      derivedColumns?: { id: string; expression: string; alias: string }[];
+    };
+
+    // Compute output columns: selected columns + derived columns
+    const outputColumns: { name: string; type: "selected" | "derived"; source?: string }[] = [];
+
+    // Add selected columns
+    if (projConfig.columns) {
+      projConfig.columns.forEach((col) => {
+        outputColumns.push({ name: col, type: "selected" });
+      });
+    }
+
+    // Add derived columns (using alias or expression as the output column name)
+    if (projConfig.derivedColumns) {
+      projConfig.derivedColumns.forEach((dc) => {
+        const name = dc.alias || dc.expression;
+        if (name) {
+          outputColumns.push({
+            name,
+            type: "derived",
+            source: dc.alias && dc.expression !== dc.alias ? dc.expression : undefined,
+          });
+        }
+      });
+    }
+
+    const hasOutputColumns = outputColumns.length > 0;
+    const selectedCount = projConfig.columns?.length || 0;
+    const derivedCount = projConfig.derivedColumns?.filter((dc) => dc.expression || dc.alias)?.length || 0;
+
+    return (
+      <div className="space-y-3">
+        {/* Info banner */}
+        <div className="flex items-start gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <Info className="h-4 w-4 text-blue-500 flex-shrink-0 mt-0.5" />
+          <div className="space-y-0.5">
+            <p className="text-xs font-medium text-blue-900">
+              Output columns are automatic for Projection nodes
+            </p>
+            <p className="text-[11px] text-blue-700 leading-relaxed">
+              Columns are determined by Selected columns and Derived expressions in Settings.
+            </p>
+          </div>
+        </div>
+
+        {/* Output columns header */}
+        <div className="flex items-center justify-between">
+          <Label className="text-slate-600">Output Columns (read-only)</Label>
+          {hasOutputColumns && (
+            <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+              {outputColumns.length} columns
+            </span>
+          )}
+        </div>
+
+        {/* Column type breakdown */}
+        {hasOutputColumns && (
+          <div className="flex gap-2 text-xs">
+            <span className="px-2 py-1 bg-blue-50 text-blue-600 rounded">
+              Selected: {selectedCount}
+            </span>
+            <span className="px-2 py-1 bg-purple-50 text-purple-600 rounded">
+              Derived: {derivedCount}
+            </span>
+          </div>
+        )}
+
+        {/* Show output columns or configuration prompt */}
+        {hasOutputColumns ? (
+          <div className="border rounded-md max-h-64 overflow-y-auto">
+            {outputColumns.map((col, idx) => (
+              <div
+                key={`${col.name}-${idx}`}
+                className="flex items-center gap-2 py-1.5 px-2 rounded-md opacity-75"
+              >
+                <Checkbox checked={true} disabled={true} />
+                <div className="flex-1 min-w-0 flex items-center gap-2">
+                  <Badge
+                    variant="outline"
+                    className={`text-[10px] px-1.5 py-0 ${
+                      col.type === "selected"
+                        ? "bg-blue-50 text-blue-600 border-blue-200"
+                        : "bg-purple-50 text-purple-600 border-purple-200"
+                    }`}
+                  >
+                    {col.type === "selected" ? "SEL" : "EXPR"}
+                  </Badge>
+                  <span className="text-sm font-mono text-slate-700 truncate">
+                    {col.name}
+                  </span>
+                  {col.source && (
+                    <>
+                      <ArrowRight className="h-3 w-3 text-slate-400 flex-shrink-0" />
+                      <span className="text-xs text-slate-500 font-mono truncate">
+                        {col.source}
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-4 text-sm text-slate-500 border rounded-lg bg-slate-50">
+            <p className="font-medium">No output columns configured</p>
+            <p className="text-xs mt-1">
+              Select columns or add Derived expressions in the Settings tab.
+            </p>
+          </div>
+        )}
+      </div>
+    );
   }
 
   // Check if node has upstream connection (only for non-source, non-join nodes)
