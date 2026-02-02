@@ -70,7 +70,7 @@ export default function OrgLayout({
             </main>
           </SidebarInset>
         </div>
-        <Toaster />
+        <Toaster position="top-right" />
       </SidebarProvider>
     </SsoSpnUserStoreInitializer>
   );

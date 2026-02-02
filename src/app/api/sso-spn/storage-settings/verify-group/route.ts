@@ -66,6 +66,7 @@ interface UserVolumeStatus {
 
 /**
  * Converts an email to a valid volume name by replacing ".", spaces, and "/" with "_"
+ * Note: "@" is allowed in volume names
  */
 function emailToVolumeName(email: string): string {
   return email

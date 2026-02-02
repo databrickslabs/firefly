@@ -207,15 +207,13 @@ export function FileView({
   void uploadError;
   void onClearUploadError;
 
-  // Handle item click - single click selects, double click opens
-  const handleItemClick = (item: FileItem, event: React.MouseEvent) => {
-    // If ctrl/cmd or shift is held, always just select
-    if (event.ctrlKey || event.metaKey || event.shiftKey) {
-      onItemSelect?.(item.path, event);
-      return;
+  // Handle item click - single click opens folders, files do nothing (use checkbox for selection)
+  const handleItemClick = (item: FileItem) => {
+    // Single click on folder opens it
+    if (item.isDirectory) {
+      onFolderOpen(item.path);
     }
-    // Single click selects (without modifier keys)
-    onItemSelect?.(item.path, event);
+    // Single click on file does nothing - use checkbox to select
   };
 
   const handleItemDoubleClick = (item: FileItem) => {
@@ -224,6 +222,18 @@ export function FileView({
     } else {
       onFileDownload(item.path);
     }
+  };
+
+  // Handle checkbox change - always toggle selection (like ctrl-click)
+  const handleCheckboxChange = (item: FileItem, event?: React.MouseEvent) => {
+    // Create a synthetic event with ctrlKey to trigger toggle behavior
+    const syntheticEvent = {
+      ...event,
+      ctrlKey: true,
+      metaKey: true,
+      shiftKey: event?.shiftKey ?? false,
+    } as React.MouseEvent;
+    onItemSelect?.(item.path, syntheticEvent);
   };
 
   const handleCreateFolder = () => {
@@ -333,7 +343,7 @@ export function FileView({
                         ? "bg-primary/10 ring-2 ring-primary"
                         : "hover:bg-muted"
                     )}
-                    onClick={(e) => handleItemClick(item, e)}
+                    onClick={() => handleItemClick(item)}
                     onDoubleClick={() => handleItemDoubleClick(item)}
                   >
                     {/* Checkbox for selection */}
@@ -342,11 +352,14 @@ export function FileView({
                         "absolute top-2 left-2 transition-opacity",
                         isSelected || selectedItems.size > 0 ? "opacity-100" : "opacity-0 group-hover:opacity-100"
                       )}
-                      onClick={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCheckboxChange(item, e);
+                      }}
                     >
                       <Checkbox
                         checked={isSelected}
-                        onCheckedChange={() => onItemSelect?.(item.path)}
+                        onCheckedChange={() => {}}
                       />
                     </div>
 
@@ -555,13 +568,18 @@ export function FileView({
                         "cursor-pointer",
                         isSelected && "bg-primary/10"
                       )}
-                      onClick={(e) => handleItemClick(item, e)}
+                      onClick={() => handleItemClick(item)}
                       onDoubleClick={() => handleItemDoubleClick(item)}
                     >
-                      <TableCell onClick={(e) => e.stopPropagation()}>
+                      <TableCell
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCheckboxChange(item, e);
+                        }}
+                      >
                         <Checkbox
                           checked={isSelected}
-                          onCheckedChange={() => onItemSelect?.(item.path)}
+                          onCheckedChange={() => {}}
                         />
                       </TableCell>
                       <TableCell>

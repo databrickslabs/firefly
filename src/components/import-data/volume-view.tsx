@@ -344,6 +344,7 @@ export function VolumeView({
                 <VolumeContextMenu key={volume.name} volume={volume}>
                   <TableRow
                     className="cursor-pointer"
+                    onClick={() => onVolumeOpen(volume.name)}
                     onDoubleClick={() => onVolumeOpen(volume.name)}
                   >
                     <TableCell>
