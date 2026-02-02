@@ -13,6 +13,7 @@ import {
   LayoutDashboard,
   GitBranch,
   Upload,
+  NotebookPen,
 } from "lucide-react";
 import {
   Sidebar,
@@ -51,6 +52,11 @@ const navigationItems = [
     name: "Code Editor",
     href: "/code-editor",
     icon: FileCode,
+  },
+  {
+    name: "Notebook Editor",
+    href: "/notebook-editor",
+    icon: NotebookPen,
   },
   {
     name: "Embedded Dashboard",

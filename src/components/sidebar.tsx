@@ -13,6 +13,7 @@ import {
   Briefcase,
   ShieldCheck,
   FileCode,
+  NotebookPen,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -50,6 +51,11 @@ const navigationItems = [
     name: "Code Editor",
     href: "/code-editor",
     icon: FileCode,
+  },
+  {
+    name: "Notebook Editor",
+    href: "/notebook-editor",
+    icon: NotebookPen,
   },
   {
     name: "Jobs",
