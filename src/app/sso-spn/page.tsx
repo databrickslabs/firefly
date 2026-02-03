@@ -8,10 +8,17 @@ import { useSession } from "@/lib/auth-client";
 
 function SsoSpnHrdContent() {
   const router = useRouter();
-  const { data: session } = useSession();
+  const { data: session, isPending } = useSession();
   const [email, setEmail] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Redirect to login if no user email is available to auto-fill
+  useEffect(() => {
+    if (!isPending && !session?.user?.email) {
+      router.replace("/sso-spn-login");
+    }
+  }, [isPending, session?.user?.email, router]);
 
   // Prefill email from session if user is authenticated
   useEffect(() => {
@@ -19,6 +26,18 @@ function SsoSpnHrdContent() {
       setEmail(session.user.email);
     }
   }, [session?.user?.email]);
+
+  // Show loading while checking session or redirecting
+  if (isPending || !session?.user?.email) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-emerald-50 to-white dark:from-emerald-950/20 dark:to-background">
+        <div className="text-center space-y-4">
+          <Spinner className="w-12 h-12 text-emerald-600 mx-auto" />
+          <p className="text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
