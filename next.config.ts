@@ -5,6 +5,9 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: __dirname,
   },
+  outputFileTracingIncludes: {
+    "/api/sso-spn/authoring-tools/*": ["./databricks-apps/**/*"],
+  },
   async headers() {
     return [
       {

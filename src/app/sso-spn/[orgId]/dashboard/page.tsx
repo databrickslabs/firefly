@@ -42,6 +42,30 @@ export default function SsoSpnDashboard() {
     }
   }, [session, isPending, activeOrg]);
 
+  // Auto-setup workspace secrets on login
+  useEffect(() => {
+    async function setupWorkspaceSecrets() {
+      try {
+        const response = await fetch("/api/sso-spn/workspace-secrets/setup", {
+          method: "POST",
+        });
+        if (response.ok) {
+          const data = await response.json();
+          console.log("Workspace secrets setup completed:", data);
+        } else {
+          const errorData = await response.json();
+          console.warn("Workspace secrets setup warning:", errorData.error);
+        }
+      } catch (err) {
+        console.warn("Workspace secrets setup error:", err);
+      }
+    }
+
+    if (!isPending && session) {
+      setupWorkspaceSecrets();
+    }
+  }, [session, isPending]);
+
   useEffect(() => {
     async function fetchData() {
       try {

@@ -14,6 +14,7 @@ import {
   GitBranch,
   Upload,
   NotebookPen,
+  MonitorPlay,
 } from "lucide-react";
 import {
   Sidebar,
@@ -72,6 +73,11 @@ const navigationItems = [
     name: "Import Data",
     href: "/import-data",
     icon: Upload,
+  },
+  {
+    name: "IDE",
+    href: "/ide",
+    icon: MonitorPlay,
   },
   {
     name: "Jobs (Coming Soon)",

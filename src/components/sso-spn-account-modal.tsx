@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Dialog,
   DialogContent,
@@ -12,7 +12,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Spinner } from "@/components/ui/spinner";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { JWTPayload } from "jose";
+import { CheckCircle2, XCircle, AlertCircle, RefreshCw } from "lucide-react";
 
 interface DecodedTokenInfo {
   raw: string;
@@ -28,6 +30,34 @@ interface AccountInfoResponse {
   workspaceToken: DecodedTokenInfo | null;
   organizationName: string;
   workspaceUrl: string;
+}
+
+interface WorkspaceSecretsStatusResponse {
+  configured: boolean;
+  scopeName: string | null;
+  scopeExists: boolean;
+  secretKey: string | null;
+  secretRegistered: boolean;
+  lastUpdated: number | null;
+  patSecretKey: string | null;
+  patRegistered: boolean;
+  patLastUpdated: number | null;
+  workspaceUrl: string;
+  error?: string;
+}
+
+interface WorkspaceSecretsSetupResponse {
+  scopeName: string;
+  scopeExists: boolean;
+  scopeCreated: boolean;
+  secretKey: string;
+  secretExists: boolean;
+  secretUpdated: boolean;
+  patSecretKey: string;
+  patCreated: boolean;
+  patRotated: boolean;
+  workspaceUrl: string;
+  error?: string;
 }
 
 interface SsoSpnAccountModalProps {
@@ -77,6 +107,240 @@ function TokenTab({ token, title }: { token: DecodedTokenInfo | null; title: str
   );
 }
 
+function StatusIcon({ status }: { status: "success" | "error" | "warning" | "pending" }) {
+  switch (status) {
+    case "success":
+      return <CheckCircle2 className="h-5 w-5 text-green-600" />;
+    case "error":
+      return <XCircle className="h-5 w-5 text-red-600" />;
+    case "warning":
+      return <AlertCircle className="h-5 w-5 text-yellow-600" />;
+    case "pending":
+      return <AlertCircle className="h-5 w-5 text-muted-foreground" />;
+  }
+}
+
+function SecretsTab({ enabled }: { enabled: boolean }) {
+  const queryClient = useQueryClient();
+
+  const { data: statusData, isLoading: statusLoading, error: statusError, refetch } = useQuery<{ data: WorkspaceSecretsStatusResponse }>({
+    queryKey: ["workspace-secrets-status"],
+    queryFn: async () => {
+      const response = await fetch("/api/sso-spn/workspace-secrets/status");
+      if (!response.ok) {
+        throw new Error("Failed to fetch secrets status");
+      }
+      return response.json();
+    },
+    enabled,
+    staleTime: 0,
+  });
+
+  const setupMutation = useMutation<{ data: WorkspaceSecretsSetupResponse }>({
+    mutationFn: async () => {
+      const response = await fetch("/api/sso-spn/workspace-secrets/setup", {
+        method: "POST",
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to setup secrets");
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["workspace-secrets-status"] });
+    },
+  });
+
+  const status = statusData?.data;
+
+  if (statusLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="text-center space-y-4">
+          <Spinner className="w-8 h-8 text-emerald-600 mx-auto" />
+          <p className="text-sm text-muted-foreground">Checking secrets status...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (statusError) {
+    return (
+      <div className="p-4 text-center text-red-600">
+        <p>Failed to load secrets status</p>
+        <p className="text-xs text-muted-foreground mt-1">
+          {statusError instanceof Error ? statusError.message : "Unknown error"}
+        </p>
+      </div>
+    );
+  }
+
+  if (!status) {
+    return (
+      <div className="p-4 text-center text-muted-foreground">
+        <p>No status data available</p>
+      </div>
+    );
+  }
+
+  const isFullyConfigured = status.configured && status.scopeExists && status.secretRegistered;
+
+  return (
+    <ScrollArea className="h-[400px]">
+      <div className="space-y-4 pr-4">
+        {/* Overall Status */}
+        <div className="flex items-center gap-3 p-4 rounded-lg border bg-muted/50">
+          <StatusIcon status={isFullyConfigured ? "success" : status.error ? "error" : "warning"} />
+          <div className="flex-1">
+            <p className="font-medium">
+              {isFullyConfigured
+                ? "Workspace Secret Registered"
+                : status.error
+                  ? "Configuration Error"
+                  : "Secret Not Registered"}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              {isFullyConfigured
+                ? "Your SPN secret is available in the workspace"
+                : status.error
+                  ? status.error
+                  : "Click the button below to register your secret"}
+            </p>
+          </div>
+        </div>
+
+        {/* Status Details */}
+        <div className="space-y-2">
+          <h4 className="text-sm font-medium">Configuration Details</h4>
+
+          <div className="flex items-center gap-2 py-2 border-b border-border">
+            <StatusIcon status={status.configured ? "success" : "error"} />
+            <span className="text-sm flex-1">Environment Configured</span>
+            <Badge variant={status.configured ? "default" : "destructive"}>
+              {status.configured ? "Yes" : "No"}
+            </Badge>
+          </div>
+
+          {status.scopeName && (
+            <div className="flex flex-col gap-1 py-2 border-b border-border">
+              <span className="text-xs text-muted-foreground font-medium">Scope Name</span>
+              <span className="text-sm font-mono">{status.scopeName}</span>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 py-2 border-b border-border">
+            <StatusIcon status={status.scopeExists ? "success" : "pending"} />
+            <span className="text-sm flex-1">Scope Exists in Workspace</span>
+            <Badge variant={status.scopeExists ? "default" : "secondary"}>
+              {status.scopeExists ? "Yes" : "No"}
+            </Badge>
+          </div>
+
+          {status.secretKey && (
+            <div className="flex flex-col gap-1 py-2 border-b border-border">
+              <span className="text-xs text-muted-foreground font-medium">Secret Key (Client ID)</span>
+              <span className="text-sm font-mono">{status.secretKey}</span>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 py-2 border-b border-border">
+            <StatusIcon status={status.secretRegistered ? "success" : "pending"} />
+            <span className="text-sm flex-1">Secret Registered</span>
+            <Badge variant={status.secretRegistered ? "default" : "secondary"}>
+              {status.secretRegistered ? "Yes" : "No"}
+            </Badge>
+          </div>
+
+          {status.lastUpdated && (
+            <div className="flex flex-col gap-1 py-2 border-b border-border">
+              <span className="text-xs text-muted-foreground font-medium">Secret Last Updated</span>
+              <span className="text-sm">
+                {new Date(status.lastUpdated).toLocaleString()}
+              </span>
+            </div>
+          )}
+
+          {/* PAT Token Status */}
+          {status.patSecretKey && (
+            <div className="flex flex-col gap-1 py-2 border-b border-border">
+              <span className="text-xs text-muted-foreground font-medium">PAT Secret Key</span>
+              <span className="text-sm font-mono">{status.patSecretKey}</span>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 py-2 border-b border-border">
+            <StatusIcon status={status.patRegistered ? "success" : "pending"} />
+            <span className="text-sm flex-1">PAT Token Registered</span>
+            <Badge variant={status.patRegistered ? "default" : "secondary"}>
+              {status.patRegistered ? "Yes" : "No"}
+            </Badge>
+          </div>
+
+          {status.patLastUpdated && (
+            <div className="flex flex-col gap-1 py-2 border-b border-border">
+              <span className="text-xs text-muted-foreground font-medium">PAT Last Updated</span>
+              <span className="text-sm">
+                {new Date(status.patLastUpdated).toLocaleString()}
+              </span>
+            </div>
+          )}
+
+          {status.workspaceUrl && (
+            <div className="flex flex-col gap-1 py-2 border-b border-border">
+              <span className="text-xs text-muted-foreground font-medium">Workspace URL</span>
+              <span className="text-sm font-mono">{status.workspaceUrl}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="flex gap-2 pt-2">
+          <Button
+            onClick={() => setupMutation.mutate()}
+            disabled={setupMutation.isPending}
+            className="flex-1"
+          >
+            {setupMutation.isPending ? (
+              <>
+                <Spinner className="w-4 h-4 mr-2" />
+                Setting up...
+              </>
+            ) : isFullyConfigured ? (
+              "Refresh Secret"
+            ) : (
+              "Setup Secret"
+            )}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => refetch()}
+            disabled={statusLoading}
+          >
+            <RefreshCw className="w-4 h-4" />
+          </Button>
+        </div>
+
+        {setupMutation.isSuccess && (
+          <div className="p-3 rounded-lg border bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300 text-sm">
+            Secret setup completed successfully!
+            {setupMutation.data?.data?.scopeCreated && " (Scope was created)"}
+            {setupMutation.data?.data?.secretUpdated && " (Secret was updated)"}
+            {setupMutation.data?.data?.patCreated && " (PAT token created)"}
+            {setupMutation.data?.data?.patRotated && " (PAT token rotated)"}
+          </div>
+        )}
+
+        {setupMutation.isError && (
+          <div className="p-3 rounded-lg border bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 text-sm">
+            {setupMutation.error instanceof Error ? setupMutation.error.message : "Setup failed"}
+          </div>
+        )}
+      </div>
+    </ScrollArea>
+  );
+}
+
 export function SsoSpnAccountModal({ open, onOpenChange }: SsoSpnAccountModalProps) {
   const { data, isLoading, error } = useQuery<{ data: AccountInfoResponse }>({
     queryKey: ["sso-spn-account-info"],
@@ -95,7 +359,7 @@ export function SsoSpnAccountModal({ open, onOpenChange }: SsoSpnAccountModalPro
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh]">
+      <DialogContent className="max-w-4xl max-h-[90vh]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             My Account
@@ -126,8 +390,9 @@ export function SsoSpnAccountModal({ open, onOpenChange }: SsoSpnAccountModalPro
 
         {accountInfo && !isLoading && (
           <Tabs defaultValue="overview" className="w-full">
-            <TabsList className="w-full grid grid-cols-3">
+            <TabsList className="w-full grid grid-cols-4">
               <TabsTrigger value="overview">Overview</TabsTrigger>
+              <TabsTrigger value="secrets">Secrets</TabsTrigger>
               <TabsTrigger value="okta">Okta Token</TabsTrigger>
               <TabsTrigger value="workspace">Workspace Token</TabsTrigger>
             </TabsList>
@@ -143,6 +408,10 @@ export function SsoSpnAccountModal({ open, onOpenChange }: SsoSpnAccountModalPro
                   <InfoRow label="SPN Client Secret" value={accountInfo.clientSecretPreview} />
                 </div>
               </ScrollArea>
+            </TabsContent>
+
+            <TabsContent value="secrets" className="mt-4">
+              <SecretsTab enabled={open} />
             </TabsContent>
 
             <TabsContent value="okta" className="mt-4">
