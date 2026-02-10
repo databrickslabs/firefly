@@ -29,6 +29,7 @@ import {
 interface AppSidebarProps {
   basePath: string;
   userEmail?: string | null;
+  userRole?: string | null;
 }
 
 const navigationItems = [
@@ -75,9 +76,13 @@ const navigationItems = [
   },
 ] as const;
 
-export function AppSidebar({ basePath, userEmail }: AppSidebarProps) {
+export function AppSidebar({ basePath, userEmail, userRole }: AppSidebarProps) {
   const pathname = usePathname();
-  const showAdminLink = isAdmin(userEmail);
+  const isSsoSpn = basePath.startsWith("/sso-spn/");
+  const showAdminLink = isSsoSpn
+    ? isAdmin(userEmail) && userRole === "admin"
+    : isAdmin(userEmail);
+  const adminHref = isSsoSpn ? "/sso-spn-admin" : "/admin";
 
   return (
     <Sidebar collapsible="icon">
@@ -132,10 +137,10 @@ export function AppSidebar({ basePath, userEmail }: AppSidebarProps) {
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     asChild
-                    isActive={pathname === "/admin"}
+                    isActive={pathname.startsWith(adminHref)}
                     tooltip="Admin"
                   >
-                    <Link href={`/admin?returnUrl=${encodeURIComponent(pathname)}`}>
+                    <Link href={`${adminHref}?returnUrl=${encodeURIComponent(pathname)}`}>
                       <ShieldCheck className="h-4 w-4" />
                       <span>Admin</span>
                     </Link>

@@ -20,21 +20,21 @@ flowchart TB
         SPNMgr["SPN Token Manager<br/>Caching & Refresh"]
     end
 
-    subgraph Storage["Data Layer"]
-        direction TB
-        PG[("PostgreSQL")]
-        subgraph PGTables["Tables"]
-            Users["users"]
-            Orgs["organizations"]
-            OrgMembers["organization_members"]
-            SPNs["spn_credentials"]
-            SessionsT["sessions"]
-        end
-        PG --> PGTables
-    end
-
     subgraph Databricks["Databricks Platform"]
         direction TB
+        subgraph Storage["Databricks OLTP Layer"]
+            direction TB
+            PG[("Lakebase")]
+            subgraph PGTables["Tables"]
+                direction LR
+                Users["users"]
+                Orgs["organizations"]
+                OrgMembers["organization_members"]
+                SPNs["spn_credentials"]
+                SessionsT["sessions"]
+            end
+            PG --> PGTables
+        end
         subgraph APIs["APIs"]
             UCApi["Unity Catalog API"]
             SQLApi["Statement Execution API"]
@@ -42,6 +42,7 @@ flowchart TB
             AppsApi["Apps API"]
         end
         subgraph Resources["Resources"]
+            direction LR
             Catalogs["Catalogs & Schemas"]
             Tables["Tables & Views"]
             Volumes["Volumes & Files"]

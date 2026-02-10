@@ -8,12 +8,12 @@ flowchart TB
         OIDC["OAuth 2.0 / OIDC<br/>(Okta, Azure AD, Auth0)"]
     end
 
-    subgraph FireFly["FireFly Analytics Platform"]
+    subgraph FireFly["FireFly Application"]
         direction TB
         FE["Next.js Frontend<br/>React + TanStack Query"]
         API["Next.js API Routes<br/>Server-side Middleware"]
         Auth["Better-Auth<br/>Session Management"]
-        DB_PG[("PostgreSQL<br/>Sessions, Orgs, SPNs")]
+        SPNMgr["SPN Management"]
     end
 
     subgraph Databricks["Databricks Lakehouse"]
@@ -22,6 +22,7 @@ flowchart TB
         SQL["SQL Warehouse"]
         DBFS["DBFS / Volumes"]
         Apps["Databricks Apps"]
+        DB_PG[("Lakebase<br/>Sessions, Orgs, SPNs")]
     end
 
     U --> FE
@@ -30,10 +31,12 @@ flowchart TB
     API --> Auth
     Auth --> OIDC
     Auth --> DB_PG
-    API --> UC
-    API --> SQL
-    API --> DBFS
-    API --> Apps
+    API --> SPNMgr
+    SPNMgr --> DB_PG
+    SPNMgr --> UC
+    SPNMgr --> SQL
+    SPNMgr --> DBFS
+    SPNMgr --> Apps
 
     style FireFly fill:#fff7ed,stroke:#f97316
     style Databricks fill:#eff6ff,stroke:#3b82f6

@@ -51,7 +51,7 @@ export default function OrgLayout({
     <SsoSpnUserStoreInitializer orgId={orgId}>
       <SidebarProvider>
         <div className="h-screen flex w-full">
-          <AppSidebar basePath={basePath} userEmail={session.user.email} />
+          <AppSidebar basePath={basePath} userEmail={session.user.email} userRole={session.user.role} />
           <SidebarInset className="flex flex-col h-screen flex-1">
             {/* Top Navigation with Trigger */}
             <div className="flex h-14 shrink-0 items-center gap-2 border-b bg-background px-4">
