@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
+
 import { useRouter, useParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -52,6 +52,8 @@ import {
   Settings,
   CheckCircle2,
   XCircle,
+  LayoutGrid,
+  List,
 } from "lucide-react";
 import {
   Tooltip,
@@ -150,6 +152,7 @@ export default function IDEPage() {
   const router = useRouter();
   const params = useParams<{ orgId: string }>();
   const queryClient = useQueryClient();
+  const [viewMode, setViewMode] = useState<"tile" | "list">("tile");
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -329,7 +332,9 @@ export default function IDEPage() {
     },
   });
 
-  const tools = toolsData?.authoringTools || [];
+  const tools = [...(toolsData?.authoringTools || [])].sort((a, b) =>
+    a.name.localeCompare(b.name)
+  );
 
   // Validate name: after sanitization, must only contain lowercase letters, numbers, and dashes
   // and result in a valid 2-30 char app name (sanitized name + 7 char suffix: "-" + 6 random)
@@ -431,6 +436,24 @@ export default function IDEPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <div className="flex items-center border rounded-lg">
+              <Button
+                variant={viewMode === "tile" ? "secondary" : "ghost"}
+                size="icon"
+                className="h-9 w-9 rounded-r-none"
+                onClick={() => setViewMode("tile")}
+              >
+                <LayoutGrid className="h-4 w-4" />
+              </Button>
+              <Button
+                variant={viewMode === "list" ? "secondary" : "ghost"}
+                size="icon"
+                className="h-9 w-9 rounded-l-none"
+                onClick={() => setViewMode("list")}
+              >
+                <List className="h-4 w-4" />
+              </Button>
+            </div>
             <Button
               variant="outline"
               size="icon"
@@ -493,8 +516,8 @@ export default function IDEPage() {
           </div>
         )}
 
-        {/* Tools Grid */}
-        {!isLoading && !error && tools.length > 0 && (
+        {/* Tools Grid / List */}
+        {!isLoading && !error && tools.length > 0 && viewMode === "tile" && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {tools.map((tool) => {
               const typeConfig = toolTypeConfig[tool.type];
@@ -506,12 +529,10 @@ export default function IDEPage() {
               const actionInProgress = actionMutation.isPending && actionMutation.variables?.id === tool.id;
               const canOpenIframe = isRunning && tool.hasActiveDeployment && tool.appUrl;
 
-              const ideDetailPath = `/sso-spn/${params.orgId}/ide/${tool.id}`;
-
-              const cardContent = (
+              return (
                 <Card
                   key={tool.id}
-                  className={`relative group ${canOpenIframe ? "hover:border-emerald-500 transition-colors" : ""}`}
+                  className="relative group"
                 >
                   <CardHeader className="pb-3">
                     <div className="flex items-start justify-between">
@@ -656,7 +677,7 @@ export default function IDEPage() {
                     )}
 
                     {/* Start/Stop Buttons */}
-                    <div className="flex gap-2 pt-2" onClick={(e) => e.preventDefault()}>
+                    <div className="flex gap-2 pt-2">
                       {isStopped && (
                         <>
                           <Button
@@ -746,16 +767,200 @@ export default function IDEPage() {
                   </CardContent>
                 </Card>
               );
+            })}
+          </div>
+        )}
 
-              if (canOpenIframe) {
-                return (
-                  <Link key={tool.id} href={ideDetailPath} className="block no-underline text-inherit">
-                    {cardContent}
-                  </Link>
-                );
-              }
+        {/* List View */}
+        {!isLoading && !error && tools.length > 0 && viewMode === "list" && (
+          <div className="border rounded-lg divide-y">
+            {tools.map((tool) => {
+              const typeConfig = toolTypeConfig[tool.type];
+              const TypeIcon = typeConfig.icon;
+              const status = statusConfig[tool.status] || statusConfig.UNKNOWN;
+              const isRunning = tool.status === "RUNNING" || tool.status === "ACTIVE";
+              const isStopped = tool.status === "STOPPED";
+              const isTransitioning = tool.status === "STARTING" || tool.status === "STOPPING" || tool.status === "CREATING";
+              const actionInProgress = actionMutation.isPending && actionMutation.variables?.id === tool.id;
+              const canOpenIframe = isRunning && tool.hasActiveDeployment && tool.appUrl;
 
-              return <div key={tool.id}>{cardContent}</div>;
+              return (
+                <div
+                  key={tool.id}
+                  className="group flex items-center gap-4 p-4 hover:bg-muted/50 transition-colors"
+                >
+                  {/* Icon + Name */}
+                  <div className={`p-2 rounded-lg ${typeConfig.color} flex-shrink-0`}>
+                    <TypeIcon className="h-4 w-4" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium truncate">{tool.name}</span>
+                      <Badge variant="outline" className="text-xs flex-shrink-0">
+                        {typeConfig.label}
+                      </Badge>
+                    </div>
+                    {tool.description && (
+                      <p className="text-sm text-muted-foreground truncate mt-0.5">
+                        {tool.description}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Deployment Status */}
+                  <div className="flex-shrink-0">
+                    {tool.hasActiveDeployment ? (
+                      <span className="flex items-center gap-1 text-green-600 dark:text-green-400">
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        <span className="text-xs">Deployed</span>
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                        <XCircle className="h-3.5 w-3.5" />
+                        <span className="text-xs">Not Deployed</span>
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Status Badge */}
+                  <Badge className={`${status.color} flex-shrink-0`}>{status.label}</Badge>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {isStopped && (
+                      <>
+                        <Button
+                          size="sm"
+                          onClick={() => handleStartStop(tool, "start")}
+                          disabled={actionInProgress || isTransitioning}
+                        >
+                          {actionInProgress ? (
+                            <Spinner className="h-3.5 w-3.5 mr-1.5" />
+                          ) : (
+                            <Play className="h-3.5 w-3.5 mr-1.5" />
+                          )}
+                          Start
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => openEditDialog(tool)}
+                          title="Edit settings"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                      </>
+                    )}
+                    {isRunning && (
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleStartStop(tool, "stop")}
+                          disabled={actionInProgress || isTransitioning}
+                        >
+                          {actionInProgress ? (
+                            <Spinner className="h-3.5 w-3.5 mr-1.5" />
+                          ) : (
+                            <Square className="h-3.5 w-3.5 mr-1.5" />
+                          )}
+                          Stop
+                        </Button>
+                        {tool.appUrl && tool.hasActiveDeployment ? (
+                          <>
+                            <Button
+                              size="sm"
+                              onClick={() => router.push(`/sso-spn/${params.orgId}/ide/${tool.id}`)}
+                            >
+                              <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
+                              Open
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => openEditDialog(tool)}
+                              title="Change IDE type or backup folder"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                          </>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => setupMutation.mutate(tool.id)}
+                            disabled={setupMutation.isPending && setupMutation.variables === tool.id}
+                          >
+                            {setupMutation.isPending && setupMutation.variables === tool.id ? (
+                              <>
+                                <Spinner className="h-3.5 w-3.5 mr-1.5" />
+                                Setting up...
+                              </>
+                            ) : (
+                              <>
+                                <Settings className="h-3.5 w-3.5 mr-1.5" />
+                                Setup
+                              </>
+                            )}
+                          </Button>
+                        )}
+                      </>
+                    )}
+                    {isTransitioning && (
+                      <Button size="sm" disabled>
+                        <Spinner className="h-3.5 w-3.5 mr-1.5" />
+                        {tool.status === "STARTING" ? "Starting..." : tool.status === "STOPPING" ? "Stopping..." : "Creating..."}
+                      </Button>
+                    )}
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={(e) => e.preventDefault()}
+                        >
+                          <MoreVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        {tool.appUrl && isRunning && (
+                          <DropdownMenuItem asChild>
+                            <a
+                              href={tool.appUrl.startsWith("http") ? tool.appUrl : `https://${tool.appUrl}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              <ExternalLink className="h-4 w-4 mr-2" />
+                              Open in Browser
+                            </a>
+                          </DropdownMenuItem>
+                        )}
+                        {isStopped && (
+                          <DropdownMenuItem onClick={() => openEditDialog(tool)}>
+                            <Pencil className="h-4 w-4 mr-2" />
+                            Edit Settings
+                          </DropdownMenuItem>
+                        )}
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          className="text-red-600 dark:text-red-400"
+                          disabled={isTransitioning}
+                          onClick={() => {
+                            setSelectedTool(tool);
+                            setDeleteDialogOpen(true);
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </div>
+              );
             })}
           </div>
         )}

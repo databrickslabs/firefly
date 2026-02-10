@@ -328,9 +328,6 @@ def main():
         os.environ["DATABRICKS_CLIENT_ID"] = os.environ["FIREFLY_DATABRICKS_CLIENT_ID"]
     if os.environ.get("FIREFLY_DATABRICKS_CLIENT_SECRET"):
         os.environ["DATABRICKS_CLIENT_SECRET"] = os.environ["FIREFLY_DATABRICKS_CLIENT_SECRET"]
-    if os.environ.get("FIREFLY_DATABRICKS_TOKEN"):
-        os.environ["DATABRICKS_TOKEN"] = os.environ["FIREFLY_DATABRICKS_TOKEN"]
-
     # Create a temp directory to use as our base (similar to code-editor approach)
     tmp = Path(tempfile.mkdtemp(prefix="marimo-"))
     HOME_DIR = tmp
@@ -340,7 +337,7 @@ def main():
 
     # Create ~/.databrickscfg for the databricks CLI
     host = os.environ.get("DATABRICKS_HOST", "")
-    token = os.environ.get("DATABRICKS_TOKEN", "")
+    token = os.environ.get("FIREFLY_DATABRICKS_TOKEN", "")
     if host:
         if not host.startswith("https://"):
             host = f"https://{host}"
@@ -351,7 +348,7 @@ def main():
             )
             print(f"Created {cfg_path} with DEFAULT profile (token auth)")
         else:
-            print("Warning: No DATABRICKS_TOKEN available for .databrickscfg")
+            print("Warning: No FIREFLY_DATABRICKS_TOKEN available for .databrickscfg")
     else:
         print("Warning: DATABRICKS_HOST not set, skipping .databrickscfg")
 
@@ -397,15 +394,6 @@ def main():
     # Prepare environment
     env = os.environ.copy()
     env["HOME"] = str(HOME_DIR)
-
-    # Anthropic / Claude Code environment variables
-    env["ANTHROPIC_MODEL"] = "databricks-claude-opus-4-6"
-    env["ANTHROPIC_BASE_URL"] = "https://dbc-acc143fd-4ea9.cloud.databricks.com/serving-endpoints/anthropic"
-    env["ANTHROPIC_AUTH_TOKEN"] = os.environ.get("FIREFLY_DATABRICKS_TOKEN", "")
-    env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = "databricks-claude-opus-4-6"
-    env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = "databricks-claude-sonnet-4-5"
-    env["ANTHROPIC_CUSTOM_HEADERS"] = "x-databricks-use-coding-agent-mode: true"
-    env["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] = "1"
 
     # Build marimo command using uv run
     args = [

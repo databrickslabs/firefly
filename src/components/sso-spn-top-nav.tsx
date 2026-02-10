@@ -85,7 +85,7 @@ export function SsoSpnTopNav({ user, title, basePath }: SsoSpnTopNavProps) {
       </div>
 
       {/* Right Section - Org Switcher & Profile */}
-      <div className="flex items-center gap-2 flex-shrink-0">
+      <div className="flex items-center gap-2 flex-shrink-0 ml-auto">
         {/* Organization Switcher */}
         <OrgSwitcher />
 
