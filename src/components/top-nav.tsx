@@ -15,6 +15,7 @@ import { Search, ChevronDown, User } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import { OrgSwitcher } from "@/components/org-switcher";
+import { GitHubSourceLink } from "@/components/github-source-link";
 
 interface TopNavProps {
   user: {
@@ -66,6 +67,7 @@ export function TopNav({ user, title, basePath }: TopNavProps) {
       <div className="flex items-center gap-2 flex-shrink-0">
         {/* Organization Switcher */}
         <OrgSwitcher />
+        <GitHubSourceLink />
 
         {/* Profile Dropdown */}
         <DropdownMenu>

@@ -17,6 +17,7 @@ import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import { OrgSwitcher } from "@/components/org-switcher";
 import { SsoSpnAccountModal } from "@/components/sso-spn-account-modal";
+import { GitHubSourceLink } from "@/components/github-source-link";
 
 interface SsoSpnTopNavProps {
   user: {
@@ -88,6 +89,7 @@ export function SsoSpnTopNav({ user, title, basePath }: SsoSpnTopNavProps) {
       <div className="flex items-center gap-2 flex-shrink-0 ml-auto">
         {/* Organization Switcher */}
         <OrgSwitcher />
+        <GitHubSourceLink />
 
         {/* Profile Dropdown */}
         <DropdownMenu>
