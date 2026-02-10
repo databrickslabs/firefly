@@ -82,6 +82,10 @@ interface CatalogTreeViewProps {
   className?: string;
   /** View mode: "editor" truncates text, "display" shows full text */
   viewMode?: CatalogViewMode;
+  /** If provided, overrides internal selection state for controlled mode */
+  controlledSelectedItemKey?: string | null;
+  /** If provided, auto-expands these node keys (e.g. from URL state) */
+  controlledExpandedNodes?: Set<string>;
 }
 
 export function CatalogTreeView({
@@ -89,8 +93,15 @@ export function CatalogTreeView({
   onItemSelect,
   className,
   viewMode = "display",
+  controlledSelectedItemKey,
+  controlledExpandedNodes,
 }: CatalogTreeViewProps) {
-  const [selectedItemKey, setSelectedItemKey] = React.useState<string | null>(null);
+  const [internalSelectedItemKey, setInternalSelectedItemKey] = React.useState<string | null>(null);
+
+  // Use controlled value when provided, otherwise use internal state
+  const selectedItemKey = controlledSelectedItemKey !== undefined
+    ? controlledSelectedItemKey
+    : internalSelectedItemKey;
 
   // Fetch catalogs
   const { data: catalogsData, isLoading: catalogsLoading } = useQuery({
@@ -108,20 +119,23 @@ export function CatalogTreeView({
   });
 
   const handleCatalogClick = (catalog: string) => {
-    const key = `catalog:${catalog}`;
-    setSelectedItemKey(key);
+    if (controlledSelectedItemKey === undefined) {
+      setInternalSelectedItemKey(`catalog:${catalog}`);
+    }
     onItemSelect?.({ type: "catalog", catalog });
   };
 
   const handleSchemaClick = (catalog: string, schema: string) => {
-    const key = `schema:${catalog}.${schema}`;
-    setSelectedItemKey(key);
+    if (controlledSelectedItemKey === undefined) {
+      setInternalSelectedItemKey(`schema:${catalog}.${schema}`);
+    }
     onItemSelect?.({ type: "schema", catalog, schema });
   };
 
   const handleTableClick = (catalog: string, schema: string, table: string) => {
-    const key = `table:${catalog}.${schema}.${table}`;
-    setSelectedItemKey(key);
+    if (controlledSelectedItemKey === undefined) {
+      setInternalSelectedItemKey(`table:${catalog}.${schema}.${table}`);
+    }
     onItemSelect?.({ type: "table", catalog, schema, table });
   };
 
@@ -150,6 +164,7 @@ export function CatalogTreeView({
               onSchemaClick={handleSchemaClick}
               onTableClick={handleTableClick}
               selectedItemKey={selectedItemKey}
+              controlledExpandedNodes={controlledExpandedNodes}
             />
           ))}
         </div>
@@ -166,6 +181,7 @@ interface CatalogNodeProps {
   onSchemaClick: (catalog: string, schema: string) => void;
   onTableClick: (catalog: string, schema: string, table: string) => void;
   selectedItemKey: string | null;
+  controlledExpandedNodes?: Set<string>;
 }
 
 function CatalogNode({
@@ -176,10 +192,20 @@ function CatalogNode({
   onSchemaClick,
   onTableClick,
   selectedItemKey,
+  controlledExpandedNodes,
 }: CatalogNodeProps) {
-  const [isOpen, setIsOpen] = React.useState(false);
-  const itemKey = `catalog:${catalog.name}`;
+  const nodeKey = `catalog:${catalog.name}`;
+  const [isOpen, setIsOpen] = React.useState(
+    controlledExpandedNodes?.has(nodeKey) ?? false
+  );
+  const itemKey = nodeKey;
   const isSelected = selectedItemKey === itemKey;
+
+  React.useEffect(() => {
+    if (controlledExpandedNodes?.has(nodeKey)) {
+      setIsOpen(true);
+    }
+  }, [controlledExpandedNodes, nodeKey]);
 
   return (
     <Collapsible
@@ -228,6 +254,7 @@ function CatalogNode({
             onSchemaClick={onSchemaClick}
             onTableClick={onTableClick}
             selectedItemKey={selectedItemKey}
+            controlledExpandedNodes={controlledExpandedNodes}
           />
         )}
       </CollapsibleContent>
@@ -242,6 +269,7 @@ interface SchemaListProps {
   onSchemaClick: (catalog: string, schema: string) => void;
   onTableClick: (catalog: string, schema: string, table: string) => void;
   selectedItemKey: string | null;
+  controlledExpandedNodes?: Set<string>;
 }
 
 function SchemaList({
@@ -251,6 +279,7 @@ function SchemaList({
   onSchemaClick,
   onTableClick,
   selectedItemKey,
+  controlledExpandedNodes,
 }: SchemaListProps) {
   const { data: schemasData, isLoading } = useQuery({
     queryKey: ["schemas", catalogName],
@@ -288,6 +317,7 @@ function SchemaList({
           onSchemaClick={onSchemaClick}
           onTableClick={onTableClick}
           selectedItemKey={selectedItemKey}
+          controlledExpandedNodes={controlledExpandedNodes}
         />
       ))}
     </div>
@@ -301,6 +331,7 @@ interface SchemaNodeProps {
   onSchemaClick: (catalog: string, schema: string) => void;
   onTableClick: (catalog: string, schema: string, table: string) => void;
   selectedItemKey: string | null;
+  controlledExpandedNodes?: Set<string>;
 }
 
 function SchemaNode({
@@ -310,10 +341,20 @@ function SchemaNode({
   onSchemaClick,
   onTableClick,
   selectedItemKey,
+  controlledExpandedNodes,
 }: SchemaNodeProps) {
-  const [isOpen, setIsOpen] = React.useState(false);
-  const itemKey = `schema:${schema.catalog_name}.${schema.name}`;
+  const nodeKey = `schema:${schema.catalog_name}.${schema.name}`;
+  const [isOpen, setIsOpen] = React.useState(
+    controlledExpandedNodes?.has(nodeKey) ?? false
+  );
+  const itemKey = nodeKey;
   const isSelected = selectedItemKey === itemKey;
+
+  React.useEffect(() => {
+    if (controlledExpandedNodes?.has(nodeKey)) {
+      setIsOpen(true);
+    }
+  }, [controlledExpandedNodes, nodeKey]);
 
   return (
     <Collapsible

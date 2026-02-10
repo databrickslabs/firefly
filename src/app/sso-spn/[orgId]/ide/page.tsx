@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter, useParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -505,27 +506,12 @@ export default function IDEPage() {
               const actionInProgress = actionMutation.isPending && actionMutation.variables?.id === tool.id;
               const canOpenIframe = isRunning && tool.hasActiveDeployment && tool.appUrl;
 
-              const handleCardClick = (e: React.MouseEvent) => {
-                // Don't navigate if clicking on buttons, dropdown, or interactive elements
-                const target = e.target as HTMLElement;
-                if (
-                  target.closest("button") ||
-                  target.closest("[role='menuitem']") ||
-                  target.closest("[data-radix-collection-item]") ||
-                  target.closest("a")
-                ) {
-                  return;
-                }
-                if (canOpenIframe) {
-                  router.push(`/sso-spn/${params.orgId}/ide/${tool.id}`);
-                }
-              };
+              const ideDetailPath = `/sso-spn/${params.orgId}/ide/${tool.id}`;
 
-              return (
+              const cardContent = (
                 <Card
                   key={tool.id}
-                  className={`relative group ${canOpenIframe ? "cursor-pointer hover:border-emerald-500 transition-colors" : ""}`}
-                  onClick={handleCardClick}
+                  className={`relative group ${canOpenIframe ? "hover:border-emerald-500 transition-colors" : ""}`}
                 >
                   <CardHeader className="pb-3">
                     <div className="flex items-start justify-between">
@@ -550,6 +536,7 @@ export default function IDEPage() {
                             variant="ghost"
                             size="icon"
                             className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                            onClick={(e) => e.preventDefault()}
                           >
                             <MoreVertical className="h-4 w-4" />
                           </Button>
@@ -669,7 +656,7 @@ export default function IDEPage() {
                     )}
 
                     {/* Start/Stop Buttons */}
-                    <div className="flex gap-2 pt-2">
+                    <div className="flex gap-2 pt-2" onClick={(e) => e.preventDefault()}>
                       {isStopped && (
                         <>
                           <Button
@@ -759,6 +746,16 @@ export default function IDEPage() {
                   </CardContent>
                 </Card>
               );
+
+              if (canOpenIframe) {
+                return (
+                  <Link key={tool.id} href={ideDetailPath} className="block no-underline text-inherit">
+                    {cardContent}
+                  </Link>
+                );
+              }
+
+              return <div key={tool.id}>{cardContent}</div>;
             })}
           </div>
         )}

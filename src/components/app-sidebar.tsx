@@ -9,11 +9,9 @@ import {
   Code,
   Briefcase,
   ShieldCheck,
-  FileCode,
   LayoutDashboard,
   GitBranch,
   Upload,
-  NotebookPen,
   MonitorPlay,
 } from "lucide-react";
 import {
@@ -50,14 +48,9 @@ const navigationItems = [
     icon: Code,
   },
   {
-    name: "Code Editor",
-    href: "/code-editor",
-    icon: FileCode,
-  },
-  {
-    name: "Notebook Editor",
-    href: "/notebook-editor",
-    icon: NotebookPen,
+    name: "IDE",
+    href: "/ide",
+    icon: MonitorPlay,
   },
   {
     name: "Embedded Dashboard",
@@ -73,11 +66,6 @@ const navigationItems = [
     name: "Import Data",
     href: "/import-data",
     icon: Upload,
-  },
-  {
-    name: "IDE",
-    href: "/ide",
-    icon: MonitorPlay,
   },
   {
     name: "Jobs (Coming Soon)",

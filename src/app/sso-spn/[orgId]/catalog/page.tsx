@@ -1,12 +1,13 @@
 "use client";
 
-import * as React from "react";
-import { CatalogTreeView, SelectedItem } from "@/components/unity-catalog/catalog-tree-view";
+import { CatalogTreeView } from "@/components/unity-catalog/catalog-tree-view";
 import { CatalogViewer } from "@/components/unity-catalog/catalog-viewer";
 import { Separator } from "@/components/ui/separator";
+import { useCatalogUrlState } from "@/hooks/use-catalog-url-state";
 
 export default function CatalogPage() {
-  const [selectedItem, setSelectedItem] = React.useState<SelectedItem | null>(null);
+  const { selectedItem, handleItemSelect, expandedNodes, selectedItemKey } =
+    useCatalogUrlState();
 
   return (
     <div className="h-full flex flex-col">
@@ -34,7 +35,9 @@ export default function CatalogPage() {
             <CatalogTreeView
               showColumns={false}
               viewMode="display"
-              onItemSelect={setSelectedItem}
+              onItemSelect={handleItemSelect}
+              controlledSelectedItemKey={selectedItemKey}
+              controlledExpandedNodes={expandedNodes}
             />
           </div>
         </div>

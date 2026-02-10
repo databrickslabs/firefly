@@ -563,6 +563,15 @@ def main():
     for key, value in DEFAULT_ENV.items():
         env.setdefault(key, value)
 
+    # Anthropic / Claude Code environment variables
+    env["ANTHROPIC_MODEL"] = "databricks-claude-opus-4-6"
+    env["ANTHROPIC_BASE_URL"] = "https://dbc-acc143fd-4ea9.cloud.databricks.com/serving-endpoints/anthropic"
+    env["ANTHROPIC_AUTH_TOKEN"] = os.environ.get("FIREFLY_DATABRICKS_TOKEN", "")
+    env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = "databricks-claude-opus-4-6"
+    env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = "databricks-claude-sonnet-4-5"
+    env["ANTHROPIC_CUSTOM_HEADERS"] = "x-databricks-use-coding-agent-mode: true"
+    env["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] = "1"
+
     args = [
         str(binary),
         "--bind-addr", f"0.0.0.0:{port}",
