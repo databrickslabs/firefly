@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useQueryState, parseAsString } from "nuqs";
 import { Button } from "@/components/ui/button";
+import { GitHubSourceLink } from "@/components/github-source-link";
 
 const ALLOWED_PATH_PREFIXES = ["/databricks-idp/", "/sso-spn/"];
 
@@ -75,7 +76,10 @@ export function SsoSpnAdminSidebar() {
   return (
     <aside className="w-56 border-r bg-background flex flex-col">
       <div className="p-4 border-b">
-        <h2 className="font-semibold text-lg">SPN Admin Panel</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold text-lg">SPN Admin Panel</h2>
+          <GitHubSourceLink />
+        </div>
         <p className="text-xs text-muted-foreground">Account-Level Operations</p>
       </div>
 
