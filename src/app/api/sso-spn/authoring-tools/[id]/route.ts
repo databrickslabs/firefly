@@ -4,7 +4,7 @@ import { headers } from 'next/headers';
 import { revalidateTag } from 'next/cache';
 import { AUTHORING_TOOLS_CACHE_TAG } from '../cache-tags';
 import { db } from '@/db';
-import { authoringTool, organization, userSpns } from '@/db/schema';
+import { authoringTool, organization, userSpns, organizationWarehouses } from '@/db/schema';
 import { eq, and } from 'drizzle-orm';
 import {
   getGlobalAdminToken,
@@ -308,6 +308,18 @@ export async function POST(
       }
       console.log('Workspace sync result:', syncResult.data);
 
+      // Get the default warehouse for HTTP path
+      const [defaultWarehouse] = await db
+        .select()
+        .from(organizationWarehouses)
+        .where(
+          and(
+            eq(organizationWarehouses.organizationId, organizationId),
+            eq(organizationWarehouses.isDefault, true)
+          )
+        )
+        .limit(1);
+
       // Create the deployment with environment variables
       const deployResult = await createDeployment(workspaceUrl, accessToken, appName, {
         source_code_path: sourceCodePath,
@@ -329,6 +341,10 @@ export async function POST(
             name: 'FIREFLY_DATABRICKS_TOKEN',
             value_from: 'firefly_spn_pat',
           },
+          ...(defaultWarehouse ? [{
+            name: 'DATABRICKS_HTTP_PATH',
+            value: `/sql/1.0/warehouses/${defaultWarehouse.warehouseId}`,
+          }] : []),
         ],
       });
 
@@ -484,6 +500,18 @@ export async function POST(
       }
       console.log('Workspace sync result:', syncResult.data);
 
+      // Get the default warehouse for HTTP path
+      const [defaultWarehouse] = await db
+        .select()
+        .from(organizationWarehouses)
+        .where(
+          and(
+            eq(organizationWarehouses.organizationId, organizationId),
+            eq(organizationWarehouses.isDefault, true)
+          )
+        )
+        .limit(1);
+
       // Create the new deployment with environment variables
       const deployResult = await createDeployment(workspaceUrl, accessToken, appName, {
         source_code_path: sourceCodePath,
@@ -505,6 +533,10 @@ export async function POST(
             name: 'FIREFLY_DATABRICKS_TOKEN',
             value_from: 'firefly_spn_pat',
           },
+          ...(defaultWarehouse ? [{
+            name: 'DATABRICKS_HTTP_PATH',
+            value: `/sql/1.0/warehouses/${defaultWarehouse.warehouseId}`,
+          }] : []),
         ],
       });
 

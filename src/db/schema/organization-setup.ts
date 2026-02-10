@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uniqueIndex, integer } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, uniqueIndex, integer, boolean } from 'drizzle-orm/pg-core';
 import { organization } from './auth';
 
 // Organization Setup table - stores Unity Catalog configuration for each organization
@@ -36,3 +36,25 @@ export const organizationStorageSettings = pgTable('organizationStorageSettings'
 // Type inference
 export type OrganizationStorageSettings = typeof organizationStorageSettings.$inferSelect;
 export type InsertOrganizationStorageSettings = typeof organizationStorageSettings.$inferInsert;
+
+// Organization Warehouses table - stores SQL warehouses managed per organization
+export const organizationWarehouses = pgTable('organizationWarehouses', {
+  id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+  organizationId: text('organizationId').notNull().references(() => organization.id, { onDelete: 'cascade' }),
+  warehouseId: text('warehouseId').notNull(),
+  name: text('name').notNull(),
+  clusterSize: text('clusterSize').notNull(),
+  warehouseType: text('warehouseType').notNull().default('PRO'),
+  enableServerlessCompute: boolean('enableServerlessCompute').notNull().default(true),
+  enablePhoton: boolean('enablePhoton').notNull().default(true),
+  autoStopMins: integer('autoStopMins').notNull().default(120),
+  minNumClusters: integer('minNumClusters').notNull().default(1),
+  maxNumClusters: integer('maxNumClusters').notNull().default(1),
+  isDefault: boolean('isDefault').notNull().default(false),
+  createdAt: timestamp('createdAt').notNull().defaultNow(),
+  updatedAt: timestamp('updatedAt').notNull().defaultNow().$onUpdate(() => new Date()),
+});
+
+// Type inference
+export type OrganizationWarehouse = typeof organizationWarehouses.$inferSelect;
+export type InsertOrganizationWarehouse = typeof organizationWarehouses.$inferInsert;
