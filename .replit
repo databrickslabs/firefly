@@ -39,6 +39,6 @@ localPort = 5000
 externalPort = 80
 
 [deployment]
-build = ["sh", "-c", "pnpm run install && pnpm run build"]
+build = ["sh", "-c", "pnpm run build"]
 run = ["sh", "-c", "pnpm run start"]
 deploymentTarget = "cloudrun"
