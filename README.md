@@ -1,5 +1,6 @@
 # FireFly Analytics - Databricks Custom Frontend
 
+
 A Next.js application that provides a customized frontend for Databricks with multiple authentication strategies and embedded Databricks apps.
 
 ## Table of Contents
