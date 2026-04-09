@@ -41,6 +41,6 @@ localPort = 5000
 externalPort = 80
 
 [deployment]
-build = ["bash", "-c", "pnpm install && pnpm run build"]
-run = ["bash", "-c", "pnpm run start"]
-deploymentTarget = "autoscale"
+build = ["sh", "-c", "pnpm run install && pnpm run build"]
+run = ["sh", "-c", "pnpm run start"]
+deploymentTarget = "cloudrun"
