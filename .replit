@@ -8,8 +8,6 @@ channel = "stable-25_05"
 [userenv]
 
 [userenv.shared]
-BETTER_AUTH_URL = "https://cc610f7c-3187-4088-81fa-b84df88494d6-00-1ro129wmc0i24.janeway.replit.dev"
-NEXT_PUBLIC_BETTER_AUTH_URL = "https://cc610f7c-3187-4088-81fa-b84df88494d6-00-1ro129wmc0i24.janeway.replit.dev"
 NEXT_TELEMETRY_DISABLED = "1"
 
 [workflows]
