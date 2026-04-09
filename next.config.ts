@@ -5,6 +5,7 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: __dirname,
   },
+  allowedDevOrigins: ["*.replit.dev", "*.janeway.replit.dev", "*.replit.app"],
   outputFileTracingIncludes: {
     "/api/sso-spn/authoring-tools/*": ["./databricks-apps/**/*"],
   },

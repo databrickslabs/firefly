@@ -1,0 +1,46 @@
+modules = ["nodejs-20", "python-3.12", "go-1.21", "web"]
+[agent]
+expertMode = true
+
+[nix]
+channel = "stable-25_05"
+
+[userenv]
+
+[userenv.shared]
+BETTER_AUTH_URL = "https://cc610f7c-3187-4088-81fa-b84df88494d6-00-1ro129wmc0i24.janeway.replit.dev"
+NEXT_PUBLIC_BETTER_AUTH_URL = "https://cc610f7c-3187-4088-81fa-b84df88494d6-00-1ro129wmc0i24.janeway.replit.dev"
+NEXT_TELEMETRY_DISABLED = "1"
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start application"
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm run dev"
+waitForPort = 5000
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
+[[ports]]
+localPort = 5000
+externalPort = 80
+
+[deployment]
+build = ["sh", "-c", "pnpm run build"]
+run = ["sh", "-c", "pnpm run start"]
+deploymentTarget = "cloudrun"
