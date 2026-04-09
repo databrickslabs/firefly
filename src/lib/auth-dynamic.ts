@@ -227,6 +227,7 @@ export async function createAuthInstance() {
         },
       },
     },
+    trustedOrigins: ["https://firefly-analytics-monorepo-deployment.replit.app"],
     secret: process.env.BETTER_AUTH_SECRET!,
     baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3000",
   });
