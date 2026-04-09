@@ -13,12 +13,24 @@ function SsoSpnHrdContent() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Guest users should go to their dashboard, not the HRD/Okta flow
+  useEffect(() => {
+    if (!isPending && session?.user?.role === 'guest') {
+      const orgId = session.session?.activeOrganizationId;
+      if (orgId) {
+        router.replace(`/sso-spn/${orgId}/dashboard`);
+      } else {
+        router.replace('/guest-login');
+      }
+    }
+  }, [isPending, session, router]);
+
   // Redirect to login if no user email is available to auto-fill
   useEffect(() => {
-    if (!isPending && !session?.user?.email) {
+    if (!isPending && !session?.user?.email && session?.user?.role !== 'guest') {
       router.replace("/sso-spn-login");
     }
-  }, [isPending, session?.user?.email, router]);
+  }, [isPending, session?.user?.email, session?.user?.role, router]);
 
   // Prefill email from session if user is authenticated
   useEffect(() => {

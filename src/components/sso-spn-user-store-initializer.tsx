@@ -90,6 +90,8 @@ export function SsoSpnUserStoreInitializer({ children, orgId }: { children: Reac
   })
 
   // Handle errors requiring sign-out and re-authentication
+  const isGuest = session?.user?.role === 'guest'
+
   useEffect(() => {
     const accountError = error as AccountNotFoundError | null
     console.log('[SsoSpn] useEffect check:', {
@@ -97,8 +99,18 @@ export function SsoSpnUserStoreInitializer({ children, orgId }: { children: Reac
       accountNotFound: accountError?.accountNotFound,
       requireReauth: accountError?.requireReauth,
       hasSession: !!session,
-      email: session?.user?.email
+      email: session?.user?.email,
+      role: session?.user?.role,
     })
+
+    // Guest users should never be redirected to Okta SSO
+    // They authenticated via email/password, not SSO
+    if (isGuest) {
+      if (error) {
+        console.log('[SsoSpn] Guest user encountered error, not redirecting to SSO:', error.message)
+      }
+      return
+    }
 
     // Handle re-authentication required (invalid token)
     if (error && accountError?.requireReauth && !isSigningOut) {
@@ -136,7 +148,7 @@ export function SsoSpnUserStoreInitializer({ children, orgId }: { children: Reac
         },
       })
     }
-  }, [error, session, router, isSigningOut])
+  }, [error, session, router, isSigningOut, isGuest])
 
   // Show loading state while signing out
   if (isSigningOut) {

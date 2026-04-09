@@ -6,3 +6,4 @@ export * from './organization-setup';
 export * from './byod-databricks';
 export * from './pipelines';
 export * from './authoring-tools';
+export * from './guest-user';

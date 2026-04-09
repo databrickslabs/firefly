@@ -102,8 +102,8 @@ export async function callDatabricksSpnApi<T = unknown>(
     const userEmail = session.user.email;
 
     // Get the Databricks SPN token using the organization's workspace URL
-    // Pass userEmail to avoid duplicate session lookup
-    const tokenResult = await getDatabricksSpnToken(workspaceUrl, undefined, userEmail);
+    // Pass userEmail and orgId to enable BYOD SPN fallback for guest users
+    const tokenResult = await getDatabricksSpnToken(workspaceUrl, undefined, userEmail, activeOrgId);
 
     if (!tokenResult.success) {
       return {

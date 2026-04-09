@@ -28,9 +28,8 @@ const LOGIN_OPTIONS = [
   {
     id: "guest-user",
     title: "Login With Guest User",
-    description: "Coming Soon",
-    href: "#",
-    disabled: true,
+    description: "Temporary credentials login",
+    href: "/guest-login",
   },
 ];
 
@@ -113,8 +112,7 @@ export default function GetStartedPage() {
                     key={option.id}
                     variant="outline"
                     className="w-full h-auto py-4 px-6 justify-start"
-                    onClick={() => !("disabled" in option && option.disabled) && handleLoginClick(option.id, option.href)}
-                    disabled={"disabled" in option && option.disabled}
+                    onClick={() => handleLoginClick(option.id, option.href)}
                   >
                     <div className="flex flex-col items-start">
                       <span className="font-semibold">{option.title}</span>

@@ -152,8 +152,8 @@ export function CatalogTreeView({
 
   return (
     <TooltipProvider delayDuration={300}>
-      <ScrollArea className={cn("h-full", className)}>
-        <div className="p-4 space-y-1 overflow-hidden">
+      <ScrollArea className={cn("h-full [&_[data-slot=scroll-area-viewport]]:!overflow-x-hidden", className)}>
+        <div className="p-4 space-y-1 overflow-hidden w-full max-w-full">
           {catalogsData?.map((catalog: Catalog) => (
             <CatalogNode
               key={catalog.name}
@@ -245,7 +245,7 @@ function CatalogNode({
           <p className="font-mono text-xs">{catalog.name}</p>
         </TooltipContent>
       </Tooltip>
-      <CollapsibleContent className="pl-6">
+      <CollapsibleContent className="pl-6 overflow-hidden min-w-0">
         {isOpen && (
           <SchemaList
             catalogName={catalog.name}
@@ -394,7 +394,7 @@ function SchemaNode({
           <p className="font-mono text-xs">{schema.catalog_name}.{schema.name}</p>
         </TooltipContent>
       </Tooltip>
-      <CollapsibleContent className="pl-6">
+      <CollapsibleContent className="pl-6 overflow-hidden min-w-0">
         {isOpen && (
           <TableList
             catalogName={schema.catalog_name}
@@ -551,7 +551,7 @@ function TableNode({
           <p className="font-mono text-xs">{table.catalog_name}.{table.schema_name}.{table.name}</p>
         </TooltipContent>
       </Tooltip>
-      <CollapsibleContent className="pl-6">
+      <CollapsibleContent className="pl-6 overflow-hidden min-w-0">
         {isOpen && (
           <ColumnList fullName={itemKey.replace("table:", "")} />
         )}

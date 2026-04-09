@@ -103,7 +103,7 @@ async function getAuthContext(): Promise<FilesApiResult<AuthContext>> {
     const workspaceUrl = org.workspaceUrl.replace(/\/$/, "");
     const userEmail = session.user.email;
 
-    const tokenResult = await getDatabricksSpnToken(workspaceUrl, undefined, userEmail);
+    const tokenResult = await getDatabricksSpnToken(workspaceUrl, undefined, userEmail, activeOrgId);
 
     if (!tokenResult.success) {
       return {

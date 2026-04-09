@@ -98,7 +98,7 @@ export async function GET() {
     // Get the workspace token
     // Pass userEmail to avoid duplicate session lookup
     const workspaceUrl = org.workspaceUrl.replace(/\/$/, '');
-    const tokenResult = await getDatabricksSpnToken(workspaceUrl, undefined, userEmail);
+    const tokenResult = await getDatabricksSpnToken(workspaceUrl, undefined, userEmail, activeOrgId);
 
     // Prepare Okta token info (if available)
     let oktaTokenInfo: DecodedTokenInfo | null = null;

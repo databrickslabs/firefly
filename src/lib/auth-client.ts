@@ -1,5 +1,5 @@
 import { createAuthClient } from "better-auth/react";
-import { organizationClient, genericOAuthClient, adminClient, jwtClient } from "better-auth/client/plugins";
+import { organizationClient, genericOAuthClient, adminClient, jwtClient, oneTimeTokenClient } from "better-auth/client/plugins";
 
 // Use the environment variable if set, otherwise use the current origin (for production)
 // or fallback to localhost for development
@@ -35,6 +35,7 @@ export const authClient = createAuthClient({
       },
     }),
     genericOAuthClient(),
+    oneTimeTokenClient(),
   ],
   fetchOptions: {
     onError(context) {

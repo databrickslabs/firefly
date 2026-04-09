@@ -12,12 +12,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Search, ChevronDown, User, Settings } from "lucide-react";
+import { Search, ChevronDown, User, Settings, SlidersHorizontal } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import { OrgSwitcher } from "@/components/org-switcher";
 import { SsoSpnAccountModal } from "@/components/sso-spn-account-modal";
+import { CustomizeNavModal } from "@/components/customize-nav-modal";
 import { GitHubSourceLink } from "@/components/github-source-link";
+import { useNavCustomization } from "@/hooks/use-nav-customization";
 
 interface SsoSpnTopNavProps {
   user: {
@@ -31,7 +33,10 @@ interface SsoSpnTopNavProps {
 export function SsoSpnTopNav({ user, title, basePath }: SsoSpnTopNavProps) {
   const router = useRouter();
   const [accountModalOpen, setAccountModalOpen] = useState(false);
+  const [customizeModalOpen, setCustomizeModalOpen] = useState(false);
   const [memberRole, setMemberRole] = useState<string | null>(null);
+  const orgId = basePath.split("/")[2];
+  const { userMenuItems, hasLoaded: navLoaded } = useNavCustomization(orgId);
 
   // Fetch current user's membership role using better-auth
   useEffect(() => {
@@ -108,23 +113,46 @@ export function SsoSpnTopNav({ user, title, basePath }: SsoSpnTopNavProps) {
                 {user.email}
               </span>
             </DropdownMenuItem>
+            {(() => {
+              const showAccountDetails = !navLoaded || userMenuItems["Account Details"] !== false;
+              const showProfileSettings = !navLoaded || userMenuItems["Profile Settings"] !== false;
+              const showPreferences = !navLoaded || userMenuItems["Preferences"] !== false;
+              const showOrgSettings = isOwnerOrAdmin && (!navLoaded || userMenuItems["Organization Settings"] !== false);
+              const hasAnyMiddleItem = showAccountDetails || showProfileSettings || showPreferences || showOrgSettings;
+
+              return (
+                <>
+                  {hasAnyMiddleItem && <DropdownMenuSeparator />}
+                  {showAccountDetails && (
+                    <DropdownMenuItem onClick={() => setAccountModalOpen(true)}>
+                      Account Details
+                    </DropdownMenuItem>
+                  )}
+                  {showProfileSettings && (
+                    <DropdownMenuItem disabled>Profile Settings</DropdownMenuItem>
+                  )}
+                  {showPreferences && (
+                    <DropdownMenuItem disabled>Preferences</DropdownMenuItem>
+                  )}
+                  {showOrgSettings && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem asChild>
+                        <Link href={`${basePath}/settings`} className="flex items-center gap-2">
+                          <Settings className="h-4 w-4" />
+                          Organization Settings
+                        </Link>
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                </>
+              );
+            })()}
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => setAccountModalOpen(true)}>
-              Account Details
+            <DropdownMenuItem onClick={() => setCustomizeModalOpen(true)}>
+              <SlidersHorizontal className="h-4 w-4" />
+              Customize
             </DropdownMenuItem>
-            <DropdownMenuItem disabled>Profile Settings</DropdownMenuItem>
-            <DropdownMenuItem disabled>Preferences</DropdownMenuItem>
-            {isOwnerOrAdmin && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem asChild>
-                  <Link href={`${basePath}/settings`} className="flex items-center gap-2">
-                    <Settings className="h-4 w-4" />
-                    Organization Settings
-                  </Link>
-                </DropdownMenuItem>
-              </>
-            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onClick={handleSignOut}
@@ -140,6 +168,13 @@ export function SsoSpnTopNav({ user, title, basePath }: SsoSpnTopNavProps) {
       <SsoSpnAccountModal
         open={accountModalOpen}
         onOpenChange={setAccountModalOpen}
+      />
+
+      {/* Customize Navigation Modal */}
+      <CustomizeNavModal
+        open={customizeModalOpen}
+        onOpenChange={setCustomizeModalOpen}
+        orgId={orgId}
       />
     </>
   );

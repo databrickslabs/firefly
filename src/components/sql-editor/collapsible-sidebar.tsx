@@ -87,7 +87,7 @@ export const CollapsibleSidebar = React.memo(function CollapsibleSidebar({
   };
 
   return (
-    <div className={cn("h-full w-full flex", className)}>
+    <div className={cn("h-full w-full flex overflow-hidden", className)}>
       {/* Icon Bar */}
       <div className="w-12 flex-shrink-0 flex-col items-center py-4 gap-2 border-r border-slate-200 bg-slate-100/80 flex">
         <TooltipProvider>
@@ -177,7 +177,7 @@ export const CollapsibleSidebar = React.memo(function CollapsibleSidebar({
 
       {/* Content Panel */}
       {isExpanded && activeView && (
-        <div className="flex-1 min-w-0 border-r border-slate-200 overflow-hidden bg-white">
+        <div className="flex-1 min-w-0 border-r border-slate-200 overflow-hidden bg-white max-w-[calc(100%-3rem)]">
           {activeView === "files" && (
             <div className="h-full flex flex-col overflow-hidden">
               <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/80 shrink-0">

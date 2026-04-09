@@ -1,6 +1,7 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { organization, genericOAuth, admin } from "better-auth/plugins";
+import { oneTimeToken } from "better-auth/plugins/one-time-token";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
 import { eq } from "drizzle-orm";
@@ -81,6 +82,10 @@ export const middlewareAuth = betterAuth({
           },
         },
       ],
+    }),
+    oneTimeToken({
+      expiresIn: 10, // 10 minutes
+      storeToken: "hashed",
     }),
   ],
   databaseHooks: {

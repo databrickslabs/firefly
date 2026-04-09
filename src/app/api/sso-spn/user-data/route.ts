@@ -54,8 +54,8 @@ export async function GET() {
     const workspaceUrl = org.workspaceUrl.replace(/\/$/, '');
     const userEmail = session.user.email;
 
-    // Pass userEmail to avoid duplicate session lookup
-    const tokenResult = await getDatabricksSpnToken(workspaceUrl, undefined, userEmail);
+    // Pass userEmail and orgId to enable BYOD SPN fallback for guest users
+    const tokenResult = await getDatabricksSpnToken(workspaceUrl, undefined, userEmail, activeOrgId);
 
     if (!tokenResult.success) {
       // Check if this is a re-authentication required scenario

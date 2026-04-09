@@ -1,8 +1,8 @@
 import { getAuthInstance } from "@/lib/auth-dynamic";
 import { headers } from "next/headers";
 import { db } from "@/db";
-import { organization, account, userSpns } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { organization, account, userSpns, guestUser, guestSpns, byodDatabricksSpns } from "@/db/schema";
+import { eq, and, sql } from "drizzle-orm";
 import { decodeJwt } from "jose";
 import { revalidateTag } from "next/cache";
 
@@ -42,25 +42,73 @@ async function getSpnWorkspaceToken(
 ): Promise<
   { success: true; data: DatabricksWorkspaceTokenInfo } | { success: false; error: TokenError }
 > {
-  // Look up the SPN credentials for this user's email
+  // Look up the SPN credentials for this user's email (case-insensitive: better-auth lowercases emails)
+  const lowerEmail = userEmail.toLowerCase();
   const [spnRecord] = await db
     .select()
     .from(userSpns)
-    .where(eq(userSpns.email, userEmail))
+    .where(sql`lower(${userSpns.email}) = ${lowerEmail}`)
     .limit(1);
 
-  if (!spnRecord) {
-    return {
-      success: false,
-      error: {
-        error: `No SPN credentials found for email: ${userEmail}`,
-        status: 404,
-        details: "Please contact your administrator to set up SPN credentials for your account.",
-      },
-    };
-  }
+  let clientId: string;
+  let clientSecret: string;
 
-  const { clientId, clientSecret } = spnRecord;
+  if (spnRecord) {
+    clientId = spnRecord.clientId;
+    clientSecret = spnRecord.clientSecret;
+  } else {
+    // Fallback 1: look up via guestUser → guestSpns (case-insensitive)
+    const [guest] = await db
+      .select({ spnId: guestUser.spnId })
+      .from(guestUser)
+      .where(sql`lower(${guestUser.generatedEmail}) = ${lowerEmail}`)
+      .limit(1);
+
+    if (guest) {
+      const [guestSpn] = await db
+        .select()
+        .from(guestSpns)
+        .where(eq(guestSpns.id, guest.spnId))
+        .limit(1);
+
+      if (guestSpn) {
+        console.log("Using guestSpns credentials for guest user:", userEmail);
+        clientId = guestSpn.clientId;
+        clientSecret = guestSpn.clientSecret;
+      } else {
+        return {
+          success: false,
+          error: {
+            error: `Guest SPN not found for spnId: ${guest.spnId}`,
+            status: 404,
+            details: "The SPN associated with this guest user no longer exists.",
+          },
+        };
+      }
+    } else {
+      // Fallback 2: check byodDatabricksSpns by org ID (for guests created before guestUser table)
+      const [byodSpn] = await db
+        .select()
+        .from(byodDatabricksSpns)
+        .where(eq(byodDatabricksSpns.organizationId, activeOrganizationId))
+        .limit(1);
+
+      if (byodSpn) {
+        console.log("Using BYOD SPN credentials for org:", activeOrganizationId);
+        clientId = byodSpn.clientId;
+        clientSecret = byodSpn.clientSecret;
+      } else {
+        return {
+          success: false,
+          error: {
+            error: `No SPN credentials found for email: ${userEmail}`,
+            status: 404,
+            details: "No SPN credentials found in userSpns, guestSpns, or byodDatabricksSpns.",
+          },
+        };
+      }
+    }
+  }
 
   // Normalize the URL - remove trailing slash if present
   const baseUrl = workspaceUrl.replace(/\/$/, '');
@@ -186,6 +234,16 @@ export async function getDatabricksWorkspaceToken(orgIdOverride?: string): Promi
           },
         },
       };
+    }
+
+    // Guest users authenticate via email/password, not OAuth — use SPN credentials
+    if (session.user.role === 'guest') {
+      console.log("Guest user detected, using SPN credentials");
+      return getSpnWorkspaceToken(
+        session.user.email,
+        targetOrgId,
+        workspaceUrl
+      );
     }
 
     // Check if user authenticated with SPN provider

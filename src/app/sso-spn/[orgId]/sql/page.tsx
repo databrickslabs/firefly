@@ -739,7 +739,9 @@ export default function SQLPage() {
             maxSize={40}
             collapsible={true}
             collapsedSize={5}
+            style={{ overflow: 'hidden', minWidth: 0, position: 'relative' }}
           >
+            <div className="absolute inset-0">
             <CollapsibleSidebar
               panelRef={sidebarPanelRef}
               filesContent={
@@ -756,17 +758,18 @@ export default function SQLPage() {
                 />
               }
             />
+            </div>
           </Panel>
             <PanelResizeHandle className="w-[3px] bg-slate-200/80 hover:bg-slate-300 transition-colors" />
 
             {/* Right Panel - Editor and Results */}
             <Panel>
-              <PanelGroup direction="vertical">
+              <PanelGroup direction="vertical" className="overflow-hidden">
                 {/* Top Section - Toolbar, Tabs, and Editor */}
                 <Panel defaultSize={50} minSize={20} maxSize={80}>
-                  <div className="h-full flex flex-col bg-white">
+                  <div className="h-full flex flex-col bg-white overflow-hidden">
                     {/* Toolbar */}
-                    <div className="px-4 py-2 border-b border-slate-200 flex items-center gap-4 bg-slate-50/80">
+                    <div className="px-4 py-2 border-b border-slate-200 flex items-center gap-4 bg-slate-50/80 min-w-0">
                     <WarehouseSelector
                       value={warehouseId}
                       onValueChange={handleWarehouseChange}

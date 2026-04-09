@@ -25,6 +25,7 @@ import {
   SidebarMenuItem,
   SidebarFooter,
 } from "@/components/ui/sidebar";
+import { useNavCustomization } from "@/hooks/use-nav-customization";
 
 interface AppSidebarProps {
   basePath: string;
@@ -78,11 +79,17 @@ const navigationItems = [
 
 export function AppSidebar({ basePath, userEmail, userRole }: AppSidebarProps) {
   const pathname = usePathname();
+  const orgId = basePath.split("/")[2];
+  const { sidebarItems, hasLoaded: navLoaded } = useNavCustomization(orgId);
   const isSsoSpn = basePath.startsWith("/sso-spn/");
   const showAdminLink = isSsoSpn
     ? isAdmin(userEmail) && userRole === "admin"
     : isAdmin(userEmail);
   const adminHref = isSsoSpn ? "/sso-spn-admin" : "/admin";
+
+  const visibleNavItems = navLoaded
+    ? navigationItems.filter((item) => sidebarItems[item.name] !== false)
+    : navigationItems;
 
   return (
     <Sidebar collapsible="icon">
@@ -91,7 +98,7 @@ export function AppSidebar({ basePath, userEmail, userRole }: AppSidebarProps) {
           <SidebarGroupLabel>Navigation</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navigationItems.map((item) => {
+              {visibleNavItems.map((item) => {
                 const Icon = item.icon;
                 const isDisabled = "disabled" in item && item.disabled;
 
@@ -129,7 +136,7 @@ export function AppSidebar({ basePath, userEmail, userRole }: AppSidebarProps) {
         </SidebarGroup>
 
         {/* Admin Link - Only visible to @databricks.com users */}
-        {showAdminLink && (
+        {showAdminLink && (!navLoaded || sidebarItems["Admin"] !== false) && (
           <SidebarGroup>
             <SidebarGroupLabel>Admin</SidebarGroupLabel>
             <SidebarGroupContent>

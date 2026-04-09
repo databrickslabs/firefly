@@ -22,7 +22,14 @@ export default function SsoSpnLayout({
     if (!isPending && !session && !isPublicRoute) {
       router.push("/sso-spn");
     }
-  }, [session, isPending, router, isPublicRoute]);
+    // Guest users on public routes (like /sso-spn) should go to their dashboard
+    if (!isPending && session?.user?.role === 'guest' && isPublicRoute && pathname === '/sso-spn') {
+      const orgId = session.session?.activeOrganizationId;
+      if (orgId) {
+        router.push(`/sso-spn/${orgId}/dashboard`);
+      }
+    }
+  }, [session, isPending, router, isPublicRoute, pathname]);
 
   // Public routes render without layout
   if (isPublicRoute) {

@@ -237,15 +237,22 @@ export async function callDatabricksApi<T = unknown>(
       });
 
       if (session && session.session.activeOrganizationId) {
-        await revokeSession(session.session.token, session.user.id, session.session.activeOrganizationId);
+        // Don't revoke session for guest users — they use SPN credentials, not OAuth tokens
+        if (session.user.role !== 'guest') {
+          await revokeSession(session.session.token, session.user.id, session.session.activeOrganizationId);
+        } else {
+          console.log("Guest user - skipping session revocation on SPN token error");
+        }
       }
 
       return {
         success: false,
-        error: "Databricks authentication expired. Please sign in again.",
-        details: "REQUIRE_REAUTHENTICATION",
+        error: session?.user?.role === 'guest'
+          ? "Databricks workspace access failed. Please contact your administrator."
+          : "Databricks authentication expired. Please sign in again.",
+        details: session?.user?.role === 'guest' ? "SPN_TOKEN_ERROR" : "REQUIRE_REAUTHENTICATION",
         status: 401,
-        requireReauth: true,
+        requireReauth: session?.user?.role !== 'guest',
       };
     }
 
