@@ -12,6 +12,23 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
+        source: "/api/:path*",
+        headers: [
+          {
+            key: "Access-Control-Allow-Origin",
+            value: "https://firefly-analytics-monorepo-deployment.replit.app",
+          },
+          {
+            key: "Access-Control-Allow-Methods",
+            value: "GET, POST, PUT, DELETE, OPTIONS",
+          },
+          {
+            key: "Access-Control-Allow-Headers",
+            value: "Content-Type, Authorization",
+          },
+        ],
+      },
+      {
         // Apply COOP/COEP headers to notebooks page for SharedArrayBuffer support
         source: "/databricks-idp/notebooks",
         headers: [
