@@ -41,6 +41,6 @@ localPort = 5000
 externalPort = 80
 
 [deployment]
-build = ["sh", "-c", "npm install && npm build"]
-run = ["sh", "-c", "npm start"]
-deploymentTarget = "cloudrun"
+build = ["bash", "-c", "pnpm install && pnpm run build"]
+run = ["bash", "-c", "pnpm run start"]
+deploymentTarget = "autoscale"
