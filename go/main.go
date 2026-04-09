@@ -280,9 +280,25 @@ func handleStartSession(w http.ResponseWriter, r *http.Request) {
 
 	// Set the session cookie.
 	// Dev:  Path-scoped to the tool's proxy path, no Secure flag (http://localhost).
-	// Prod: Domain-scoped to the proxy host, Secure + SameSite=Lax.
-	//       SameSite=Lax works because after the initial POST the iframe is loaded
-	//       from the proxy's own domain, so all subsequent requests are same-site.
+	// Prod: Domain-scoped to the proxy host, Secure + SameSite=None.
+	//
+	//       SameSite=None is required (not Lax) because the Next.js frontend and
+	//       the Go proxy run on different domains (e.g. firefly-analytics-deployment.replit.app
+	//       vs firefly-proxy.replit.app). Both replit.app subdomains are separate
+	//       "sites" under the Public Suffix List, so the browser treats all iframe
+	//       requests from the Next.js app to the proxy as cross-site. SameSite=Lax
+	//       cookies are not sent in cross-site iframe requests, causing every
+	//       /app-proxy/ request to fail with "missing session cookie".
+	//
+	//       SameSite=None does not weaken CSRF protection here because:
+	//         1. /start-session requires a valid short-lived JWT in the POST body
+	//            (an attacker cannot forge this from another origin).
+	//         2. The Origin header is hard-checked against FRONTEND_URL before any
+	//            processing, rejecting all other callers.
+	//         3. /app-proxy/ routes are read-only proxies — there is no
+	//            state-mutating action a cross-site request could exploit.
+	//       SameSite=None must be paired with Secure (HTTPS-only), which browsers
+	//       enforce — they silently ignore SameSite=None on non-Secure cookies.
 	cookie := &http.Cookie{
 		Name:     "proxy_sid",
 		Value:    sessionID,
@@ -296,7 +312,7 @@ func handleStartSession(w http.ResponseWriter, r *http.Request) {
 	} else {
 		cookie.Domain = r.Host
 		cookie.Path = "/"
-		cookie.SameSite = http.SameSiteLaxMode
+		cookie.SameSite = http.SameSiteNoneMode
 		cookie.Secure = true
 	}
 	http.SetCookie(w, cookie)
