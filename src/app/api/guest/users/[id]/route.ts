@@ -127,32 +127,38 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       }
 
       // Generate OTT from the new session
-      const ottResult = await auth.api.generateOneTimeToken({
-        headers: new Headers({
-          cookie: `better-auth.session_token=${signInResult.token}`,
-        }),
-      });
-
       const appUrl = process.env.BETTER_AUTH_URL || 'http://localhost:3000';
-      return NextResponse.json({
-        loginUrl: `${appUrl}/guest-login?token=${encodeURIComponent(ottResult.token)}`,
-        expiresIn: '10 minutes',
-      });
+      let loginUrl: string;
+      try {
+        const ottResult = await auth.api.generateOneTimeToken({
+          headers: new Headers({
+            cookie: `better-auth.session_token=${signInResult.token}`,
+          }),
+        });
+        loginUrl = `${appUrl}/guest-login?token=${encodeURIComponent(ottResult.token)}`;
+      } catch (err) {
+        console.error('Error generating one-time token:', err);
+        loginUrl = `${appUrl}/guest-login?email=${encodeURIComponent(guest.generatedEmail)}&p=${encodeURIComponent(guest.generatedPassword || '')}`;
+      }
+      return NextResponse.json({ loginUrl, expiresIn: '10 minutes' });
     }
 
     // Generate OTT from existing session
     const auth = await getAuthInstance();
-    const ottResult = await auth.api.generateOneTimeToken({
-      headers: new Headers({
-        cookie: `better-auth.session_token=${activeSession.token}`,
-      }),
-    });
-
     const appUrl = process.env.BETTER_AUTH_URL || 'http://localhost:3000';
-    return NextResponse.json({
-      loginUrl: `${appUrl}/guest-login?token=${encodeURIComponent(ottResult.token)}`,
-      expiresIn: '10 minutes',
-    });
+    let loginUrl: string;
+    try {
+      const ottResult = await auth.api.generateOneTimeToken({
+        headers: new Headers({
+          cookie: `better-auth.session_token=${activeSession.token}`,
+        }),
+      });
+      loginUrl = `${appUrl}/guest-login?token=${encodeURIComponent(ottResult.token)}`;
+    } catch (err) {
+      console.error('Error generating one-time token:', err);
+      loginUrl = `${appUrl}/guest-login?email=${encodeURIComponent(guest.generatedEmail)}&p=${encodeURIComponent(guest.generatedPassword || '')}`;
+    }
+    return NextResponse.json({ loginUrl, expiresIn: '10 minutes' });
   } catch (error) {
     console.error('Error regenerating guest login token:', error);
     return NextResponse.json(
