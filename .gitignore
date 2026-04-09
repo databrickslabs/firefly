@@ -32,7 +32,10 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # env files (can opt-in for committing if needed)
+.env
+go/.env
 .env.local
+.env.local.dev
 .env.dev
 .env.prod
 .env.test
@@ -51,3 +54,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+.env.local.bck
+pg_dump/
+
+# Go build artifacts
+go/databricks-proxy
+go/proxy

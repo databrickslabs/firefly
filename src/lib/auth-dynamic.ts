@@ -1,6 +1,6 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { organization, genericOAuth, admin, okta } from "better-auth/plugins";
+import { organization, genericOAuth, admin, okta, jwt } from "better-auth/plugins";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
 import { eq } from "drizzle-orm";
@@ -106,6 +106,16 @@ export async function createAuthInstance() {
               },
             },
           },
+        },
+      }),
+      jwt({
+        jwks: {
+          keyPairConfig: { alg: "EdDSA" },
+        },
+        jwt: {
+          issuer: process.env.BETTER_AUTH_URL || "http://localhost:3000",
+          audience: process.env.BETTER_AUTH_URL || "http://localhost:3000",
+          expirationTime: "5m",
         },
       }),
       genericOAuth({

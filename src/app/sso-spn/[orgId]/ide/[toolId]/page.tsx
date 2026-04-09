@@ -8,9 +8,8 @@ import { db } from "@/db";
 import { authoringTool } from "@/db/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { getAuthInstance } from "@/lib/auth-dynamic";
-import { getDatabricksWorkspaceToken } from "@/lib/databricks-workspace-token";
-import { generateProxyUrl } from "@/lib/token-encryption";
 import { ChevronRight, NotebookPen, Code2 } from "lucide-react";
+import ProxyIframe from "@/components/proxy-iframe";
 
 interface IDEViewPageProps {
   params: Promise<{ orgId: string; toolId: string }>;
@@ -32,7 +31,7 @@ async function IDEIframe({ toolId, orgId }: { toolId: string; orgId: string }) {
     redirect("/sso-spn");
   }
 
-  // Fetch the authoring tool
+  // Fetch the authoring tool — verify it belongs to this org and user.
   const [tool] = await db
     .select()
     .from(authoringTool)
@@ -50,14 +49,12 @@ async function IDEIframe({ toolId, orgId }: { toolId: string; orgId: string }) {
     notFound();
   }
 
-  // Get tool type icon
   const ToolIcon = tool.type === "MARIMO" ? NotebookPen : Code2;
 
-  // Check if the tool has an app URL and is running
+  // Check if the tool has an app URL configured.
   if (!tool.appUrl) {
     return (
       <div className="h-full flex flex-col">
-        {/* Breadcrumb Header */}
         <div className="flex-shrink-0 bg-white border-b border-slate-200 px-4 py-3">
           <nav className="flex items-center gap-2 text-sm">
             <Link
@@ -73,8 +70,6 @@ async function IDEIframe({ toolId, orgId }: { toolId: string; orgId: string }) {
             </div>
           </nav>
         </div>
-
-        {/* Error Content */}
         <div className="flex-1 flex items-center justify-center bg-slate-100/80">
           <div className="text-center">
             <p className="text-slate-600">This environment does not have an app URL yet.</p>
@@ -93,32 +88,11 @@ async function IDEIframe({ toolId, orgId }: { toolId: string; orgId: string }) {
     );
   }
 
-  // Get the user's Databricks workspace token
-  const tokenResult = await getDatabricksWorkspaceToken();
-
-  if (!tokenResult.success) {
-    console.error("Failed to get Databricks SPN token:", tokenResult.error);
-    redirect("/sso-spn");
-  }
-
-  const { accessToken } = tokenResult.data;
-
-  // Get proxy base URL from environment
   const proxyBaseUrl = process.env.NEXT_PUBLIC_PROXY_URL;
   if (!proxyBaseUrl) {
     throw new Error("NEXT_PUBLIC_PROXY_URL environment variable is required");
   }
 
-  // Build the full app URL if it doesn't include the protocol
-  const appUrl = tool.appUrl.startsWith("http")
-    ? tool.appUrl
-    : `https://${tool.appUrl}`;
-
-  // Generate the encrypted proxy URL
-  const proxyPath = generateProxyUrl(accessToken, appUrl, "/");
-  const fullProxyUrl = `${proxyBaseUrl}${proxyPath}`;
-
-  // Get tool type label for the title
   const toolTypeLabel = tool.type === "MARIMO" ? "Marimo Notebook" : "Code Server IDE";
 
   return (
@@ -140,15 +114,14 @@ async function IDEIframe({ toolId, orgId }: { toolId: string; orgId: string }) {
         </nav>
       </div>
 
-      {/* Iframe Content */}
+      {/* Proxy iframe — session init and token fetch handled by the Go proxy via JWT + DB */}
       <div className="flex-1 overflow-hidden bg-slate-100/80 px-4 py-4">
         <div className="h-full rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-          <iframe
-            src={fullProxyUrl}
-            className="w-full h-full border-0"
+          <ProxyIframe
+            toolId={toolId}
+            orgId={organizationId}
+            proxyBaseUrl={proxyBaseUrl}
             title={`${tool.name} - ${toolTypeLabel}`}
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
-            allow="clipboard-write; clipboard-read"
           />
         </div>
       </div>
@@ -180,7 +153,6 @@ export default async function IDEViewPage({ params }: IDEViewPageProps) {
 export async function generateMetadata({ params }: IDEViewPageProps) {
   const { toolId } = await params;
 
-  // Get the user's session to fetch tool details
   const auth = await getAuthInstance();
   const session = await auth.api.getSession({
     headers: await headers(),

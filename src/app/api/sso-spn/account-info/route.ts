@@ -128,13 +128,13 @@ export async function GET() {
       }
     }
 
-    // Mask the client secret (show first 6 and last 3 characters, random asterisk length)
-    // Use random asterisk count (8-16) to not reveal actual secret length
+    // Mask the client secret — show first 3 and last 3 chars only (6 total).
+    // Random asterisk count (8–16) avoids leaking the actual secret length.
     const randomAsterisks = "*".repeat(Math.floor(Math.random() * 9) + 8);
     const clientSecretPreview = spnRecord?.clientSecret
-      ? spnRecord.clientSecret.length > 9
-        ? `${spnRecord.clientSecret.substring(0, 6)}${randomAsterisks}${spnRecord.clientSecret.substring(spnRecord.clientSecret.length - 3)}`
-        : `${spnRecord.clientSecret.substring(0, 6)}${randomAsterisks}`
+      ? spnRecord.clientSecret.length > 6
+        ? `${spnRecord.clientSecret.substring(0, 3)}${randomAsterisks}${spnRecord.clientSecret.slice(-3)}`
+        : `${spnRecord.clientSecret.substring(0, 3)}${randomAsterisks}`
       : "Not configured";
 
     const response: AccountInfoResponse = {

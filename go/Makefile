@@ -1,10 +1,10 @@
 .PHONY: run build clean
 
 run:
-	@if [ -f .env ]; then export $$(cat .env | grep -v '^#' | xargs) && go run main.go crypto.go; else go run main.go crypto.go; fi
+	@if [ -f .env ]; then export $$(cat .env | grep -v '^#' | xargs) && go run .; else go run .; fi
 
 build:
-	go build -o proxy main.go crypto.go
+	go build -o proxy .
 
 clean:
 	rm -f proxy

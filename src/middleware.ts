@@ -62,17 +62,16 @@ export async function middleware(request: NextRequest) {
       });
 
       if (!session) {
-        console.log("[Middleware] No session found for /sso-spn-admin route");
-      } else {
-        const email = session.user?.email;
-        if (!email || !email.toLowerCase().endsWith("@databricks.com")) {
-          console.log("[Middleware] Non-admin email detected for sso-spn-admin:", email);
-        } else {
-          console.log("[Middleware] SPN Admin access granted for:", email);
-        }
+        return NextResponse.redirect(new URL("/admin-login", request.url));
+      }
+
+      const email = session.user?.email;
+      if (!email || !email.toLowerCase().endsWith("@databricks.com")) {
+        return NextResponse.redirect(new URL("/admin-login?error=unauthorized", request.url));
       }
     } catch (error) {
       console.error("[Middleware] Error checking sso-spn-admin access:", error);
+      return NextResponse.redirect(new URL("/admin-login", request.url));
     }
   }
 
@@ -121,5 +120,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/databricks-idp/:path*", "/federation", "/admin/:path*", "/admin-login", "/sso-spn-admin/:path*"],
+  matcher: ["/databricks-idp/:path*", "/federation", "/admin/:path*", "/admin-login", "/sso-spn-admin", "/sso-spn-admin/:path*"],
 };
