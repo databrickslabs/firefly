@@ -7,6 +7,7 @@ import {
 } from "@/components/docs/section";
 import Link from "next/link";
 
+
 export default function LakehouseAppsProxyPage() {
   return (
     <div className="container mx-auto px-4 py-8 max-w-7xl">
@@ -17,22 +18,40 @@ export default function LakehouseAppsProxyPage() {
           </div>
           <PageTitle>Embedding Databricks Apps via Proxy</PageTitle>
           <p className="text-xl text-muted-foreground">
-            This documentation has been reorganized into dedicated pages for each
-            solution. Please visit the relevant pages below.
+            The proxy uses a session-cookie architecture — a short-lived JWT is exchanged
+            for an opaque <code>HttpOnly</code> session cookie, so no Databricks tokens
+            ever appear in URLs, browser storage, or logs. Documentation is organized into
+            dedicated pages below.
           </p>
         </header>
 
         <Section id="solutions" title="Solution Documentation">
           <ContentBlock>
             <p className="mb-6">
-              The embedding architecture and individual solutions are now documented
+              The embedding architecture and individual solutions are documented
               separately for easier navigation and more detailed coverage.
             </p>
           </ContentBlock>
 
-          <HighlightBox variant="info" title="New Documentation Structure">
-            <p className="text-sm mb-4">
-              Documentation has been reorganized into the following pages:
+          <HighlightBox variant="danger" title="⚠️ Production Deployment Warning">
+            <p className="text-sm mb-2">
+              The Firefly reference implementation uses <strong>path-based cookies</strong> on
+              a single shared proxy domain for simplicity. This is suitable for development
+              and demos only.
+            </p>
+            <p className="text-sm mb-2">
+              <strong>For production, use wildcard subdomain routing</strong> (e.g.,{" "}
+              <code className="bg-white/50 px-1 rounded">app-*.firefly-analytics.com</code>)
+              to ensure full app isolation, strict CORS, and to prevent cross-app cookie
+              contamination. Path-scoping is a browser hint — it is not enforced by the
+              Same-Origin Policy.
+            </p>
+            <p className="text-sm">
+              See the{" "}
+              <Link href="/docs/solutions/embedding-apps#production-deployment" className="underline font-medium">
+                Embedding Databricks Apps — Production Deployment
+              </Link>{" "}
+              section for the full guidance and architecture comparison.
             </p>
           </HighlightBox>
 
@@ -43,8 +62,9 @@ export default function LakehouseAppsProxyPage() {
             >
               <h3 className="font-semibold text-lg mb-2 text-blue-900">Embedding Databricks Apps w/o SSO</h3>
               <p className="text-sm text-blue-800">
-                Technical details on the Go proxy architecture, token encryption,
-                WebSocket support, and iframe embedding.
+                Session-cookie proxy architecture: JWT exchange, SPN token management,
+                HttpOnly <code>proxy_sid</code> cookies, WebSocket support, and wildcard
+                domain routing for production.
               </p>
             </Link>
 

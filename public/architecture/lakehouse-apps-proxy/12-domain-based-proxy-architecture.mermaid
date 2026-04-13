@@ -1,0 +1,48 @@
+graph TB
+    subgraph DEV ["Path-Based — Firefly Reference (Dev / Demo Only)"]
+        direction TB
+        FE1["frontend.firefly-analytics.com<br/>(Next.js App)"]
+        PROXY1["proxy.firefly-analytics.com<br/>(Go Proxy — shared domain)"]
+        C1["Cookie: proxy_sid<br/>Path: /app-proxy/tool-a/<br/>SameSite: None"]
+        C2["Cookie: proxy_sid<br/>Path: /app-proxy/tool-b/<br/>SameSite: None"]
+        APP1A["Databricks App A"]
+        APP1B["Databricks App B"]
+        WARN["⚠️ Same domain — path scoping is a browser hint,<br/>NOT a same-origin-policy boundary.<br/>XSS in one app can reach all sessions."]
+
+        FE1 -->|"iframe: /app-proxy/tool-a/"| PROXY1
+        FE1 -->|"iframe: /app-proxy/tool-b/"| PROXY1
+        PROXY1 --> C1
+        PROXY1 --> C2
+        C1 --> APP1A
+        C2 --> APP1B
+        WARN -.->|risk| PROXY1
+    end
+
+    subgraph PROD ["Domain-Based — Recommended Production"]
+        direction TB
+        FE2["firefly-analytics.com<br/>(Next.js App)"]
+        DNS["*.firefly-analytics.com<br/>Wildcard DNS → Reverse Proxy<br/>(nginx / Cloudflare / ALB)"]
+        SA["app-tool-a.firefly-analytics.com<br/>(Go Proxy — tool A subdomain)"]
+        SB["app-tool-b.firefly-analytics.com<br/>(Go Proxy — tool B subdomain)"]
+        CA["Cookie: proxy_sid<br/>Domain: app-tool-a.firefly-analytics.com<br/>SameSite: Strict; Secure; HttpOnly"]
+        CB["Cookie: proxy_sid<br/>Domain: app-tool-b.firefly-analytics.com<br/>SameSite: Strict; Secure; HttpOnly"]
+        APP2A["Databricks App A"]
+        APP2B["Databricks App B"]
+        SEC["✓ Full SOP isolation — separate origins per app<br/>✓ SameSite: Strict (no cross-site leakage)<br/>✓ XSS in App A cannot reach App B sessions"]
+
+        FE2 -->|"iframe: app-tool-a.firefly-analytics.com"| DNS
+        FE2 -->|"iframe: app-tool-b.firefly-analytics.com"| DNS
+        DNS --> SA
+        DNS --> SB
+        SA --> CA
+        SB --> CB
+        CA --> APP2A
+        CB --> APP2B
+        SEC -.->|enforced by browser| SA
+        SEC -.->|enforced by browser| SB
+    end
+
+    style DEV fill:#fff8f0,stroke:#f59e0b,stroke-width:2px
+    style PROD fill:#f0fff4,stroke:#22c55e,stroke-width:2px
+    style WARN fill:#fee2e2,stroke:#ef4444,color:#991b1b
+    style SEC fill:#dcfce7,stroke:#16a34a,color:#15803d

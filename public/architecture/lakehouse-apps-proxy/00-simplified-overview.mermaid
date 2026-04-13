@@ -1,36 +1,45 @@
 graph TB
-    subgraph "Client Browser"
-        UI[User Interface<br/>React App]
-        IF[Iframe<br/>Embedded App]
+    subgraph Browser ["Client Browser"]
+        UI["User Interface<br/>(React App)"]
+        IF["Iframe<br/>(Embedded App)"]
     end
 
-    subgraph "Next.js Application"
-        API[API Routes<br/>Token Management]
-        ENC[Token Encryption<br/>AES-256-GCM]
+    subgraph NextJS ["Next.js Application"]
+        AUTH["Better Auth<br/>(Session)"]
+        JWKS["JWKS Endpoint<br/>/api/auth/jwks"]
     end
 
-    subgraph "Go Proxy Server"
-        PROXY[Reverse Proxy<br/>HTTP & WebSocket]
-        DEC[Token Decryption<br/>AES-256-GCM]
+    subgraph GoProxy ["Go Proxy Server"]
+        SS["/start-session<br/>JWT → session cookie"]
+        PR["/app-proxy/{toolId}/<br/>proxy handler"]
+        DB["proxy_sessions<br/>(PostgreSQL)"]
     end
 
-    subgraph "Databricks Platform"
-        APP[Lakehouse Apps<br/>VSCode Editor]
-        AUTH[OAuth Validation<br/>Bearer Token]
+    subgraph Databricks ["Databricks Platform"]
+        SPN["OAuth /oidc/v1/token<br/>(SPN client credentials)"]
+        APP["Lakehouse App<br/>(VSCode / Marimo / etc.)"]
     end
 
-    UI -->|Request Token| API
-    API -->|Encrypt Token| ENC
-    ENC -->|Encrypted URL| UI
-    UI -->|Load Iframe| IF
-    IF -->|Proxied Request| PROXY
-    PROXY -->|Decrypt Token| DEC
-    DEC -->|Add Auth Header| AUTH
-    AUTH -->|Validate & Serve| APP
-    APP -->|Response| PROXY
-    PROXY -->|Forward| IF
+    UI -->|"1. Mount ProxyIframe"| AUTH
+    AUTH -->|"2. Short-lived JWT"| UI
+    UI -->|"3. POST jwt + toolId + orgId"| SS
+    SS -->|"4. Verify JWT signature"| JWKS
+    SS -->|"5. Lookup SPN credentials"| DB
+    SS -->|"6. Fetch bearer token"| SPN
+    SPN -->|"7. accessToken (1h)"| SS
+    SS -->|"8. Set-Cookie: proxy_sid HttpOnly"| IF
+    IF -->|"9. GET /app-proxy/{toolId}/ + cookie"| PR
+    PR -->|"10. Validate session"| DB
+    PR -->|"11. Bearer token request"| APP
+    APP -->|"12. HTML / JS / API response"| PR
+    PR -->|"13. Forward response"| IF
 
     style UI fill:#e3f2fd
-    style API fill:#fff3e0
-    style PROXY fill:#f3e5f5
+    style IF fill:#e3f2fd
+    style AUTH fill:#fff3e0
+    style JWKS fill:#fff3e0
+    style SS fill:#f3e5f5
+    style PR fill:#f3e5f5
+    style DB fill:#f3e5f5
+    style SPN fill:#e8f5e9
     style APP fill:#e8f5e9

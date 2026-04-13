@@ -1,0 +1,59 @@
+sequenceDiagram
+    participant Browser
+    participant ProxyIframe as ProxyIframe<br/>(React Component)
+    participant BetterAuth as Better Auth<br/>(JWKS / Session)
+    participant GoProxy as Go Proxy Server
+    participant PostgreSQL as PostgreSQL<br/>(proxy_sessions)
+    participant SPN as Databricks OAuth<br/>(SPN /oidc/v1/token)
+    participant LakehouseApp as Databricks<br/>Lakehouse App
+
+    rect rgb(240, 248, 255)
+        Note over Browser,SPN: Phase 1 — Session Initialization (POST /start-session)
+
+        Browser->>ProxyIframe: Mount component (toolId, orgId)
+        ProxyIframe->>BetterAuth: authClient.token()
+        BetterAuth-->>ProxyIframe: short-lived JWT (signed, ~5 min TTL)
+
+        ProxyIframe->>GoProxy: POST /start-session<br/>{ jwt, toolId, orgId }<br/>credentials: "include"
+        GoProxy->>GoProxy: Validate Origin == FRONTEND_URL<br/>(strict CORS — no wildcards)
+        GoProxy->>BetterAuth: Fetch JWKS, verify JWT<br/>(signature, iss, aud, exp)
+        BetterAuth-->>GoProxy: Claims: sub (userId), email
+
+        GoProxy->>PostgreSQL: validateUserAccess(userId, email, toolId, orgId)<br/>— user not banned, org membership,<br/>tool exists, SPN credentials
+        PostgreSQL-->>GoProxy: appURL, workspaceURL,<br/>spnClientId, spnClientSecret
+
+        GoProxy->>SPN: POST {workspaceURL}/oidc/v1/token<br/>grant_type=client_credentials<br/>Basic auth: clientId:clientSecret
+        SPN-->>GoProxy: accessToken (1h TTL), tokenExpiresAt
+
+        GoProxy->>GoProxy: Generate 32-byte random sessionID<br/>Compute hash = SHA-256(sessionID)
+        GoProxy->>PostgreSQL: INSERT proxy_sessions<br/>(id=hash, userId, toolId, appURL,<br/>accessToken, tokenExpiresAt, expiresAt=+1h)
+        PostgreSQL-->>GoProxy: OK
+
+        GoProxy-->>Browser: Set-Cookie: proxy_sid={sessionID}<br/>HttpOnly; SameSite=None; Secure; Path=/; MaxAge=3600
+        GoProxy-->>ProxyIframe: 200 OK { ok: true }
+
+        ProxyIframe->>Browser: Render iframe<br/>src={proxyBaseUrl}/app-proxy/{toolId}/
+    end
+
+    rect rgb(240, 255, 240)
+        Note over Browser,LakehouseApp: Phase 2 — Proxied App Requests (cookie auth)
+
+        Browser->>GoProxy: GET /app-proxy/{toolId}/<br/>Cookie: proxy_sid={sessionID}
+        GoProxy->>GoProxy: Extract proxy_sid cookie<br/>Compute SHA-256(cookie value)
+        GoProxy->>PostgreSQL: SELECT * FROM proxy_sessions<br/>WHERE id = hash
+        PostgreSQL-->>GoProxy: Session record<br/>(accessToken, appURL, toolID, expiresAt)
+        GoProxy->>GoProxy: Validate: session not expired,<br/>toolID matches request path
+
+        opt Token expires within 5 minutes
+            GoProxy->>SPN: POST /oidc/v1/token (refresh)
+            SPN-->>GoProxy: new accessToken
+            GoProxy->>PostgreSQL: UPDATE proxy_sessions<br/>SET access_token, token_expires_at
+        end
+
+        GoProxy->>LakehouseApp: GET {appURL}/...<br/>Authorization: Bearer {accessToken}<br/>(X-Forwarded-* headers stripped)
+        LakehouseApp-->>GoProxy: HTML / JS / CSS / API response
+        GoProxy->>GoProxy: Inject security headers:<br/>CSP: frame-ancestors 'self' {frontendURL}<br/>X-Frame-Options: SAMEORIGIN
+        GoProxy-->>Browser: Forwarded response
+
+        Note over Browser,LakehouseApp: WebSocket connections follow the same cookie-auth pattern
+    end
