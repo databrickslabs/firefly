@@ -1,0 +1,10 @@
+[project]
+name = "guest-manager"
+version = "0.1.0"
+description = "Streamlit app for managing Firefly guest users"
+requires-python = ">=3.11"
+dependencies = [
+    "streamlit>=1.40.0",
+    "requests>=2.32.0",
+    "python-dotenv>=1.0.0",
+]

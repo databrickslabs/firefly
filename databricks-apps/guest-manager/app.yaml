@@ -1,0 +1,6 @@
+env:
+  - name: APP_BASE_URL
+    value: https://firefly-analytics-monorepo-deployment.replit.app
+
+  - name: GUEST_API_SECRET
+    valueFrom: guestApiSecret
