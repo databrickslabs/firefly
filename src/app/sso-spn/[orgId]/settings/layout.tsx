@@ -17,7 +17,7 @@ export default function SettingsLayout({
   const basePath = `/sso-spn/${orgId}/settings`;
 
   const { data: session } = useSession();
-  const isGuest = session?.user?.email?.endsWith("@firefly-guest.local") ?? false;
+  const isGuest = session?.user?.role === "guest";
 
   const [memberRole, setMemberRole] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);

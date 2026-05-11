@@ -25,6 +25,7 @@ interface SsoSpnTopNavProps {
   user: {
     name?: string | null;
     email?: string | null;
+    role?: string | null;
   };
   title: string;
   basePath: string;
@@ -56,8 +57,8 @@ export function SsoSpnTopNav({ user, title, basePath }: SsoSpnTopNavProps) {
   // Check if user is owner or admin
   const isOwnerOrAdmin = memberRole === "owner" || memberRole === "admin";
 
-  // Guest users have auto-generated emails on the firefly-guest.local domain
-  const isGuest = user.email?.endsWith("@firefly-guest.local") ?? false;
+  // Guest users are explicitly assigned role: 'guest' at creation time
+  const isGuest = user.role === "guest";
 
   const handleSignOut = async () => {
     await authClient.signOut();

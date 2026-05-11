@@ -58,7 +58,7 @@ export default function OrgLayout({
               <SidebarTrigger className="-ml-1" />
               <Separator orientation="vertical" className="mr-2 h-4" />
               <SsoSpnTopNav
-                user={session.user}
+                user={{ name: session.user.name, email: session.user.email, role: session.user.role }}
                 title="FireFly Analytics"
                 basePath={basePath}
               />
