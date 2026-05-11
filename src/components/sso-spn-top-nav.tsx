@@ -56,6 +56,9 @@ export function SsoSpnTopNav({ user, title, basePath }: SsoSpnTopNavProps) {
   // Check if user is owner or admin
   const isOwnerOrAdmin = memberRole === "owner" || memberRole === "admin";
 
+  // Guest users have auto-generated emails on the firefly-guest.local domain
+  const isGuest = user.email?.endsWith("@firefly-guest.local") ?? false;
+
   const handleSignOut = async () => {
     await authClient.signOut();
     // Redirect to SPN login page
@@ -114,10 +117,10 @@ export function SsoSpnTopNav({ user, title, basePath }: SsoSpnTopNavProps) {
               </span>
             </DropdownMenuItem>
             {(() => {
-              const showAccountDetails = !navLoaded || userMenuItems["Account Details"] !== false;
-              const showProfileSettings = !navLoaded || userMenuItems["Profile Settings"] !== false;
-              const showPreferences = !navLoaded || userMenuItems["Preferences"] !== false;
-              const showOrgSettings = isOwnerOrAdmin && (!navLoaded || userMenuItems["Organization Settings"] !== false);
+              const showAccountDetails = !isGuest && (!navLoaded || userMenuItems["Account Details"] !== false);
+              const showProfileSettings = !isGuest && (!navLoaded || userMenuItems["Profile Settings"] !== false);
+              const showPreferences = !isGuest && (!navLoaded || userMenuItems["Preferences"] !== false);
+              const showOrgSettings = !isGuest && isOwnerOrAdmin && (!navLoaded || userMenuItems["Organization Settings"] !== false);
               const hasAnyMiddleItem = showAccountDetails || showProfileSettings || showPreferences || showOrgSettings;
 
               return (
