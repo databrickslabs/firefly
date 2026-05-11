@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getAuthInstance } from "@/lib/auth-dynamic";
+import { headers } from "next/headers";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +35,19 @@ interface TokenResponse {
  */
 export async function POST(request: NextRequest) {
   try {
+    // Require an authenticated session
+    const auth = await getAuthInstance();
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session?.user) {
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        { status: 401 }
+      );
+    }
+
     // Validate configuration
     const missingConfig: string[] = [];
     if (!EMBED_CONFIG.instanceUrl) missingConfig.push("DATABRICKS_EMBED_INSTANCE_URL");

@@ -1,6 +1,14 @@
+command:
+  - streamlit
+  - run
+  - app.py
+
 env:
   - name: APP_BASE_URL
     value: https://firefly-analytics-monorepo-deployment.replit.app
 
   - name: GUEST_API_SECRET
     valueFrom: guestApiSecret
+
+  - name: STREAMLIT_BROWSER_GATHER_USAGE_STATS
+    value: "false"

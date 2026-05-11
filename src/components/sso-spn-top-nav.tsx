@@ -25,6 +25,7 @@ interface SsoSpnTopNavProps {
   user: {
     name?: string | null;
     email?: string | null;
+    role?: string | null;
   };
   title: string;
   basePath: string;
@@ -55,6 +56,9 @@ export function SsoSpnTopNav({ user, title, basePath }: SsoSpnTopNavProps) {
 
   // Check if user is owner or admin
   const isOwnerOrAdmin = memberRole === "owner" || memberRole === "admin";
+
+  // Guest users are explicitly assigned role: 'guest' at creation time
+  const isGuest = user.role === "guest";
 
   const handleSignOut = async () => {
     await authClient.signOut();
@@ -114,10 +118,10 @@ export function SsoSpnTopNav({ user, title, basePath }: SsoSpnTopNavProps) {
               </span>
             </DropdownMenuItem>
             {(() => {
-              const showAccountDetails = !navLoaded || userMenuItems["Account Details"] !== false;
-              const showProfileSettings = !navLoaded || userMenuItems["Profile Settings"] !== false;
-              const showPreferences = !navLoaded || userMenuItems["Preferences"] !== false;
-              const showOrgSettings = isOwnerOrAdmin && (!navLoaded || userMenuItems["Organization Settings"] !== false);
+              const showAccountDetails = !isGuest && (!navLoaded || userMenuItems["Account Details"] !== false);
+              const showProfileSettings = !isGuest && (!navLoaded || userMenuItems["Profile Settings"] !== false);
+              const showPreferences = !isGuest && (!navLoaded || userMenuItems["Preferences"] !== false);
+              const showOrgSettings = !isGuest && isOwnerOrAdmin && (!navLoaded || userMenuItems["Organization Settings"] !== false);
               const hasAnyMiddleItem = showAccountDetails || showProfileSettings || showPreferences || showOrgSettings;
 
               return (

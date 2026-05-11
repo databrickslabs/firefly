@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
-import { authClient } from "@/lib/auth-client";
+import { authClient, useSession } from "@/lib/auth-client";
 import { SettingsNav } from "@/components/settings-nav";
 import { Spinner } from "@/components/ui/spinner";
 
@@ -15,6 +15,9 @@ export default function SettingsLayout({
   const params = useParams();
   const orgId = params.orgId as string;
   const basePath = `/sso-spn/${orgId}/settings`;
+
+  const { data: session } = useSession();
+  const isGuest = session?.user?.role === "guest";
 
   const [memberRole, setMemberRole] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -38,12 +41,12 @@ export default function SettingsLayout({
 
   const isOwnerOrAdmin = memberRole === "owner" || memberRole === "admin";
 
-  // Redirect if not owner/admin
+  // Redirect guests and non-owner/admins
   useEffect(() => {
-    if (!loading && !isOwnerOrAdmin) {
+    if (isGuest || (!loading && !isOwnerOrAdmin)) {
       router.push(`/sso-spn/${orgId}/dashboard`);
     }
-  }, [loading, isOwnerOrAdmin, router, orgId]);
+  }, [loading, isOwnerOrAdmin, isGuest, router, orgId]);
 
   if (loading) {
     return (
@@ -56,7 +59,7 @@ export default function SettingsLayout({
     );
   }
 
-  if (!isOwnerOrAdmin) {
+  if (isGuest || !isOwnerOrAdmin) {
     return null;
   }
 
