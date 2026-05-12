@@ -99,6 +99,7 @@ export default function GuestUsersAdminPage() {
   // Regenerate login URL
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const [regeneratedUrl, setRegeneratedUrl] = useState<string | null>(null);
+  const [regenerateError, setRegenerateError] = useState<string | null>(null);
 
   // GC
   const [runningGc, setRunningGc] = useState(false);
@@ -292,6 +293,7 @@ export default function GuestUsersAdminPage() {
   async function handleRegenerate(guestId: string) {
     setRegeneratingId(guestId);
     setRegeneratedUrl(null);
+    setRegenerateError(null);
     try {
       const res = await fetch(`/api/guest/users/${guestId}`, {
         method: "POST",
@@ -301,10 +303,10 @@ export default function GuestUsersAdminPage() {
       if (res.ok && data.loginUrl) {
         setRegeneratedUrl(data.loginUrl);
       } else {
-        alert(data.error || "Failed to regenerate login URL");
+        setRegenerateError(data.error || "Failed to regenerate login URL");
       }
     } catch {
-      alert("Failed to regenerate login URL");
+      setRegenerateError("Failed to regenerate login URL");
     } finally {
       setRegeneratingId(null);
     }
@@ -691,6 +693,13 @@ export default function GuestUsersAdminPage() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {regenerateError && (
+            <div className="mt-4 p-3 border border-destructive rounded-lg bg-destructive/10">
+              <p className="text-destructive text-sm font-medium">Regeneration failed</p>
+              <p className="text-destructive text-xs mt-1">{regenerateError}</p>
             </div>
           )}
 

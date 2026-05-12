@@ -60,3 +60,5 @@ pg_dump/
 # Go build artifacts
 go/databricks-proxy
 go/proxy
+# Local skills and personal tooling
+.local/

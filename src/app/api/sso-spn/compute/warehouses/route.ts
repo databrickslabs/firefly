@@ -79,6 +79,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    if (session.user.role === "guest") {
+      return NextResponse.json({ error: "Guest users cannot create warehouses" }, { status: 403 });
+    }
+
     const activeOrgId = session.session.activeOrganizationId;
 
     const [org] = await db
@@ -205,6 +209,10 @@ export async function DELETE(request: NextRequest) {
 
     if (!session?.user?.id || !session.session?.activeOrganizationId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    if (session.user.role === "guest") {
+      return NextResponse.json({ error: "Guest users cannot delete warehouses" }, { status: 403 });
     }
 
     const activeOrgId = session.session.activeOrganizationId;

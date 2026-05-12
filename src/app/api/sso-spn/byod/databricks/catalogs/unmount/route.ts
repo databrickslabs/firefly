@@ -128,6 +128,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No active organization in session" }, { status: 401 });
     }
 
+    if (session.user?.role === "guest") {
+      return NextResponse.json({ error: "Guest users cannot unmount catalogs" }, { status: 403 });
+    }
+
     const orgId = session.session.activeOrganizationId;
 
     // Parse request body

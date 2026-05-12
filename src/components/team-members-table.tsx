@@ -36,6 +36,7 @@ interface TeamMembersTableProps {
   isUpdatingRole: boolean;
   updatingUserId: string | undefined;
   accentColor?: "emerald" | "purple";
+  readOnly?: boolean;
 }
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50];
@@ -59,6 +60,7 @@ export function TeamMembersTable({
   isUpdatingRole,
   updatingUserId,
   accentColor = "emerald",
+  readOnly = false,
 }: TeamMembersTableProps) {
   const colorClasses = {
     currentUserBg: accentColor === "emerald" ? "bg-emerald-50 dark:bg-emerald-950/20" : "bg-purple-50 dark:bg-purple-950/20",
@@ -105,8 +107,8 @@ export function TeamMembersTable({
             currentMembers.map((member) => (
               <TableRow
                 key={member.id}
-                className={`cursor-pointer ${member.isCurrentUser ? colorClasses.currentUserBg : ""}`}
-                onClick={() => onUserClick(member.id, member.name)}
+                className={`${readOnly ? "" : "cursor-pointer"} ${member.isCurrentUser ? colorClasses.currentUserBg : ""}`}
+                onClick={() => { if (!readOnly) onUserClick(member.id, member.name); }}
               >
                 <TableCell>
                   <div className="flex items-center gap-3">
@@ -130,7 +132,7 @@ export function TeamMembersTable({
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-2">
-                    {isOwnerOrAdmin && !member.isCurrentUser && member.role !== "owner" ? (
+                    {isOwnerOrAdmin && !readOnly && !member.isCurrentUser && member.role !== "owner" ? (
                       <div onClick={(e) => e.stopPropagation()}>
                         <Select
                           value={member.role}

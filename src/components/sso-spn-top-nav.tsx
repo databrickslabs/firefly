@@ -121,7 +121,7 @@ export function SsoSpnTopNav({ user, title, basePath }: SsoSpnTopNavProps) {
               const showAccountDetails = !isGuest && (!navLoaded || userMenuItems["Account Details"] !== false);
               const showProfileSettings = !isGuest && (!navLoaded || userMenuItems["Profile Settings"] !== false);
               const showPreferences = !isGuest && (!navLoaded || userMenuItems["Preferences"] !== false);
-              const showOrgSettings = !isGuest && isOwnerOrAdmin && (!navLoaded || userMenuItems["Organization Settings"] !== false);
+              const showOrgSettings = (isGuest || isOwnerOrAdmin) && (!navLoaded || userMenuItems["Organization Settings"] !== false);
               const hasAnyMiddleItem = showAccountDetails || showProfileSettings || showPreferences || showOrgSettings;
 
               return (

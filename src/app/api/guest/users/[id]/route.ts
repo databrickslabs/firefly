@@ -72,9 +72,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const { id } = await params;
 
     const { db } = await import('@/db');
-    const { guestUser, session: sessionTable } = await import('@/db/schema');
-    const { eq, and, gt } = await import('drizzle-orm');
+    const { guestUser } = await import('@/db/schema');
+    const { eq } = await import('drizzle-orm');
     const { getAuthInstance } = await import('@/lib/auth-dynamic');
+    const { nanoid } = await import('nanoid');
 
     // Find the guest record
     const [guest] = await db
@@ -97,67 +98,53 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    // Find an active session for this user
-    const [activeSession] = await db
-      .select()
-      .from(sessionTable)
-      .where(
-        and(
-          eq(sessionTable.userId, guest.userId),
-          gt(sessionTable.expiresAt, new Date())
-        )
-      )
-      .limit(1);
-
-    if (!activeSession) {
-      // No active session - sign in with stored credentials to create one
-      const auth = await getAuthInstance();
-      const signInResult = await auth.api.signInEmail({
-        body: {
-          email: guest.generatedEmail,
-          password: guest.generatedPassword || '',
-        },
-      });
-
-      if (!signInResult?.token) {
-        return NextResponse.json(
-          { error: 'Failed to create session for guest user' },
-          { status: 500 }
-        );
-      }
-
-      // Generate OTT from the new session
-      const appUrl = process.env.BETTER_AUTH_URL || 'http://localhost:3000';
-      let loginUrl: string;
-      try {
-        const ottResult = await auth.api.generateOneTimeToken({
-          headers: new Headers({
-            cookie: `better-auth.session_token=${signInResult.token}`,
-          }),
-        });
-        loginUrl = `${appUrl}/guest-login?token=${encodeURIComponent(ottResult.token)}`;
-      } catch (err) {
-        console.error('Error generating one-time token:', err);
-        loginUrl = `${appUrl}/guest-login?email=${encodeURIComponent(guest.generatedEmail)}&p=${encodeURIComponent(guest.generatedPassword || '')}`;
-      }
-      return NextResponse.json({ loginUrl, expiresIn: '10 minutes' });
-    }
-
-    // Generate OTT from existing session
     const auth = await getAuthInstance();
     const appUrl = process.env.BETTER_AUTH_URL || 'http://localhost:3000';
-    let loginUrl: string;
-    try {
-      const ottResult = await auth.api.generateOneTimeToken({
-        headers: new Headers({
-          cookie: `better-auth.session_token=${activeSession.token}`,
-        }),
-      });
-      loginUrl = `${appUrl}/guest-login?token=${encodeURIComponent(ottResult.token)}`;
-    } catch (err) {
-      console.error('Error generating one-time token:', err);
-      loginUrl = `${appUrl}/guest-login?email=${encodeURIComponent(guest.generatedEmail)}&p=${encodeURIComponent(guest.generatedPassword || '')}`;
+
+    // Sign in with current credentials to get a session
+    const signInResult = await auth.api.signInEmail({
+      body: { email: guest.generatedEmail, password: guest.generatedPassword || '' },
+    });
+
+    if (!signInResult?.token) {
+      return NextResponse.json(
+        { error: 'Failed to create session for guest user' },
+        { status: 500 }
+      );
     }
+
+    const sessionCookie = `better-auth.session_token=${signInResult.token}`;
+
+    // Mint the OTT first — it's stored independently and won't be affected by password rotation
+    const ottResult = await auth.api.generateOneTimeToken({
+      headers: new Headers({ cookie: sessionCookie }),
+    });
+    if (!ottResult?.token) {
+      return NextResponse.json(
+        { error: 'Failed to generate one-time login token' },
+        { status: 500 }
+      );
+    }
+
+    // Rotate the password so any previous email/password URLs are immediately invalidated,
+    // and revoke all existing sessions (guest will re-enter via the new OTT)
+    const newPassword = nanoid(24);
+    await auth.api.changePassword({
+      body: {
+        currentPassword: guest.generatedPassword || '',
+        newPassword,
+        revokeOtherSessions: true,
+      },
+      headers: new Headers({ cookie: sessionCookie }),
+    });
+
+    // Persist new password so future regenerations still work
+    await db
+      .update(guestUser)
+      .set({ generatedPassword: newPassword, updatedAt: new Date() })
+      .where(eq(guestUser.id, id));
+
+    const loginUrl = `${appUrl}/guest-login?token=${encodeURIComponent(ottResult.token)}`;
     return NextResponse.json({ loginUrl, expiresIn: '10 minutes' });
   } catch (error) {
     console.error('Error regenerating guest login token:', error);
