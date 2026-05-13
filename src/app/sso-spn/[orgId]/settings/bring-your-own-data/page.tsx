@@ -29,6 +29,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Spinner } from "@/components/ui/spinner";
 import { ShareDetailsButton } from "@/components/byod/share-details-modal";
+import { useSession } from "@/lib/auth-client";
 
 interface DataPlatform {
   id: string;
@@ -198,6 +199,8 @@ interface CatalogsResponse {
 }
 
 function DatabricksConfig() {
+  const { data: session } = useSession();
+  const isGuest = session?.user?.role === "guest";
   const queryClient = useQueryClient();
   const [showAddSpnDialog, setShowAddSpnDialog] = useState(false);
   const [showAddWorkspaceDialog, setShowAddWorkspaceDialog] = useState(false);
@@ -715,7 +718,7 @@ function DatabricksConfig() {
                     Unity Catalog metastores available for sharing
                   </CardDescription>
                 </div>
-                <Button size="sm" onClick={() => setShowAddMetastoreDialog(true)}>
+                <Button size="sm" onClick={() => setShowAddMetastoreDialog(true)} disabled={isGuest}>
                   <Plus className="h-4 w-4 mr-2" />
                   Add
                 </Button>
@@ -774,7 +777,7 @@ function DatabricksConfig() {
                             </p>
                           )}
                         </div>
-                        {metastore.source === "manual" && (
+                        {metastore.source === "manual" && !isGuest && (
                           <Button
                             variant="ghost"
                             size="sm"
@@ -987,15 +990,17 @@ function DatabricksConfig() {
                                                       <span className="text-xs px-2 py-0.5 bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 rounded font-mono">
                                                         {cat.catalogName}
                                                       </span>
-                                                      <Button
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        className="h-5 w-5 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
-                                                        onClick={() => setShowUnmountCatalogDialog(cat)}
-                                                        title="Unmount catalog"
-                                                      >
-                                                        <Trash2 className="h-3 w-3" />
-                                                      </Button>
+                                                      {!isGuest && (
+                                                        <Button
+                                                          variant="ghost"
+                                                          size="sm"
+                                                          className="h-5 w-5 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                                          onClick={() => setShowUnmountCatalogDialog(cat)}
+                                                          title="Unmount catalog"
+                                                        >
+                                                          <Trash2 className="h-3 w-3" />
+                                                        </Button>
+                                                      )}
                                                     </div>
                                                   ))}
                                                 </div>
@@ -1009,22 +1014,24 @@ function DatabricksConfig() {
                                                   <AlertTriangle className="h-3 w-3" />
                                                   Not mounted
                                                 </span>
-                                                <Button
-                                                  size="sm"
-                                                  variant="outline"
-                                                  className="h-6 text-xs"
-                                                  onClick={() =>
-                                                    providerResult.provider &&
-                                                    handleMountCatalog(
-                                                      providerResult.provider.name,
-                                                      share.name,
-                                                      generatedCatalogName
-                                                    )
-                                                  }
-                                                >
-                                                  <Plus className="h-3 w-3 mr-1" />
-                                                  Mount as <span className="font-mono ml-1">{generatedCatalogName}</span>
-                                                </Button>
+                                                {!isGuest && (
+                                                  <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    className="h-6 text-xs"
+                                                    onClick={() =>
+                                                      providerResult.provider &&
+                                                      handleMountCatalog(
+                                                        providerResult.provider.name,
+                                                        share.name,
+                                                        generatedCatalogName
+                                                      )
+                                                    }
+                                                  >
+                                                    <Plus className="h-3 w-3 mr-1" />
+                                                    Mount as <span className="font-mono ml-1">{generatedCatalogName}</span>
+                                                  </Button>
+                                                )}
                                               </div>
                                             )}
                                           </div>
@@ -1061,7 +1068,7 @@ function DatabricksConfig() {
                 Configure service principals for authentication (required)
               </CardDescription>
             </div>
-            <Button size="sm" onClick={() => setShowAddSpnDialog(true)}>
+            <Button size="sm" onClick={() => setShowAddSpnDialog(true)} disabled={isGuest}>
               <Plus className="h-4 w-4 mr-2" />
               Add
             </Button>
@@ -1097,14 +1104,16 @@ function DatabricksConfig() {
                       Secret: {spn.clientSecret}
                     </p>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-destructive hover:text-destructive"
-                    onClick={() => setShowDeleteSpnDialog(spn)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  {!isGuest && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-destructive hover:text-destructive"
+                      onClick={() => setShowDeleteSpnDialog(spn)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
                 </div>
               ))}
             </div>
@@ -1128,7 +1137,7 @@ function DatabricksConfig() {
             <Button
               size="sm"
               onClick={() => setShowAddWorkspaceDialog(true)}
-              disabled={spns.length === 0}
+              disabled={isGuest || spns.length === 0}
             >
               <Plus className="h-4 w-4 mr-2" />
               Add
@@ -1240,14 +1249,16 @@ function DatabricksConfig() {
                         >
                           <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-destructive hover:text-destructive"
-                          onClick={() => setShowDeleteWorkspaceDialog(workspace)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        {!isGuest && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive hover:text-destructive"
+                            onClick={() => setShowDeleteWorkspaceDialog(workspace)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
                       </div>
                     </div>
                   </div>

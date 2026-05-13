@@ -20,6 +20,10 @@ async function getActiveOrgId(): Promise<{ orgId: string } | { error: string; st
     return { error: "No active organization in session", status: 401 };
   }
 
+  if (session.user?.role === "guest") {
+    return { error: "Guest users cannot perform this action", status: 403 };
+  }
+
   return { orgId: session.session.activeOrganizationId };
 }
 

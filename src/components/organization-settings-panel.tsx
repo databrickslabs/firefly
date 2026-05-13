@@ -121,7 +121,10 @@ export function OrganizationSettingsPanel({
 
   const orgUsers = orgUsersData?.users || [];
 
+  const isGuest = session?.user?.role === "guest";
+
   const handleRoleChange = (targetUserId: string, newRole: string) => {
+    if (isGuest) return;
     updateRoleMutation.mutate({ targetUserId, newRole });
   };
 
@@ -136,28 +139,43 @@ export function OrganizationSettingsPanel({
     }
   };
 
-  // Combine current user and other users into a single array for the table
+  // Derive email domain from org name for demo member display
+  const demoDomain = activeOrg?.name
+    ? `${activeOrg.name.toLowerCase().replace(/[^a-z0-9]/g, "")}.com`
+    : "demo.com";
+
+  const demoMembers = [
+    { id: "demo-1", name: "Sarah Chen", email: `s.chen@${demoDomain}`, role: "admin", isCurrentUser: false },
+    { id: "demo-2", name: "Marcus Johnson", email: `m.johnson@${demoDomain}`, role: "member", isCurrentUser: false },
+    { id: "demo-3", name: "Priya Patel", email: `p.patel@${demoDomain}`, role: "member", isCurrentUser: false },
+  ];
+
+  // Combine current user and other users into a single array for the table.
+  // Guest sessions use illustrative demo members to show the interface.
   const allMembers = [
     // Current user first
     ...(session?.user
       ? [
           {
             id: session.user.id,
-            name: session.user.name || null,
-            email: session.user.email || "",
+            name: isGuest ? (session.user.name || "Demo User") : (session.user.name || null),
+            email: isGuest ? `owner@${demoDomain}` : (session.user.email || ""),
             role: memberRole || "member",
             isCurrentUser: true,
           },
         ]
       : []),
     // Other users
-    ...orgUsers.map((user: { id: string; name: string; email: string; role: string }) => ({
-      id: user.id,
-      name: user.name || null,
-      email: user.email,
-      role: user.role,
-      isCurrentUser: false,
-    })),
+    ...(isGuest
+      ? demoMembers
+      : orgUsers.map((user: { id: string; name: string; email: string; role: string }) => ({
+          id: user.id,
+          name: user.name || null,
+          email: user.email,
+          role: user.role,
+          isCurrentUser: false,
+        }))
+    ),
   ];
 
   return (
@@ -188,10 +206,12 @@ export function OrganizationSettingsPanel({
                 <p className="text-sm font-medium text-muted-foreground">Name</p>
                 <p className="text-lg font-semibold">{activeOrg?.name || "N/A"}</p>
               </div>
-              <div className="space-y-1">
-                <p className="text-sm font-medium text-muted-foreground">Slug</p>
-                <p className="text-lg font-mono">{activeOrg?.slug || "N/A"}</p>
-              </div>
+              {!isGuest && (
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-muted-foreground">Slug</p>
+                  <p className="text-lg font-mono">{activeOrg?.slug || "N/A"}</p>
+                </div>
+              )}
               {(activeOrg as { workspaceUrl?: string })?.workspaceUrl && (
                 <div className="space-y-1 md:col-span-2">
                   <p className="text-sm font-medium text-muted-foreground flex items-center gap-1">
@@ -244,11 +264,11 @@ export function OrganizationSettingsPanel({
             </CardTitle>
             <CardDescription>
               Members of this organization ({allMembers.length} total)
-              {(memberRole === "owner" || memberRole === "admin") && " - Click on a user to view details"}
+              {!isGuest && (memberRole === "owner" || memberRole === "admin") && " - Click on a user to view details"}
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {usersLoading ? (
+            {usersLoading && !isGuest ? (
               <div className="flex items-center justify-center p-8">
                 <Spinner className={`w-8 h-8 ${colorClasses.spinner}`} />
               </div>
@@ -262,6 +282,7 @@ export function OrganizationSettingsPanel({
                   isUpdatingRole={updateRoleMutation.isPending}
                   updatingUserId={updateRoleMutation.variables?.targetUserId}
                   accentColor={accentColor}
+                  readOnly={isGuest}
                 />
                 {updateRoleMutation.isError && (
                   <p className="text-sm text-red-600 text-center py-2 mt-4">

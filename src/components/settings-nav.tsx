@@ -7,6 +7,7 @@ import { Building2, Cpu, Database, Cloud } from "lucide-react";
 
 interface SettingsNavProps {
   basePath: string;
+  isGuest?: boolean;
 }
 
 const settingsItems = [
@@ -15,18 +16,21 @@ const settingsItems = [
     href: "",
     icon: Building2,
     description: "Organization details and members",
+    guestVisible: true,
   },
   {
     title: "Compute",
     href: "/compute",
     icon: Cpu,
     description: "Clusters and SQL warehouses",
+    guestVisible: true,
   },
   {
     title: "Storage",
     href: "/storage",
     icon: Database,
     description: "Unity Catalog and volumes",
+    guestVisible: false,
   },
 ];
 
@@ -36,10 +40,11 @@ const databricksItems = [
     href: "/bring-your-own-data",
     icon: Cloud,
     description: "SPNs, workspaces, and sharing",
+    guestVisible: true,
   },
 ];
 
-export function SettingsNav({ basePath }: SettingsNavProps) {
+export function SettingsNav({ basePath, isGuest = false }: SettingsNavProps) {
   const pathname = usePathname();
 
   const renderNavItem = (item: typeof settingsItems[0], basePath: string) => {
@@ -83,12 +88,16 @@ export function SettingsNav({ basePath }: SettingsNavProps) {
         </p>
       </div>
       <div className="flex flex-col gap-1 px-2">
-        {settingsItems.map((item) => renderNavItem(item, basePath))}
+        {settingsItems
+          .filter((item) => !isGuest || item.guestVisible)
+          .map((item) => renderNavItem(item, basePath))}
       </div>
 
       {/* Databricks Section */}
       <div className="flex flex-col gap-1 px-2">
-        {databricksItems.map((item) => renderNavItem(item, basePath))}
+        {databricksItems
+          .filter((item) => !isGuest || item.guestVisible)
+          .map((item) => renderNavItem(item, basePath))}
       </div>
     </nav>
   );

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSession } from "@/lib/auth-client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -80,6 +81,8 @@ const CLUSTER_SIZES = [
 ];
 
 export default function ComputeSettingsPage() {
+  const { data: session } = useSession();
+  const isGuest = session?.user?.role === "guest";
   const queryClient = useQueryClient();
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -270,18 +273,20 @@ export default function ComputeSettingsPage() {
                     />
                     Refresh
                   </Button>
-                  <Button size="sm" onClick={() => {
-                    setNewWarehouse({
-                      name: "",
-                      cluster_size: defaultWarehouseSize,
-                      auto_stop_mins: 120,
-                      max_num_clusters: 1,
-                    });
-                    setCreateDialogOpen(true);
-                  }}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Create Warehouse
-                  </Button>
+                  {!isGuest && (
+                    <Button size="sm" onClick={() => {
+                      setNewWarehouse({
+                        name: "",
+                        cluster_size: defaultWarehouseSize,
+                        auto_stop_mins: 120,
+                        max_num_clusters: 1,
+                      });
+                      setCreateDialogOpen(true);
+                    }}>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Create Warehouse
+                    </Button>
+                  )}
                 </div>
               )}
             </div>
@@ -300,18 +305,20 @@ export default function ComputeSettingsPage() {
                 <p className="text-sm text-muted-foreground max-w-md mb-4">
                   Create a SQL warehouse to get started with queries and dashboards.
                 </p>
-                <Button onClick={() => {
-                  setNewWarehouse({
-                    name: "",
-                    cluster_size: defaultWarehouseSize,
-                    auto_stop_mins: 120,
-                    max_num_clusters: 1,
-                  });
-                  setCreateDialogOpen(true);
-                }}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Create Warehouse
-                </Button>
+                {!isGuest && (
+                  <Button onClick={() => {
+                    setNewWarehouse({
+                      name: "",
+                      cluster_size: defaultWarehouseSize,
+                      auto_stop_mins: 120,
+                      max_num_clusters: 1,
+                    });
+                    setCreateDialogOpen(true);
+                  }}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Create Warehouse
+                  </Button>
+                )}
               </div>
             ) : (
               <div className="space-y-4">
@@ -373,30 +380,32 @@ export default function ComputeSettingsPage() {
                               : `${warehouse.autoStopMins} min`}
                           </TableCell>
                           <TableCell className="text-right">
-                            <div className="flex items-center justify-end gap-1">
-                              {!warehouse.isDefault && (
+                            {!isGuest && (
+                              <div className="flex items-center justify-end gap-1">
+                                {!warehouse.isDefault && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() =>
+                                      setDefaultMutation.mutate(warehouse.warehouseId)
+                                    }
+                                    disabled={setDefaultMutation.isPending}
+                                  >
+                                    <Star className="h-3.5 w-3.5 mr-1" />
+                                    Set Default
+                                  </Button>
+                                )}
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  onClick={() =>
-                                    setDefaultMutation.mutate(warehouse.warehouseId)
-                                  }
-                                  disabled={setDefaultMutation.isPending}
+                                  className="text-red-600 hover:text-red-700"
+                                  onClick={() => setDeleteConfirmId(warehouse.warehouseId)}
+                                  disabled={deleteWarehouseMutation.isPending}
                                 >
-                                  <Star className="h-3.5 w-3.5 mr-1" />
-                                  Set Default
+                                  <Trash2 className="h-3.5 w-3.5" />
                                 </Button>
-                              )}
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="text-red-600 hover:text-red-700"
-                                onClick={() => setDeleteConfirmId(warehouse.warehouseId)}
-                                disabled={deleteWarehouseMutation.isPending}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                            </div>
+                              </div>
+                            )}
                           </TableCell>
                         </TableRow>
                       ))}

@@ -25,6 +25,8 @@ export async function POST(request: NextRequest) {
       customLogo,
     } = body;
 
+    const MAX_EXPIRES_MINUTES = 30 * 24 * 60; // 30 days
+
     if (!orgName) {
       return NextResponse.json(
         { error: 'orgName is required' },
@@ -35,6 +37,13 @@ export async function POST(request: NextRequest) {
     if (!spnId) {
       return NextResponse.json(
         { error: 'spnId is required (guest SPN ID)' },
+        { status: 400 }
+      );
+    }
+
+    if (expiresInMinutes > MAX_EXPIRES_MINUTES) {
+      return NextResponse.json(
+        { error: `expiresInMinutes cannot exceed ${MAX_EXPIRES_MINUTES} (30 days)` },
         { status: 400 }
       );
     }
@@ -107,7 +116,12 @@ export async function POST(request: NextRequest) {
 
     // Create temporary organization
     const orgId = `org_guest_${Date.now()}_${nanoid(8)}`;
-    const orgSlug = `guest-${nanoid(16)}`;
+    const slugBase = orgName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 32) || 'demo';
+    const orgSlug = `${slugBase}-${nanoid(6)}`;
 
     await db.insert(organization).values({
       id: orgId,
@@ -181,33 +195,41 @@ export async function POST(request: NextRequest) {
       updatedAt: new Date(),
     });
 
-    // Generate a one-time token for secure login (single-use, expires in 10 min)
-    // The signUpResult contains the session token we need
-    const sessionToken = signUpResult.token;
-    let oneTimeTokenValue: string | null = null;
+    // Generate a one-time token for secure login (single-use, expires in 10 min).
+    // signUpEmail called server-side doesn't return a session token, so we explicitly
+    // sign in to obtain one, then use it to generate the OTT.
     const appUrl = process.env.BETTER_AUTH_URL || 'http://localhost:3000';
 
-    if (sessionToken) {
-      try {
-        const ottResult = await auth.api.generateOneTimeToken({
-          headers: new Headers({
-            cookie: `better-auth.session_token=${sessionToken}`,
-          }),
-        });
-        oneTimeTokenValue = ottResult?.token || null;
-      } catch (err) {
-        console.error('Error generating one-time token:', err);
-      }
+    const signInResult = await auth.api.signInEmail({
+      body: {
+        email: generatedEmail,
+        password: generatedPassword,
+      },
+    });
+
+    const sessionToken = signInResult?.token;
+    if (!sessionToken) {
+      return NextResponse.json(
+        { error: 'Guest user created but failed to obtain session token for login link generation' },
+        { status: 500 }
+      );
     }
 
-    // Build login URL - prefer OTT, fallback to email/password
-    let loginUrl: string;
-    if (oneTimeTokenValue) {
-      loginUrl = `${appUrl}/guest-login?token=${encodeURIComponent(oneTimeTokenValue)}`;
-    } else {
-      // Fallback: email/password URL (less secure but functional)
-      loginUrl = `${appUrl}/guest-login?email=${encodeURIComponent(generatedEmail)}&p=${encodeURIComponent(generatedPassword)}`;
+    const ottResult = await auth.api.generateOneTimeToken({
+      headers: new Headers({
+        cookie: `better-auth.session_token=${sessionToken}`,
+      }),
+    });
+
+    const oneTimeTokenValue = ottResult?.token;
+    if (!oneTimeTokenValue) {
+      return NextResponse.json(
+        { error: 'Guest user created but failed to generate one-time login token' },
+        { status: 500 }
+      );
     }
+
+    const loginUrl = `${appUrl}/guest-login?token=${encodeURIComponent(oneTimeTokenValue)}`;
 
     revalidateTag(GUEST_USERS_CACHE_TAG);
     revalidateTag(ORGANIZATIONS_CACHE_TAG);
