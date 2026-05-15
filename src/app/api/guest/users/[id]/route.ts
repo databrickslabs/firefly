@@ -147,9 +147,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const loginUrl = `${appUrl}/guest-login?token=${encodeURIComponent(ottResult.token)}`;
     return NextResponse.json({ loginUrl, expiresIn: '10 minutes' });
   } catch (error) {
-    console.error('Error regenerating guest login token:', error);
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('Error regenerating guest login token:', message, error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error', detail: message },
       { status: 500 }
     );
   }
