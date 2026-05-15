@@ -212,15 +212,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Replicate oneTimeToken plugin (storeToken:"hashed"): random token → SHA-256 → base64url
-    const { createHash } = await import('@better-auth/utils/hash');
-    const { base64Url } = await import('@better-auth/utils/base64');
+    // Replicate oneTimeToken plugin (storeToken:"hashed"): random token → SHA-256 → base64url (no padding)
+    const { createHash: nodeCrypto } = await import('node:crypto');
     const { verification } = await import('@/db/schema');
     const ottRaw = nanoid(32);
-    const ottHash = base64Url.encode(
-      new Uint8Array(await createHash('SHA-256').digest(new TextEncoder().encode(ottRaw))),
-      { padding: false }
-    );
+    const ottHash = nodeCrypto('sha256').update(ottRaw).digest('base64url');
     const ottExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 min, matching plugin default
 
     await db.insert(verification).values({
