@@ -3,7 +3,7 @@ import { unstable_cache, revalidateTag } from 'next/cache';
 import { nanoid } from 'nanoid';
 import { validateGuestApiKey } from '@/lib/guest-api-auth';
 import { GUEST_USERS_CACHE_TAG } from '../cache-tags';
-import { ORGANIZATIONS_CACHE_TAG } from '@/lib/auth-dynamic';
+import { ORGANIZATIONS_CACHE_TAG, APP_URL } from '@/lib/auth-dynamic';
 
 export const dynamic = 'force-dynamic';
 
@@ -198,8 +198,7 @@ export async function POST(request: NextRequest) {
     // Generate a one-time token for secure login (single-use, expires in 10 min).
     // signUpEmail called server-side doesn't return a session token, so we explicitly
     // sign in to obtain one, then use it to generate the OTT.
-    const appUrl = process.env.BETTER_AUTH_URL || 'http://localhost:3000';
-    const internalHeaders = new Headers({ origin: appUrl });
+    const internalHeaders = new Headers({ origin: APP_URL });
 
     const signInResult = await auth.api.signInEmail({
       body: {
@@ -231,7 +230,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const loginUrl = `${appUrl}/guest-login?token=${encodeURIComponent(oneTimeTokenValue)}`;
+    const loginUrl = `${APP_URL}/guest-login?token=${encodeURIComponent(oneTimeTokenValue)}`;
 
     revalidateTag(GUEST_USERS_CACHE_TAG);
     revalidateTag(ORGANIZATIONS_CACHE_TAG);
@@ -255,7 +254,10 @@ export async function POST(request: NextRequest) {
     const message = error instanceof Error ? error.message : String(error);
     console.error('Error creating guest user:', message, error);
     return NextResponse.json(
-      { error: 'Internal server error', detail: message },
+      {
+        error: 'Internal server error',
+        ...(process.env.NODE_ENV !== 'production' && { detail: message }),
+      },
       { status: 500 }
     );
   }
