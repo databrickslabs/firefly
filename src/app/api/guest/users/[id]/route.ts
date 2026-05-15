@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { revalidateTag } from 'next/cache';
 import { validateGuestApiKey } from '@/lib/guest-api-auth';
 import { GUEST_USERS_CACHE_TAG } from '../../cache-tags';
-import { ORGANIZATIONS_CACHE_TAG } from '@/lib/auth-dynamic';
+import { ORGANIZATIONS_CACHE_TAG, APP_URL } from '@/lib/auth-dynamic';
 
 export const dynamic = 'force-dynamic';
 
@@ -99,11 +99,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     const auth = await getAuthInstance();
-    const appUrl = process.env.BETTER_AUTH_URL || 'http://localhost:3000';
+    const internalHeaders = new Headers({ origin: APP_URL });
 
     // Sign in with current credentials to get a session
     const signInResult = await auth.api.signInEmail({
       body: { email: guest.generatedEmail, password: guest.generatedPassword || '' },
+      headers: internalHeaders,
     });
 
     if (!signInResult?.token) {
@@ -144,12 +145,16 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       .set({ generatedPassword: newPassword, updatedAt: new Date() })
       .where(eq(guestUser.id, id));
 
-    const loginUrl = `${appUrl}/guest-login?token=${encodeURIComponent(ottResult.token)}`;
+    const loginUrl = `${APP_URL}/guest-login?token=${encodeURIComponent(ottResult.token)}`;
     return NextResponse.json({ loginUrl, expiresIn: '10 minutes' });
   } catch (error) {
-    console.error('Error regenerating guest login token:', error);
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('Error regenerating guest login token:', message, error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      {
+        error: 'Internal server error',
+        ...(process.env.NODE_ENV !== 'production' && { detail: message }),
+      },
       { status: 500 }
     );
   }
