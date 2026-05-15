@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { revalidateTag } from 'next/cache';
 import { validateGuestApiKey } from '@/lib/guest-api-auth';
 import { GUEST_USERS_CACHE_TAG } from '../../cache-tags';
-import { ORGANIZATIONS_CACHE_TAG } from '@/lib/auth-dynamic';
+import { ORGANIZATIONS_CACHE_TAG, APP_URL } from '@/lib/auth-dynamic';
 
 export const dynamic = 'force-dynamic';
 
@@ -99,25 +99,42 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     const auth = await getAuthInstance();
-    const appUrl = process.env.BETTER_AUTH_URL || 'http://localhost:3000';
+    const internalHeaders = new Headers({ origin: APP_URL });
 
-    // Sign in with current credentials to get a session
-    const signInResult = await auth.api.signInEmail({
+    // Use asResponse:true to capture the actual signed+prefixed session cookie.
+    // In production the cookie name is __Secure-better-auth.session_token and the value
+    // is HMAC-signed, so we must forward it verbatim rather than constructing it manually.
+    const signInResponse = await (auth.api.signInEmail as (opts: unknown) => Promise<Response>)({
       body: { email: guest.generatedEmail, password: guest.generatedPassword || '' },
+      headers: internalHeaders,
+      asResponse: true,
     });
 
-    if (!signInResult?.token) {
+    if (!signInResponse.ok) {
       return NextResponse.json(
         { error: 'Failed to create session for guest user' },
         { status: 500 }
       );
     }
 
-    const sessionCookie = `better-auth.session_token=${signInResult.token}`;
+    // Extract Set-Cookie values and forward as Cookie request header
+    const setCookies: string[] =
+      typeof (signInResponse.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie === 'function'
+        ? (signInResponse.headers as Headers & { getSetCookie: () => string[] }).getSetCookie()
+        : (signInResponse.headers.get('set-cookie') ?? '').split(/,(?=[^ ;][^;]*=)/).map((s) => s.trim());
+
+    const cookieHeader = setCookies.map((c) => c.split(';')[0].trim()).filter(Boolean).join('; ');
+
+    if (!cookieHeader) {
+      return NextResponse.json(
+        { error: 'Failed to get session cookie for guest user' },
+        { status: 500 }
+      );
+    }
 
     // Mint the OTT first — it's stored independently and won't be affected by password rotation
     const ottResult = await auth.api.generateOneTimeToken({
-      headers: new Headers({ cookie: sessionCookie }),
+      headers: new Headers({ cookie: cookieHeader, origin: APP_URL }),
     });
     if (!ottResult?.token) {
       return NextResponse.json(
@@ -135,7 +152,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         newPassword,
         revokeOtherSessions: true,
       },
-      headers: new Headers({ cookie: sessionCookie }),
+      headers: new Headers({ cookie: cookieHeader, origin: APP_URL }),
     });
 
     // Persist new password so future regenerations still work
@@ -144,7 +161,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       .set({ generatedPassword: newPassword, updatedAt: new Date() })
       .where(eq(guestUser.id, id));
 
-    const loginUrl = `${appUrl}/guest-login?token=${encodeURIComponent(ottResult.token)}`;
+    const loginUrl = `${APP_URL}/guest-login?token=${encodeURIComponent(ottResult.token)}`;
     return NextResponse.json({ loginUrl, expiresIn: '10 minutes' });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

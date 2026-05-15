@@ -3,7 +3,7 @@ import { unstable_cache, revalidateTag } from 'next/cache';
 import { nanoid } from 'nanoid';
 import { validateGuestApiKey } from '@/lib/guest-api-auth';
 import { GUEST_USERS_CACHE_TAG } from '../cache-tags';
-import { ORGANIZATIONS_CACHE_TAG } from '@/lib/auth-dynamic';
+import { ORGANIZATIONS_CACHE_TAG, APP_URL } from '@/lib/auth-dynamic';
 
 export const dynamic = 'force-dynamic';
 
@@ -198,27 +198,44 @@ export async function POST(request: NextRequest) {
     // Generate a one-time token for secure login (single-use, expires in 10 min).
     // signUpEmail called server-side doesn't return a session token, so we explicitly
     // sign in to obtain one, then use it to generate the OTT.
-    const appUrl = process.env.BETTER_AUTH_URL || 'http://localhost:3000';
+    const internalHeaders = new Headers({ origin: APP_URL });
 
-    const signInResult = await auth.api.signInEmail({
+    // Use asResponse:true to capture the actual signed+prefixed session cookie.
+    // In production the cookie name is __Secure-better-auth.session_token and the value
+    // is HMAC-signed, so we must forward it verbatim rather than constructing it manually.
+    const signInResponse = await (auth.api.signInEmail as (opts: unknown) => Promise<Response>)({
       body: {
         email: generatedEmail,
         password: generatedPassword,
       },
+      headers: internalHeaders,
+      asResponse: true,
     });
 
-    const sessionToken = signInResult?.token;
-    if (!sessionToken) {
+    if (!signInResponse.ok) {
       return NextResponse.json(
-        { error: 'Guest user created but failed to obtain session token for login link generation' },
+        { error: 'Guest user created but failed to sign in for login link generation' },
+        { status: 500 }
+      );
+    }
+
+    // Extract Set-Cookie values and forward as Cookie request header
+    const setCookies: string[] =
+      typeof (signInResponse.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie === 'function'
+        ? (signInResponse.headers as Headers & { getSetCookie: () => string[] }).getSetCookie()
+        : (signInResponse.headers.get('set-cookie') ?? '').split(/,(?=[^ ;][^;]*=)/).map((s) => s.trim());
+
+    const cookieHeader = setCookies.map((c) => c.split(';')[0].trim()).filter(Boolean).join('; ');
+
+    if (!cookieHeader) {
+      return NextResponse.json(
+        { error: 'Guest user created but no session cookie returned from sign-in' },
         { status: 500 }
       );
     }
 
     const ottResult = await auth.api.generateOneTimeToken({
-      headers: new Headers({
-        cookie: `better-auth.session_token=${sessionToken}`,
-      }),
+      headers: new Headers({ cookie: cookieHeader, origin: APP_URL }),
     });
 
     const oneTimeTokenValue = ottResult?.token;
@@ -229,7 +246,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const loginUrl = `${appUrl}/guest-login?token=${encodeURIComponent(oneTimeTokenValue)}`;
+    const loginUrl = `${APP_URL}/guest-login?token=${encodeURIComponent(oneTimeTokenValue)}`;
 
     revalidateTag(GUEST_USERS_CACHE_TAG);
     revalidateTag(ORGANIZATIONS_CACHE_TAG);
