@@ -195,56 +195,44 @@ export async function POST(request: NextRequest) {
       updatedAt: new Date(),
     });
 
-    // Generate a one-time token for secure login (single-use, expires in 10 min).
-    // signUpEmail called server-side doesn't return a session token, so we explicitly
-    // sign in to obtain one, then use it to generate the OTT.
+    // Sign in to create a session, then mint an OTT by writing directly to the
+    // verification table — mirroring exactly what better-auth's oneTimeToken plugin
+    // does internally (storeToken:"hashed", SHA-256 + base64url).
     const internalHeaders = new Headers({ origin: APP_URL });
-
-    // Use asResponse:true to capture the actual signed+prefixed session cookie.
-    // In production the cookie name is __Secure-better-auth.session_token and the value
-    // is HMAC-signed, so we must forward it verbatim rather than constructing it manually.
-    const signInResponse = await (auth.api.signInEmail as (opts: unknown) => Promise<Response>)({
-      body: {
-        email: generatedEmail,
-        password: generatedPassword,
-      },
+    const signInResult = await auth.api.signInEmail({
+      body: { email: generatedEmail, password: generatedPassword },
       headers: internalHeaders,
-      asResponse: true,
     });
 
-    if (!signInResponse.ok) {
+    const sessionToken = signInResult?.token;
+    if (!sessionToken) {
       return NextResponse.json(
-        { error: 'Guest user created but failed to sign in for login link generation' },
+        { error: 'Guest user created but failed to obtain session for login link generation' },
         { status: 500 }
       );
     }
 
-    // Extract Set-Cookie values and forward as Cookie request header
-    const setCookies: string[] =
-      typeof (signInResponse.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie === 'function'
-        ? (signInResponse.headers as Headers & { getSetCookie: () => string[] }).getSetCookie()
-        : (signInResponse.headers.get('set-cookie') ?? '').split(/,(?=[^ ;][^;]*=)/).map((s) => s.trim());
+    // Replicate oneTimeToken plugin (storeToken:"hashed"): random token → SHA-256 → base64url
+    const { createHash } = await import('@better-auth/utils/hash');
+    const { base64Url } = await import('@better-auth/utils/base64');
+    const { verification } = await import('@/db/schema');
+    const ottRaw = nanoid(32);
+    const ottHash = base64Url.encode(
+      new Uint8Array(await createHash('SHA-256').digest(new TextEncoder().encode(ottRaw))),
+      { padding: false }
+    );
+    const ottExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 min, matching plugin default
 
-    const cookieHeader = setCookies.map((c) => c.split(';')[0].trim()).filter(Boolean).join('; ');
-
-    if (!cookieHeader) {
-      return NextResponse.json(
-        { error: 'Guest user created but no session cookie returned from sign-in' },
-        { status: 500 }
-      );
-    }
-
-    const ottResult = await auth.api.generateOneTimeToken({
-      headers: new Headers({ cookie: cookieHeader, origin: APP_URL }),
+    await db.insert(verification).values({
+      id: nanoid(),
+      identifier: `one-time-token:${ottHash}`,
+      value: sessionToken,
+      expiresAt: ottExpiresAt,
+      createdAt: new Date(),
+      updatedAt: new Date(),
     });
 
-    const oneTimeTokenValue = ottResult?.token;
-    if (!oneTimeTokenValue) {
-      return NextResponse.json(
-        { error: 'Guest user created but failed to generate one-time login token' },
-        { status: 500 }
-      );
-    }
+    const oneTimeTokenValue = ottRaw;
 
     const loginUrl = `${APP_URL}/guest-login?token=${encodeURIComponent(oneTimeTokenValue)}`;
 

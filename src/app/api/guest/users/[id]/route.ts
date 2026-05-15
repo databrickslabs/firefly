@@ -76,6 +76,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const { eq } = await import('drizzle-orm');
     const { getAuthInstance } = await import('@/lib/auth-dynamic');
     const { nanoid } = await import('nanoid');
+    const { and, ne } = await import('drizzle-orm');
 
     // Find the guest record
     const [guest] = await db
@@ -101,67 +102,47 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const auth = await getAuthInstance();
     const internalHeaders = new Headers({ origin: APP_URL });
 
-    // Use asResponse:true to capture the actual signed+prefixed session cookie.
-    // In production the cookie name is __Secure-better-auth.session_token and the value
-    // is HMAC-signed, so we must forward it verbatim rather than constructing it manually.
-    const signInResponse = await (auth.api.signInEmail as (opts: unknown) => Promise<Response>)({
+    // Sign in to create a fresh session, then mint an OTT by writing directly to the
+    // verification table — mirroring exactly what better-auth's oneTimeToken plugin does
+    // internally (storeToken:"hashed", SHA-256 + base64url).
+    const signInResult = await auth.api.signInEmail({
       body: { email: guest.generatedEmail, password: guest.generatedPassword || '' },
       headers: internalHeaders,
-      asResponse: true,
     });
 
-    if (!signInResponse.ok) {
+    if (!signInResult?.token) {
       return NextResponse.json(
         { error: 'Failed to create session for guest user' },
         { status: 500 }
       );
     }
 
-    // Extract Set-Cookie values and forward as Cookie request header
-    const setCookies: string[] =
-      typeof (signInResponse.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie === 'function'
-        ? (signInResponse.headers as Headers & { getSetCookie: () => string[] }).getSetCookie()
-        : (signInResponse.headers.get('set-cookie') ?? '').split(/,(?=[^ ;][^;]*=)/).map((s) => s.trim());
+    // Replicate oneTimeToken plugin (storeToken:"hashed"): random token → SHA-256 → base64url
+    const { createHash } = await import('@better-auth/utils/hash');
+    const { base64Url } = await import('@better-auth/utils/base64');
+    const { verification, session: sessionTable } = await import('@/db/schema');
+    const ottRaw = nanoid(32);
+    const ottHash = base64Url.encode(
+      new Uint8Array(await createHash('SHA-256').digest(new TextEncoder().encode(ottRaw))),
+      { padding: false }
+    );
 
-    const cookieHeader = setCookies.map((c) => c.split(';')[0].trim()).filter(Boolean).join('; ');
+    // Revoke all previous browser sessions for this guest (they must re-enter via the new OTT)
+    await db.delete(sessionTable).where(
+      and(eq(sessionTable.userId, guest.userId), ne(sessionTable.token, signInResult.token))
+    );
 
-    if (!cookieHeader) {
-      return NextResponse.json(
-        { error: 'Failed to get session cookie for guest user' },
-        { status: 500 }
-      );
-    }
-
-    // Mint the OTT first — it's stored independently and won't be affected by password rotation
-    const ottResult = await auth.api.generateOneTimeToken({
-      headers: new Headers({ cookie: cookieHeader, origin: APP_URL }),
-    });
-    if (!ottResult?.token) {
-      return NextResponse.json(
-        { error: 'Failed to generate one-time login token' },
-        { status: 500 }
-      );
-    }
-
-    // Rotate the password so any previous email/password URLs are immediately invalidated,
-    // and revoke all existing sessions (guest will re-enter via the new OTT)
-    const newPassword = nanoid(24);
-    await auth.api.changePassword({
-      body: {
-        currentPassword: guest.generatedPassword || '',
-        newPassword,
-        revokeOtherSessions: true,
-      },
-      headers: new Headers({ cookie: cookieHeader, origin: APP_URL }),
+    // Mint the OTT
+    await db.insert(verification).values({
+      id: nanoid(),
+      identifier: `one-time-token:${ottHash}`,
+      value: signInResult.token,
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+      createdAt: new Date(),
+      updatedAt: new Date(),
     });
 
-    // Persist new password so future regenerations still work
-    await db
-      .update(guestUser)
-      .set({ generatedPassword: newPassword, updatedAt: new Date() })
-      .where(eq(guestUser.id, id));
-
-    const loginUrl = `${APP_URL}/guest-login?token=${encodeURIComponent(ottResult.token)}`;
+    const loginUrl = `${APP_URL}/guest-login?token=${encodeURIComponent(ottRaw)}`;
     return NextResponse.json({ loginUrl, expiresIn: '10 minutes' });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
