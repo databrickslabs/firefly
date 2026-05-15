@@ -167,7 +167,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const message = error instanceof Error ? error.message : String(error);
     console.error('Error regenerating guest login token:', message, error);
     return NextResponse.json(
-      { error: 'Internal server error', detail: message },
+      {
+        error: 'Internal server error',
+        ...(process.env.NODE_ENV !== 'production' && { detail: message }),
+      },
       { status: 500 }
     );
   }

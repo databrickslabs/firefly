@@ -3,6 +3,8 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { organization, genericOAuth, admin, okta, jwt } from "better-auth/plugins";
 import { oneTimeToken } from "better-auth/plugins/one-time-token";
 import { db } from "@/db";
+
+export const APP_URL = process.env.BETTER_AUTH_URL || "http://localhost:3000";
 import * as schema from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { decodeJwt } from "jose";
