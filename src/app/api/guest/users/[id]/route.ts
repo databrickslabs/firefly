@@ -100,10 +100,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const auth = await getAuthInstance();
     const appUrl = process.env.BETTER_AUTH_URL || 'http://localhost:3000';
+    const internalHeaders = new Headers({ origin: appUrl });
 
     // Sign in with current credentials to get a session
     const signInResult = await auth.api.signInEmail({
       body: { email: guest.generatedEmail, password: guest.generatedPassword || '' },
+      headers: internalHeaders,
     });
 
     if (!signInResult?.token) {
@@ -147,9 +149,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const loginUrl = `${appUrl}/guest-login?token=${encodeURIComponent(ottResult.token)}`;
     return NextResponse.json({ loginUrl, expiresIn: '10 minutes' });
   } catch (error) {
-    console.error('Error regenerating guest login token:', error);
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('Error regenerating guest login token:', message, error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error', detail: message },
       { status: 500 }
     );
   }

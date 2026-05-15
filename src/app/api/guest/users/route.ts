@@ -199,12 +199,14 @@ export async function POST(request: NextRequest) {
     // signUpEmail called server-side doesn't return a session token, so we explicitly
     // sign in to obtain one, then use it to generate the OTT.
     const appUrl = process.env.BETTER_AUTH_URL || 'http://localhost:3000';
+    const internalHeaders = new Headers({ origin: appUrl });
 
     const signInResult = await auth.api.signInEmail({
       body: {
         email: generatedEmail,
         password: generatedPassword,
       },
+      headers: internalHeaders,
     });
 
     const sessionToken = signInResult?.token;
@@ -250,9 +252,10 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
   } catch (error) {
-    console.error('Error creating guest user:', error);
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('Error creating guest user:', message, error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error', detail: message },
       { status: 500 }
     );
   }
