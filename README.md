@@ -239,6 +239,22 @@ tables, catalogs, dashboards, or "my data".
 > than reading `GENIE_MCP_URL`, so that env var only feeds the attribution-link
 > fallback today.
 
+### Grant the agent's service principal access to your data
+
+The agent queries Genie One as the **agent App's service principal** (see above), not
+the signed-in user. Genie only returns Unity Catalog data that this service principal can
+access, so on a workspace where the SP has no grants, data questions come back empty even
+though the agent and Genie are otherwise working. Grant the app's service principal access
+to the catalogs/schemas you want it to answer over:
+
+- `USE CATALOG` on the catalog and `USE SCHEMA` on the schema,
+- `SELECT` on the tables (or on the schema), and
+- access to a SQL warehouse Genie can execute against.
+
+<!-- UNVERIFIED: the exact minimal privilege set — and whether Genie One requires an
+explicit SQL-warehouse grant for the service principal — has not yet been confirmed on a
+clean workspace. -->
+
 ### How it differs from the Go proxy
 
 Unlike the VSCode/notebook editors (which use the Go proxy), the agent is embedded
