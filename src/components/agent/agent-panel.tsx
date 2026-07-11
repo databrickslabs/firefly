@@ -13,9 +13,10 @@ import { useAgentPanelStore } from "@/stores/agent-panel-store";
 // is needed — the route resolves the org + token from the session cookie.
 const AGENT_ENABLED =
   process.env.NEXT_PUBLIC_AGENT_ENABLED?.trim().toLowerCase() === "true";
-// Trailing slash matters: the app is built with base:"./", so relative assets
-// resolve under /api/agent-proxy/ instead of the site root.
-const AGENT_PROXY_SRC = "/api/agent-proxy/";
+// No trailing slash: Next strips it (308), so point straight at the mount. The
+// proxy injects <base href="/api/agent-proxy/"> into the HTML so the app's
+// relative assets resolve under the mount regardless.
+const AGENT_PROXY_SRC = "/api/agent-proxy";
 
 function agentPanelEnabled() {
   return AGENT_ENABLED;

@@ -36,6 +36,9 @@
     ".next-test/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "agent",
+    "agent-build",
+    "vendor"
   ]
 }
