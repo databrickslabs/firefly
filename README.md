@@ -272,19 +272,48 @@ The deployable app is assembled from the pristine submodule plus the local overl
 in `agent/` (agent code, chat-UI patches, bundle config):
 
 ```bash
-# Fetch the submodule (first time only)
+# Fetch the submodule (first time only) — pulls vendor/app-templates
 git submodule update --init
 
-# Merge vendor submodule + agent/ overlay into ./agent-build (gitignored)
+# Merge vendor submodule + agent/ overlay into ./agent-build (gitignored).
+# The script also runs a local-only `git init` on agent-build so the bundle
+# picks it up (the parent repo gitignores agent-build/, and `databricks bundle`
+# respects the enclosing repo's ignore rules — without its own git boundary the
+# sync would find "no files to sync" and deploy an empty app).
 bash scripts/assemble_agent.sh
 
-# Deploy the assembled app as a Databricks App bundle
 cd agent-build
-databricks bundle deploy
-databricks bundle run
+
+# Validate first. A healthy bundle reports 0 "no files to sync" warnings; if you
+# see that warning, agent-build is missing its git boundary (re-run the script).
+databricks bundle validate -p <your-cli-profile>
+
+# Deploy + start the Databricks App
+databricks bundle deploy -p <your-cli-profile>
+databricks bundle run    -p <your-cli-profile>
 ```
 
 Then point `DATABRICKS_AGENT_APP_URL` at the deployed app URL.
+
+**Operational notes**
+
+- **First request returns HTTP 503.** After `bundle run`, the container runs
+  `uv sync`, `npm install`, and the Vite build for the chat UI before it serves
+  traffic. Poll the app URL until it returns `200` (can take a few minutes) —
+  the 503 is normal, not a failure.
+- **Pin Python 3.12 for the build.** The agent's dependency tree (`whenever` via
+  `databricks-agents`) uses PyO3 capped at 3.13, so `uv` picking 3.14 fails.
+  Databricks App runtimes are 3.12; build/sync with 3.12 to match.
+- **Verify the overlay applied** before deploying (quick sanity check):
+  `agent-build/agent_server/agent.py` contains `GENIE_INSTRUCTIONS`,
+  `e2e-chatbot-app-next/client/vite.config.ts` has `base: "./"`, and
+  `client/src/main.tsx` contains `__FIREFLY_PROXY_BASENAME__`.
+- **Genie/memory config lives in the bundle**, not the frontend — see
+  `agent/databricks.yml` (`GENIE_MCP_MODE`, `GENIE_ONE_URL`,
+  `DATABRICKS_MEMORY_STORE`, etc.).
+
+Re-run `bash scripts/assemble_agent.sh` after any change under `agent/` (overlay)
+or a submodule bump; it rebuilds `agent-build/` from scratch each time.
 
 ## Local Development
 
