@@ -23,6 +23,21 @@ A Next.js application that provides a customized frontend for Databricks with mu
 - Go 1.21+ (for the proxy server)
 - Vercel account (for deployment)
 
+> **Installing pnpm.** Node ships pnpm via `corepack`, but `corepack enable` /
+> `corepack prepare` fetch the pnpm release from `registry.npmjs.org` on first use —
+> which is blocked on some corporate networks (you'll see `ECONNREFUSED` /
+> `ETIMEDOUT` to `registry.npmjs.org`, and the `pnpm` shim never actually works).
+> If corepack is blocked, install pnpm directly from your approved npm registry
+> instead:
+>
+> ```bash
+> npm install -g pnpm     # uses your configured (approved) npm registry, not corepack
+> pnpm --version          # confirm it runs
+> ```
+>
+> On macOS, `brew install pnpm` is another approved-CDN option. Do **not** work
+> around the block with `--registry https://registry.npmjs.org` or by disabling TLS.
+
 ## Environment Setup
 
 ### 1. Copy Environment Variables
@@ -228,8 +243,8 @@ frontend `.env.local`):
 | Env var | Purpose |
 | --- | --- |
 | `GENIE_MCP_MODE=one` | Use Genie One (workspace-wide) rather than a specific space |
-| `GENIE_ONE_URL` | The "Powered by Genie · Genie One" attribution link (surfaced to the UI via `/api/config`) |
-| `DATABRICKS_HOST`, `DATABRICKS_WORKSPACE_ID` | Fallback used to derive `/one?o=<id>` when `GENIE_ONE_URL` is unset |
+| `DATABRICKS_HOST`, `DATABRICKS_WORKSPACE_ID` | **Auto-injected** by the Databricks Apps runtime — never set in the bundle. The frontend `/api/config` composes the "Powered by Genie · Genie One" attribution link from them as `${DATABRICKS_HOST}/one?o=${DATABRICKS_WORKSPACE_ID}` |
+| `GENIE_ONE_URL` | *Optional* override for the attribution link. Leave **unset**: it is derived from the two auto-injected vars above, so there is nothing to hand-edit per workspace (see "Derive — don't store" in `agent/databricks.yml`) |
 
 The `GENIE_INSTRUCTIONS` prompt (composed onto the agent's memory instructions in
 `agent/agent_server/agent.py`) forces Genie-first behavior for any question about
@@ -250,6 +265,14 @@ to the catalogs/schemas you want it to answer over:
 - `USE CATALOG` on the catalog and `USE SCHEMA` on the schema,
 - `SELECT` on the tables (or on the schema), and
 - access to a SQL warehouse Genie can execute against.
+
+> **A fresh workspace has no data and no running warehouse — Genie will answer
+> "empty" until you provide both.** This repo ships no dataset. Before the first
+> demo, start a (serverless) SQL warehouse and create at least one UC schema with a
+> few tables (copy a slice from the built-in `samples` catalog or generate synthetic
+> rows), then apply the grants above to the app's SP. Without seeded data + a
+> warehouse the Agent panel looks broken even though the agent, Genie, and memory
+> are all working.
 
 <!-- UNVERIFIED: the exact minimal privilege set — and whether Genie One requires an
 explicit SQL-warehouse grant for the service principal — has not yet been confirmed on a
@@ -293,43 +316,68 @@ code/notebook editors.
 **must exist before `databricks bundle deploy`**:
 
 - an **MLflow experiment** (agent tracing),
-- a **Lakebase (Databricks Postgres)** autoscaling instance (managed-memory store),
-- a **UC volume** `main.default.firefly_wheels` (the bundle grants the app
-  `READ_VOLUME` on it).
+- a **Lakebase (Databricks Postgres)** autoscaling instance — backs the frontend's
+  chat persistence (`ai_chatbot` schema) and the OpenAI Agents SDK session store.
+  This is **not** the durable-memory store (see below); the two are often confused.
+- a **UC volume** — default `workspace.default.firefly_wheels` (the bundle grants the
+  app `READ_VOLUME` on it). The catalog/schema/name are bundle variables
+  (`catalog`/`schema`/`wheels_volume_name`), so on a workspace whose catalog is
+  `main` you pass `--var catalog=main` instead of editing the YAML.
+
+A fourth resource — the **UC memory store** for durable cross-session memory — is
+created *after* the app exists (it needs the app SP for its grant), so it is not in
+this pre-deploy list; see "Deploy → run → enable memory" below. It is a distinct UC
+securable (`DATABRICKS_MEMORY_STORE`, default `workspace.default.firefly_managed_memory`),
+**not** the Lakebase instance above.
 
 For a fresh workspace, create them as follows.
 
-**1. Experiment + Lakebase (one command).** From `agent-build/` (run
-`bash scripts/assemble_agent.sh` first so the directory exists):
+**1. Experiment + Lakebase (one command).** First fetch the submodule and assemble
+`agent-build/` (both are prerequisites of this step, even though the full build is
+documented later):
 
 ```bash
+git submodule update --init          # empty on a fresh clone; assemble fails without it
+bash scripts/assemble_agent.sh
 cd agent-build
 
 # Creates the MLflow experiment AND a new autoscaling Lakebase project+branch in
 # one pass, and writes their IDs into agent-build/databricks.yml + .env.
-# <lakebase-name> must be new/unique (this path has no reuse — a name that already
-# exists errors out). Use lowercase alphanumerics + hyphens.
-uv run quickstart --profile <your-cli-profile> --lakebase-create-new <lakebase-name>
+# --python 3.12 is REQUIRED: the dep tree (whenever/PyO3) caps at 3.13, so a bare
+# `uv run` that picks 3.14 fails to build. <lakebase-name> must be new/unique
+# (no reuse — an existing name errors). Use lowercase alphanumerics + hyphens.
+uv run --python 3.12 quickstart --profile <your-cli-profile> --lakebase-create-new <lakebase-name>
 ```
 
-**2. Wheels volume.** Create the UC volume the bundle grants read on:
+> **Do not re-run `assemble_agent.sh` after `quickstart` in a single deploy pass.**
+> Assemble does `rm -rf agent-build`, which wipes the `.env` (Lakebase creds) and
+> the resource IDs quickstart just wrote — and the SP-grant step below reads that
+> `.env`. Order that avoids the trap: assemble once → quickstart → (mirror IDs to the
+> overlay) → vendor → deploy. If you must re-assemble, first copy the quickstart IDs
+> into the tracked overlay `agent/databricks.yml` (next note).
+
+**2. Wheels volume.** Create the UC volume the bundle grants read on (matches the
+`catalog`/`schema`/`wheels_volume_name` bundle-variable defaults):
 
 ```bash
-databricks volumes create main default firefly_wheels MANAGED -p <your-cli-profile>
+databricks volumes create workspace default firefly_wheels MANAGED -p <your-cli-profile>
 ```
 
-> **The volume must _exist_; its contents are not read in the default path.** The
-> app installs dependencies online (`uv sync` / `npm install`) at container start
-> and `vendor-wheels/**` is excluded from sync, so an empty volume satisfies the
-> `READ_VOLUME` grant. <!-- UNVERIFIED: that an empty volume is sufficient (and that
-> deploy fails without it) is inferred, not yet proven by a negative deploy test. -->
+> **The volume must _exist_ for the resource binding; the build reads wheels from
+> synced source, not the volume.** UC volumes are **not mounted during the Apps
+> build**, so dependencies install from the pre-vendored `vendor-wheels/` directory
+> (synced with the source) via `UV_FIND_LINKS` — see "Vendor the build wheels"
+> below. An empty volume satisfies the `READ_VOLUME` grant.
 
-> **Copy the generated IDs into the tracked overlay.** `quickstart` writes the new
-> `experiment_id` and `postgres` (`branch`/`database`) into **`agent-build/databricks.yml`**,
-> which is gitignored and rebuilt from scratch by `scripts/assemble_agent.sh`. Copy
-> those values into the tracked overlay **`agent/databricks.yml`**, or they are lost
-> on the next assemble. Also re-point the hard-coded `DATABRICKS_HOST`,
-> `DATABRICKS_WORKSPACE_ID`, and `GENIE_ONE_URL` for the target workspace.
+> **Copy only the quickstart-managed IDs into the tracked overlay.** `quickstart`
+> writes the new `experiment_id` and `postgres` (`branch`/`database`) into
+> **`agent-build/databricks.yml`**, which is gitignored and rebuilt from scratch by
+> `scripts/assemble_agent.sh`. Copy those two resource blocks into the tracked overlay
+> **`agent/databricks.yml`**, or they are lost on the next assemble. You do **not**
+> edit `DATABRICKS_HOST`, `DATABRICKS_WORKSPACE_ID`, or `GENIE_ONE_URL` any more —
+> they are auto-injected/derived at runtime (see "Derive — don't store"). And you do
+> **not** edit the memory-store / wheels-volume namespace unless overriding the
+> `workspace.default` default via `--var`.
 
 ### Build & deploy the agent app
 
@@ -349,35 +397,65 @@ bash scripts/assemble_agent.sh
 
 cd agent-build
 
+# Vendor the build wheels (once, before deploy). Pre-fetches linux/cp311 wheels
+# into vendor-wheels/ so the Apps build installs offline via UV_FIND_LINKS and
+# never depends on the build container's PyPI egress (a dead .dev proxy, a lagging
+# .cloud mirror, and no offline fallback are what made online installs flaky and
+# blow past the 10-min startup limit). Requires local `uv` + `pip`.
+bash scripts/vendor_wheels.sh
+
 # Validate first. A healthy bundle reports 0 "no files to sync" warnings; if you
 # see that warning, agent-build is missing its git boundary (re-run the script).
 databricks bundle validate -p <your-cli-profile>
 
-# Deploy + start the Databricks App. `bundle run` requires the app resource
-# KEY (agent_openai_agents_sdk, from databricks.yml) — without it the CLI errors
-# with "expected a KEY of the resource to run".
-databricks bundle deploy -p <your-cli-profile>
-databricks bundle run agent_openai_agents_sdk -p <your-cli-profile>
+# Deploy: one command does deploy -> run -> enable-memory (see below).
+# On a non-default catalog, pass it through: ... <profile> --var catalog=main
+bash scripts/deploy_agent.sh <your-cli-profile>
 ```
+
+> **On a non-default namespace** (e.g. a workspace whose catalog is `main`), append
+> `--var catalog=main` (and/or `--var schema=...`) to `deploy_agent.sh` (it forwards
+> them to every `bundle` command) so the wheels-volume binding and
+> `DATABRICKS_MEMORY_STORE` line up. You can also set `BUNDLE_VAR_catalog=main`.
 
 Then point `DATABRICKS_AGENT_APP_URL` at the deployed app URL.
 
-**Grant the app's service principal Lakebase access (required for memory).** After
-the first successful deploy, the app's SP is a bare Postgres role with no rights to
-its memory tables — memory reads/writes fail until you grant them. From `agent-build/`:
+#### Deploy → run → enable memory
+
+`scripts/deploy_agent.sh` runs three steps; here is what it does by hand, and why:
 
 ```bash
-# The app's SP client ID comes from the deployed app:
-SP=$(databricks apps get <your-app-name> -p <your-cli-profile> --output json | jq -r '.service_principal_client_id')
+# From agent-build/:
+databricks bundle deploy -p <your-cli-profile>          # create app + SP, upload source
+databricks bundle run agent_openai_agents_sdk -p <your-cli-profile>   # build + start
 
-# memory-type is "openai" for this template (agent-openai-agents-sdk). Lakebase
-# connection defaults are read from the .env quickstart wrote.
-uv run python scripts/grant_lakebase_permissions.py "$SP" --memory-type openai
+# Resolve the SP (exists after create) and enable durable memory:
+SP=$(databricks apps get <your-app-name> -p <your-cli-profile> \
+       --output json | jq -r '.service_principal_client_id')
+uv run --python 3.12 python scripts/setup_memory_store.py "$SP" --profile <your-cli-profile>
 ```
 
-> Some grants may warn "table does not exist" on a fresh branch — that is expected;
-> the memory tables are created on first agent use. Re-run the same command once
-> after the agent's first request to grant the remaining tables.
+**No manual Lakebase grant is required for the app to come up.** The frontend *does*
+run Drizzle DB migrations during its first build, but the bundle binds the
+Postgres/Lakebase resource with `CAN_CONNECT_AND_CREATE` (`agent/databricks.yml`),
+applied at `bundle deploy`. That binding auto-provisions the app SP's Postgres login
+role, so the migrations connect as the SP, `CREATE` their own schema/tables (the SP
+becomes **owner** → full DML), and succeed. A no-grant deploy comes up `RUNNING` with
+`ai_chatbot.{Chat,Message,Vote}` present and owned by the SP — verified end-to-end.
+(`scripts/grant_lakebase_permissions.py` exists for a *different* topology — a
+Lakebase-backed session/checkpoint store — and is **not** needed here; this app's
+managed memory is a UC memory store, below.)
+
+**Durable memory is a Unity Catalog memory store — you MUST create it and grant the
+SP.** The `save_memory`/`get_memory` tools call the UC memory-store API
+(`/api/2.1/unity-catalog/memory-stores/<catalog.schema.name>/entries`), not Lakebase.
+That store is **not** created by quickstart or the bundle, and the app SP has no
+rights on it by default, so a fresh deploy answers but silently fails to persist
+("memory store not found", then "does not have READ/WRITE MEMORY STORE"). The last
+line above fixes both — it creates `DATABRICKS_MEMORY_STORE` (default
+`workspace.default.firefly_managed_memory`) and grants the SP
+`READ_MEMORY_STORE`+`WRITE_MEMORY_STORE`. It is idempotent. There is no `databricks`
+CLI for memory stores (CLI v0.298.0); the script uses the REST API via the SDK.
 
 **Operational notes**
 
@@ -385,19 +463,31 @@ uv run python scripts/grant_lakebase_permissions.py "$SP" --memory-type openai
   `uv sync`, `npm install`, and the Vite build for the chat UI before it serves
   traffic (can take a few minutes) — the 503 is normal, not a failure. Note the
   app is behind Databricks app auth, so an unauthenticated request 302-redirects
-  to OIDC rather than returning `200`. To confirm readiness, check
-  `databricks apps get <app-name> -p <your-cli-profile>` and wait for the status
-  to be RUNNING.
-- **Pin Python 3.12 for the build.** The agent's dependency tree (`whenever` via
-  `databricks-agents`) uses PyO3 capped at 3.13, so `uv` picking 3.14 fails.
-  Databricks App runtimes are 3.12; build/sync with 3.12 to match.
+  to OIDC rather than returning `200`.
+- **Deploy state ≠ health; read the *live* app state.** The platform marks the
+  deployment `SUCCEEDED` the moment the container command *starts* — before the
+  build finishes or the port binds (observed: `SUCCEEDED` ~45s before the backend
+  bound `:8000`). So `active_deployment.status.state` is always green and is not a
+  health signal. Judge health from the **live `app_status.state`** (`RUNNING`) or
+  the **runtime logs** — wait for `Both frontend and backend are ready!`.
+  `start_app.py` builds the frontend *before* the backend binds the port, so a
+  frontend/migration failure takes the whole container down (honest `app_status`)
+  rather than leaving the backend serving behind a broken UI.
+- **Two different Python versions are in play.** `uv run quickstart` runs locally
+  and needs **3.12** (its dependency tree uses PyO3 capped at 3.13, so `uv` picking
+  3.14 fails — pass `--python 3.12`). The **Apps runtime is 3.11 (cp311)**, not 3.12
+  as older docs claimed, so `scripts/vendor_wheels.sh` pins `PY=3.11` and downloads
+  cp311 wheels. If you regenerate `uv.lock`, make sure the configured PyPI proxy is
+  `pypi-proxy.cloud.databricks.com` (the `.dev` host is dead and stamping it into
+  the lock is what caused the original install timeouts).
 - **Verify the overlay applied** before deploying (quick sanity check):
   `agent-build/agent_server/agent.py` contains `GENIE_INSTRUCTIONS`,
   `e2e-chatbot-app-next/client/vite.config.ts` has `base: "./"`, and
   `client/src/main.tsx` contains `__FIREFLY_PROXY_BASENAME__`.
 - **Genie/memory config lives in the bundle**, not the frontend — see
-  `agent/databricks.yml` (`GENIE_MCP_MODE`, `GENIE_ONE_URL`,
-  `DATABRICKS_MEMORY_STORE`, etc.).
+  `agent/databricks.yml` (`GENIE_MCP_MODE`, and `DATABRICKS_MEMORY_STORE` built
+  from the `catalog`/`schema` bundle variables). `GENIE_ONE_URL`/`DATABRICKS_HOST`/
+  `DATABRICKS_WORKSPACE_ID` are intentionally absent (derived at runtime).
 
 Re-run `bash scripts/assemble_agent.sh` after any change under `agent/` (overlay)
 or a submodule bump; it rebuilds `agent-build/` from scratch each time.

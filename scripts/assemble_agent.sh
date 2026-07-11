@@ -21,9 +21,9 @@ cp -R "$TEMPLATE"/. "$BUILD"/
 cp -R "$CHAT" "$BUILD"/e2e-chatbot-app-next
 # 3) overlay: our agent_server deltas (agent.py, utils.py, start_server.py, genie_tools.py, utils_memory.py)
 cp -R "$OVERLAY"/agent_server/. "$BUILD"/agent_server/
-# 4) overlay: bundle config + startup
+# 4) overlay: bundle config + startup/build scripts (start_app.py, vendor_wheels.sh, ...)
 [[ -f "$OVERLAY/databricks.yml" ]] && cp "$OVERLAY/databricks.yml" "$BUILD"/
-[[ -f "$OVERLAY/scripts/start_app.py" ]] && cp "$OVERLAY/scripts/start_app.py" "$BUILD"/scripts/
+[[ -d "$OVERLAY/scripts" ]] && cp -R "$OVERLAY"/scripts/. "$BUILD"/scripts/
 # 5) overlay: chat UI patches (Genie attribution, proxy-friendly tweaks)
 if [[ -d "$OVERLAY/patches/e2e-chatbot-app-next" ]]; then
   cp -R "$OVERLAY/patches/e2e-chatbot-app-next/." "$BUILD"/e2e-chatbot-app-next/

@@ -188,13 +188,13 @@ export default async function AgentPage() {
                   </tr>
                   <tr>
                     <td className="border border-gray-200 px-4 py-2"><code className="text-sm">GENIE_ONE_URL</code></td>
-                    <td className="border border-gray-200 px-4 py-2 text-sm">Agent App</td>
-                    <td className="border border-gray-200 px-4 py-2">Attribution link surfaced to the UI via <code>/api/config</code></td>
+                    <td className="border border-gray-200 px-4 py-2 text-sm">Derived</td>
+                    <td className="border border-gray-200 px-4 py-2">Attribution link (via <code>/api/config</code>), <strong>composed at runtime</strong> from the auto-injected <code>DATABRICKS_HOST</code> + <code>DATABRICKS_WORKSPACE_ID</code> — not set in the bundle</td>
                   </tr>
                   <tr>
                     <td className="border border-gray-200 px-4 py-2"><code className="text-sm">DATABRICKS_MEMORY_STORE</code></td>
                     <td className="border border-gray-200 px-4 py-2 text-sm">Agent App</td>
-                    <td className="border border-gray-200 px-4 py-2">Store identifier/namespace for the agent&apos;s managed memory (persisted via the app&apos;s managed-memory store; not a standalone UC table you create)</td>
+                    <td className="border border-gray-200 px-4 py-2">Fully-qualified name (<code>catalog.schema.name</code>) of the <strong>UC memory store</strong> backing durable cross-session memory. You <strong>must create this UC securable and grant the app SP <code>READ/WRITE_MEMORY_STORE</code></strong> after deploy (<code>scripts/setup_memory_store.py</code>) — it is not created by quickstart or the bundle, and is <strong>not</strong> the Lakebase instance. Without it, memory silently no-ops.</td>
                   </tr>
                 </tbody>
               </table>
@@ -218,12 +218,19 @@ bash scripts/assemble_agent.sh
 
 cd agent-build
 
-# Validate, then deploy + start the app. 'bundle run' requires the app resource
-# KEY (agent_openai_agents_sdk, from databricks.yml); without it the CLI errors
-# "expected a KEY of the resource to run".
+# Pre-vendor linux/cp311 wheels so the Apps build installs offline (UV_FIND_LINKS)
+# instead of depending on the build container's flaky PyPI egress.
+bash scripts/vendor_wheels.sh
+
+# Validate, then deploy. deploy_agent.sh runs deploy -> run -> enable-memory:
+# it deploys + builds + starts (the frontend's first-build Drizzle migrations
+# succeed on their own — the bundle's Postgres resource binding is
+# CAN_CONNECT_AND_CREATE, so no manual Lakebase grant is needed), then creates the
+# UC memory store and grants the app SP READ/WRITE on it (the one post-deploy step
+# that durable memory actually requires). On a non-default catalog, pass
+# --var catalog=main (it forwards to bundle).
 databricks bundle validate -p <your-cli-profile>
-databricks bundle deploy   -p <your-cli-profile>
-databricks bundle run agent_openai_agents_sdk -p <your-cli-profile>
+bash scripts/deploy_agent.sh <your-cli-profile>
 
 # Then point DATABRICKS_AGENT_APP_URL at the deployed app URL`}
             </CodeBlock>
@@ -232,9 +239,13 @@ databricks bundle run agent_openai_agents_sdk -p <your-cli-profile>
                 The project <code className="text-sm">README.md</code> (&ldquo;Build &amp;
                 deploy the agent app&rdquo;) is the canonical procedure and covers the
                 operational notes: the first request returns <code>503</code> while the
-                container builds (check <code className="text-sm">databricks apps get
-                &lt;app-name&gt;</code> for status RUNNING), pinning Python 3.12 for the
-                build, and the local <code className="text-sm">agent-build</code> git
+                container builds (confirm readiness from the runtime logs —
+                <code className="text-sm">Both frontend and backend are ready!</code> — or
+                the live <code>app_status.state</code>, since the deployment status goes
+                green when the container command starts, before the port binds), the two Python
+                versions in play (local <code className="text-sm">quickstart</code> needs
+                3.12; the Apps runtime is cp311, which is why wheels are vendored for
+                3.11), and the local <code className="text-sm">agent-build</code> git
                 boundary that <code className="text-sm">assemble_agent.sh</code> creates so
                 the bundle syncs files.
               </p>

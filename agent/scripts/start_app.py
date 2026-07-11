@@ -262,19 +262,19 @@ class ProcessManager:
             self.frontend_log = open("frontend.log", "w", buffering=1)
 
         try:
-            backend_cmd = backend_command(backend_args)
-            backend_env = os.environ.copy()
-            if self.no_ui:
-                backend_env["ENABLE_CHAT_PROXY"] = "false"
-
-            # Start backend
-            self.backend_process = self.start_process(
-                backend_cmd, "backend", self.backend_log, BACKEND_READY, env=backend_env
-            )
-
+            # Build the frontend FIRST — `npm run build` runs `db:migrate` (Drizzle).
+            # Do this BEFORE the backend binds the platform port so a build/migration
+            # failure takes the WHOLE container down (nothing binds :8000) instead of
+            # leaving the backend serving while the frontend crash-loops behind it —
+            # which would keep the live `app_status` misleadingly RUNNING (GAP-17).
+            # NOTE: this does NOT change the deploy-time state: the platform marks the
+            # deployment SUCCEEDED when this command STARTS, not when the port binds,
+            # so `active_deployment.status.state` is green regardless — always judge
+            # health from the LIVE `app_status.state` (or the runtime logs), not the
+            # deployment status. The build talks to Lakebase directly (not the
+            # backend), so it has no ordering dependency on the backend being up.
+            frontend_dir = Path("e2e-chatbot-app-next")
             if not self.no_ui:
-                # Setup and start frontend
-                frontend_dir = Path("e2e-chatbot-app-next")
                 for cmd, desc in [("npm install", "install"), ("npm run build", "build")]:
                     print(f"Running npm {desc}...")
                     result = subprocess.run(
@@ -284,6 +284,18 @@ class ProcessManager:
                         print(f"npm {desc} failed: {result.stderr}")
                         return 1
 
+            backend_cmd = backend_command(backend_args)
+            backend_env = os.environ.copy()
+            if self.no_ui:
+                backend_env["ENABLE_CHAT_PROXY"] = "false"
+
+            # Start backend — binds the platform port only now, after a healthy build.
+            self.backend_process = self.start_process(
+                backend_cmd, "backend", self.backend_log, BACKEND_READY, env=backend_env
+            )
+
+            if not self.no_ui:
+                # Frontend already built above; just start its server.
                 self.frontend_process = self.start_process(
                     ["npm", "run", "start"],
                     "frontend",

@@ -1,13 +1,37 @@
 bundle:
   name: firefly_openai_managed_mem
 
+# --- Parameterize (bundle variables) --------------------------------------
+# Namespace for the wheels volume and the managed-memory store. Defaults target
+# `workspace.default` so a fresh Default-Storage workspace (which has no `main`
+# catalog) deploys with zero edits (GAP-3). Override per target below, or at the
+# command line via `--var catalog=main` / env `BUNDLE_VAR_catalog=main`, or with
+# a variable-overrides.json.
+variables:
+  catalog:
+    description: UC catalog holding the wheels volume and managed-memory store.
+    default: workspace
+  schema:
+    description: UC schema within ${var.catalog}.
+    default: default
+  wheels_volume_name:
+    description: UC volume that holds the pre-vendored build wheels.
+    default: firefly_wheels
+  memory_store_name:
+    description: Managed-memory store (Lakebase-backed) name.
+    default: firefly_managed_memory
+
 sync:
   exclude:
-    - vendor-wheels/**
+    # uv.lock is intentionally NOT synced. The Apps build runs a plain `uv sync`
+    # (not `uv sync --locked`), so it can satisfy dependencies from the vendored
+    # wheels via UV_FIND_LINKS without the lock appearing stale (GAP-15).
+    # NOTE: pyproject.toml and vendor-wheels/ MUST sync — do not add them here
+    # (GAP-7: no deps file => app crashes; GAP-14: vendored wheels feed the build).
     - uv.lock
-    - pyproject.toml
     - databricks.yml
     - .python-version
+    - .vendor-req.txt
     - .vendor-req-export.txt
     - .vendor-req-filtered.txt
     - requirements.txt.volume.bak
@@ -31,18 +55,33 @@ resources:
             value: "3000"
           - name: CHAT_PROXY_TIMEOUT_SECONDS
             value: "300"
+          # Install the pre-vendored linux/cp311 wheels first so the build never
+          # depends on the build container's PyPI egress (GAP-8/11/12). This path
+          # is the synced source_code root inside the Apps container. Run
+          # scripts/vendor_wheels.sh once before `databricks bundle deploy`.
+          - name: UV_FIND_LINKS
+            value: "/app/python/source_code/vendor-wheels"
+          # --- Leave alone (resource bindings) ---------------------------------
+          # Populated by `uv run quickstart` (experiment id + Lakebase endpoint).
+          # Never fold these into a plaintext value:.
           - name: MLFLOW_EXPERIMENT_ID
             value_from: "experiment"
           - name: LAKEBASE_AUTOSCALING_ENDPOINT
             value_from: "postgres"
+          # --- Parameterize ----------------------------------------------------
           - name: DATABRICKS_MEMORY_STORE
-            value: "main.default.firefly_managed_memory"
-          - name: DATABRICKS_HOST
-            value: "https://dbc-acc143fd-4ea9.cloud.databricks.com"
-          - name: DATABRICKS_WORKSPACE_ID
-            value: "7280163305785459"
-          - name: GENIE_ONE_URL
-            value: "https://dbc-acc143fd-4ea9.cloud.databricks.com/one?o=7280163305785459"
+            value: "${var.catalog}.${var.schema}.${var.memory_store_name}"
+          # --- Derive, don't store (GAP-4 fix) ---------------------------------
+          # None of DATABRICKS_HOST, DATABRICKS_WORKSPACE_ID, or GENIE_ONE_URL are
+          # stored here. The Databricks Apps runtime auto-injects DATABRICKS_HOST
+          # and DATABRICKS_WORKSPACE_ID into every app, and the frontend
+          # (e2e-chatbot-app-next/server/src/routes/config.ts) composes
+          # GENIE_ONE_URL from them per request as
+          #   ${DATABRICKS_HOST}/one?o=${DATABRICKS_WORKSPACE_ID}
+          # Bundle substitutions can't do this portably: ${workspace.host} is empty
+          # when the host comes from a CLI profile (the `deploy -p <profile>` flow),
+          # and ${workspace.workspace_id} does not resolve into app env. Runtime
+          # injection means nothing to hand-rewrite and nothing to go stale.
           - name: GENIE_MCP_URL
             value: "/api/2.0/mcp/genie"
           - name: GENIE_MCP_MODE
@@ -50,9 +89,11 @@ resources:
       resources:
         - name: wheels_volume
           uc_securable:
-            securable_full_name: main.default.firefly_wheels
+            securable_full_name: "${var.catalog}.${var.schema}.${var.wheels_volume_name}"
             securable_type: VOLUME
             permission: READ_VOLUME
+        # Leave alone — quickstart writes experiment_id and the postgres branch
+        # for the target workspace; the committed values are placeholders.
         - name: experiment
           experiment:
             experiment_id: "123237888438046"
