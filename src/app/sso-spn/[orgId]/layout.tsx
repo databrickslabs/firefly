@@ -10,6 +10,7 @@ import { SsoSpnUserStoreInitializer } from "@/components/sso-spn-user-store-init
 import { Spinner } from "@/components/ui/spinner";
 import { Toaster } from "@/components/ui/sonner";
 import { Separator } from "@/components/ui/separator";
+import { AgentPanel } from "@/components/agent/agent-panel";
 
 export default function OrgLayout({
   children,
@@ -69,6 +70,7 @@ export default function OrgLayout({
               {children}
             </main>
           </SidebarInset>
+          <AgentPanel orgId={orgId} />
         </div>
         <Toaster position="top-right" />
       </SidebarProvider>

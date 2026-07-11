@@ -19,6 +19,7 @@ import { OrgSwitcher } from "@/components/org-switcher";
 import { SsoSpnAccountModal } from "@/components/sso-spn-account-modal";
 import { CustomizeNavModal } from "@/components/customize-nav-modal";
 import { GitHubSourceLink } from "@/components/github-source-link";
+import { AgentPanelTrigger } from "@/components/agent/agent-panel";
 import { useNavCustomization } from "@/hooks/use-nav-customization";
 
 interface SsoSpnTopNavProps {
@@ -98,6 +99,7 @@ export function SsoSpnTopNav({ user, title, basePath }: SsoSpnTopNavProps) {
       <div className="flex items-center gap-2 flex-shrink-0 ml-auto">
         {/* Organization Switcher */}
         <OrgSwitcher />
+        <AgentPanelTrigger />
         <GitHubSourceLink />
 
         {/* Profile Dropdown */}

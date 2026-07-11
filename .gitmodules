@@ -1,0 +1,3 @@
+[submodule "vendor/app-templates"]
+	path = vendor/app-templates
+	url = https://github.com/databricks/app-templates.git

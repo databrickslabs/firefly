@@ -1,0 +1,76 @@
+bundle:
+  name: firefly_openai_managed_mem
+
+sync:
+  exclude:
+    - vendor-wheels/**
+    - uv.lock
+    - pyproject.toml
+    - databricks.yml
+    - .python-version
+    - .vendor-req-export.txt
+    - .vendor-req-filtered.txt
+    - requirements.txt.volume.bak
+
+resources:
+  apps:
+    agent_openai_agents_sdk:
+      name: "firefly-openai-managed-mem-v2"
+      description: "OpenAI Agents SDK agent with managed memory and Genie MCP"
+      source_code_path: ./
+      config:
+        command: ["python", "scripts/start_app.py"]
+        env:
+          - name: MLFLOW_TRACKING_URI
+            value: "databricks"
+          - name: MLFLOW_REGISTRY_URI
+            value: "databricks-uc"
+          - name: API_PROXY
+            value: "http://localhost:8000/invocations"
+          - name: CHAT_APP_PORT
+            value: "3000"
+          - name: CHAT_PROXY_TIMEOUT_SECONDS
+            value: "300"
+          - name: MLFLOW_EXPERIMENT_ID
+            value_from: "experiment"
+          - name: LAKEBASE_AUTOSCALING_ENDPOINT
+            value_from: "postgres"
+          - name: DATABRICKS_MEMORY_STORE
+            value: "main.default.firefly_managed_memory"
+          - name: DATABRICKS_HOST
+            value: "https://dbc-acc143fd-4ea9.cloud.databricks.com"
+          - name: DATABRICKS_WORKSPACE_ID
+            value: "7280163305785459"
+          - name: GENIE_ONE_URL
+            value: "https://dbc-acc143fd-4ea9.cloud.databricks.com/one?o=7280163305785459"
+          - name: GENIE_MCP_URL
+            value: "/api/2.0/mcp/genie"
+          - name: GENIE_MCP_MODE
+            value: "one"
+      resources:
+        - name: wheels_volume
+          uc_securable:
+            securable_full_name: main.default.firefly_wheels
+            securable_type: VOLUME
+            permission: READ_VOLUME
+        - name: experiment
+          experiment:
+            experiment_id: "123237888438046"
+            permission: CAN_MANAGE
+        - name: 'postgres'
+          postgres:
+            branch: "projects/firefly-openai-managed-mem-v2-ui-lb-202607090900/branches/firefly-openai-managed-mem-v2-ui-lb-202607090900-branch"
+            database: "projects/firefly-openai-managed-mem-v2-ui-lb-202607090900/branches/firefly-openai-managed-mem-v2-ui-lb-202607090900-branch/databases/databricks-postgres"
+            permission: 'CAN_CONNECT_AND_CREATE'
+
+targets:
+  dev:
+    mode: development
+    default: true
+
+  prod:
+    mode: production
+    resources:
+      apps:
+        agent_openai_agents_sdk:
+          name: firefly-openai-managed-mem
