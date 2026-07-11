@@ -271,6 +271,50 @@ code/notebook editors.
    - there is an **SPN mapping** (`userSpns` row) for that user's email in that org
      (the proxy mints the workspace bearer from this mapping).
 
+### Provision the agent's Databricks resources (prerequisite)
+
+`agent/databricks.yml` binds the app to three workspace-specific resources that
+**must exist before `databricks bundle deploy`**:
+
+- an **MLflow experiment** (agent tracing),
+- a **Lakebase (Databricks Postgres)** autoscaling instance (managed-memory store),
+- a **UC volume** `main.default.firefly_wheels` (the bundle grants the app
+  `READ_VOLUME` on it).
+
+For a fresh workspace, create them as follows.
+
+**1. Experiment + Lakebase (one command).** From `agent-build/` (run
+`bash scripts/assemble_agent.sh` first so the directory exists):
+
+```bash
+cd agent-build
+
+# Creates the MLflow experiment AND a new autoscaling Lakebase project+branch in
+# one pass, and writes their IDs into agent-build/databricks.yml + .env.
+# <lakebase-name> must be new/unique (this path has no reuse — a name that already
+# exists errors out). Use lowercase alphanumerics + hyphens.
+uv run quickstart --profile <your-cli-profile> --lakebase-create-new <lakebase-name>
+```
+
+**2. Wheels volume.** Create the UC volume the bundle grants read on:
+
+```bash
+databricks volumes create main default firefly_wheels MANAGED -p <your-cli-profile>
+```
+
+> **The volume must _exist_; its contents are not read in the default path.** The
+> app installs dependencies online (`uv sync` / `npm install`) at container start
+> and `vendor-wheels/**` is excluded from sync, so an empty volume satisfies the
+> `READ_VOLUME` grant. <!-- UNVERIFIED: that an empty volume is sufficient (and that
+> deploy fails without it) is inferred, not yet proven by a negative deploy test. -->
+
+> **Copy the generated IDs into the tracked overlay.** `quickstart` writes the new
+> `experiment_id` and `postgres` (`branch`/`database`) into **`agent-build/databricks.yml`**,
+> which is gitignored and rebuilt from scratch by `scripts/assemble_agent.sh`. Copy
+> those values into the tracked overlay **`agent/databricks.yml`**, or they are lost
+> on the next assemble. Also re-point the hard-coded `DATABRICKS_HOST`,
+> `DATABRICKS_WORKSPACE_ID`, and `GENIE_ONE_URL` for the target workspace.
+
 ### Build & deploy the agent app
 
 The deployable app is assembled from the pristine submodule plus the local overlay
@@ -293,19 +337,41 @@ cd agent-build
 # see that warning, agent-build is missing its git boundary (re-run the script).
 databricks bundle validate -p <your-cli-profile>
 
-# Deploy + start the Databricks App
+# Deploy + start the Databricks App. `bundle run` requires the app resource
+# KEY (agent_openai_agents_sdk, from databricks.yml) — without it the CLI errors
+# with "expected a KEY of the resource to run".
 databricks bundle deploy -p <your-cli-profile>
-databricks bundle run    -p <your-cli-profile>
+databricks bundle run agent_openai_agents_sdk -p <your-cli-profile>
 ```
 
 Then point `DATABRICKS_AGENT_APP_URL` at the deployed app URL.
+
+**Grant the app's service principal Lakebase access (required for memory).** After
+the first successful deploy, the app's SP is a bare Postgres role with no rights to
+its memory tables — memory reads/writes fail until you grant them. From `agent-build/`:
+
+```bash
+# The app's SP client ID comes from the deployed app:
+SP=$(databricks apps get <your-app-name> -p <your-cli-profile> --output json | jq -r '.service_principal_client_id')
+
+# memory-type is "openai" for this template (agent-openai-agents-sdk). Lakebase
+# connection defaults are read from the .env quickstart wrote.
+uv run python scripts/grant_lakebase_permissions.py "$SP" --memory-type openai
+```
+
+> Some grants may warn "table does not exist" on a fresh branch — that is expected;
+> the memory tables are created on first agent use. Re-run the same command once
+> after the agent's first request to grant the remaining tables.
 
 **Operational notes**
 
 - **First request returns HTTP 503.** After `bundle run`, the container runs
   `uv sync`, `npm install`, and the Vite build for the chat UI before it serves
-  traffic. Poll the app URL until it returns `200` (can take a few minutes) —
-  the 503 is normal, not a failure.
+  traffic (can take a few minutes) — the 503 is normal, not a failure. Note the
+  app is behind Databricks app auth, so an unauthenticated request 302-redirects
+  to OIDC rather than returning `200`. To confirm readiness, check
+  `databricks apps get <app-name> -p <your-cli-profile>` and wait for the status
+  to be RUNNING.
 - **Pin Python 3.12 for the build.** The agent's dependency tree (`whenever` via
   `databricks-agents`) uses PyO3 capped at 3.13, so `uv` picking 3.14 fails.
   Databricks App runtimes are 3.12; build/sync with 3.12 to match.
@@ -399,6 +465,20 @@ Navigate to your project in the Vercel dashboard:
    # Agent panel (optional; see "Agent Panel" below)
    NEXT_PUBLIC_AGENT_ENABLED
    DATABRICKS_AGENT_APP_URL
+   # The Agent panel also needs the SSO->SPN mapping vars below (the proxy mints
+   # the signed-in/guest user's mapped SPN token — see "Enable it"). Omit these
+   # and /api/agent-proxy returns 400/401 at runtime:
+   SPN_AUTH_DATABRICKS_ACCOUNT_ID
+   SPN_AUTH_DATABRICKS_ACCOUNTS_URL
+   SPN_AUTH_DATABRICKS_WORKSPACE_URL
+   SPN_AUTH_OKTA_CLIENT_ID
+   SPN_AUTH_OKTA_CLIENT_SECRET
+   SPN_AUTH_OKTA_ISSUER
+   FIREFLY_SPN_GLOBAL_ADMIN_CLIENT_ID
+   FIREFLY_SPN_GLOBAL_ADMIN_CLIENT_SECRET
+   FIREFLY_WORKSPACE_SPN_SECRET_SCOPE_NAME
+   # ...and, to create/manage guest users for the panel:
+   GUEST_API_SECRET
    ```
 
 **Important**: For production deployment, you must use your actual domain name for certain URLs:

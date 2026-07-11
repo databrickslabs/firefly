@@ -194,7 +194,7 @@ export default async function AgentPage() {
                   <tr>
                     <td className="border border-gray-200 px-4 py-2"><code className="text-sm">DATABRICKS_MEMORY_STORE</code></td>
                     <td className="border border-gray-200 px-4 py-2 text-sm">Agent App</td>
-                    <td className="border border-gray-200 px-4 py-2">UC table backing managed memory</td>
+                    <td className="border border-gray-200 px-4 py-2">Store identifier/namespace for the agent&apos;s managed memory (persisted via the app&apos;s managed-memory store; not a standalone UC table you create)</td>
                   </tr>
                 </tbody>
               </table>
@@ -216,13 +216,29 @@ git submodule update --init
 # Merge vendor submodule + agent/ overlay into ./agent-build (gitignored)
 bash scripts/assemble_agent.sh
 
-# Deploy the assembled app as a Databricks App bundle
 cd agent-build
-databricks bundle deploy
-databricks bundle run
+
+# Validate, then deploy + start the app. 'bundle run' requires the app resource
+# KEY (agent_openai_agents_sdk, from databricks.yml); without it the CLI errors
+# "expected a KEY of the resource to run".
+databricks bundle validate -p <your-cli-profile>
+databricks bundle deploy   -p <your-cli-profile>
+databricks bundle run agent_openai_agents_sdk -p <your-cli-profile>
 
 # Then point DATABRICKS_AGENT_APP_URL at the deployed app URL`}
             </CodeBlock>
+            <ContentBlock>
+              <p className="mt-4">
+                The project <code className="text-sm">README.md</code> (&ldquo;Build &amp;
+                deploy the agent app&rdquo;) is the canonical procedure and covers the
+                operational notes: the first request returns <code>503</code> while the
+                container builds (check <code className="text-sm">databricks apps get
+                &lt;app-name&gt;</code> for status RUNNING), pinning Python 3.12 for the
+                build, and the local <code className="text-sm">agent-build</code> git
+                boundary that <code className="text-sm">assemble_agent.sh</code> creates so
+                the bundle syncs files.
+              </p>
+            </ContentBlock>
           </Section>
         </Section>
 
