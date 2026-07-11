@@ -29,4 +29,13 @@ if [[ -d "$OVERLAY/patches/e2e-chatbot-app-next" ]]; then
   cp -R "$OVERLAY/patches/e2e-chatbot-app-next/." "$BUILD"/e2e-chatbot-app-next/
 fi
 
+# 6) Give agent-build its own git boundary. The parent repo gitignores
+# agent-build/, and `databricks bundle deploy` respects the enclosing repo's
+# ignore rules — without this, sync finds zero files ("no files to sync") and
+# ships an empty app. A local-only git init (never committed) scopes the bundle
+# to agent-build so its files sync correctly.
+if [[ ! -d "$BUILD/.git" ]]; then
+  git init -q "$BUILD"
+fi
+
 echo "Assembled agent at $BUILD"
