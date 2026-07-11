@@ -35,3 +35,20 @@
 
 - Do not delete folders with rm -rf
 - only delete files!
+
+## Agent panel (managed-memory agent)
+
+- The Agent panel embeds a Databricks App (Genie + memory) via a Vercel-native
+  reverse proxy at `src/app/api/agent-proxy/[[...path]]/route.ts` — NOT the Go
+  proxy. The route mints the user/guest SPN token
+  (`src/lib/databricks-spn-authtoken.ts`) and forwards HTTP + SSE to
+  `DATABRICKS_AGENT_APP_URL`.
+- This proxy route intentionally sets `Cache-Control: no-store` on the rewritten
+  HTML document (it injects `<base href>` + forced light theme per request). This
+  is the one place the "never use custom Cache-Control" rule does not apply,
+  because the app's ETag never changes and a 304 would serve stale injected HTML.
+- Panel UI: `src/components/agent/agent-panel.tsx` (gated by
+  `NEXT_PUBLIC_AGENT_ENABLED`), store in `src/stores/agent-panel-store.ts`.
+- The agent app source is the `vendor/app-templates` submodule + `agent/` overlay,
+  merged by `scripts/assemble_agent.sh` into the gitignored `agent-build/`. Do not
+  hand-edit `vendor/**` (pristine submodule); put deltas in `agent/`.

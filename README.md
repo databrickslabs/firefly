@@ -10,6 +10,7 @@ A Next.js application that provides a customized frontend for Databricks with mu
 - [Database Setup](#database-setup)
 - [Databricks OAuth Configuration](#databricks-oauth-configuration)
 - [Go Proxy Setup (VSCode Editor)](#go-proxy-setup-vscode-editor)
+- [Agent Panel (Managed-Memory Agent)](#agent-panel-managed-memory-agent)
 - [Local Development](#local-development)
 - [Deployment to Vercel](#deployment-to-vercel)
 - [Architecture](#architecture)
@@ -204,6 +205,87 @@ For production, deploy the Go proxy to:
 
 Update `NEXT_PUBLIC_PROXY_URL` in your environment to point to the deployed proxy.
 
+## Agent Panel (Managed-Memory Agent)
+
+The optional **Agent panel** is a slide-out chat assistant (Genie + long-term
+memory) available in the SSO-SPN organization view. It embeds a Databricks App
+built from the [`databricks/app-templates`](https://github.com/databricks/app-templates)
+`agent-openai-agents-sdk` template, vendored here as a git submodule under
+`vendor/app-templates`.
+
+### How the agent uses Genie One
+
+The agent answers data questions with **Genie One** — the workspace-wide unified
+Genie — served over the **Genie MCP** endpoint (`/api/2.0/mcp/genie`). The
+`ask_genie_one` tool (`agent/agent_server/genie_tools.py`) calls `genie_ask` and
+polls `genie_poll_response` until completion, authenticating with the agent App's
+service principal. It is **not** scoped to a single Genie space
+(`GENIE_MCP_MODE=one`; there is no `GENIE_SPACE_ID`).
+
+Genie is configured at the **agent App layer** in `agent/databricks.yml` (not the
+frontend `.env.local`):
+
+| Env var | Purpose |
+| --- | --- |
+| `GENIE_MCP_MODE=one` | Use Genie One (workspace-wide) rather than a specific space |
+| `GENIE_ONE_URL` | The "Powered by Genie · Genie One" attribution link (surfaced to the UI via `/api/config`) |
+| `DATABRICKS_HOST`, `DATABRICKS_WORKSPACE_ID` | Fallback used to derive `/one?o=<id>` when `GENIE_ONE_URL` is unset |
+
+The `GENIE_INSTRUCTIONS` prompt (composed onto the agent's memory instructions in
+`agent/agent_server/agent.py`) forces Genie-first behavior for any question about
+tables, catalogs, dashboards, or "my data".
+
+> Note: the tool currently **hardcodes** the MCP path `/api/2.0/mcp/genie` rather
+> than reading `GENIE_MCP_URL`, so that env var only feeds the attribution-link
+> fallback today.
+
+### How it differs from the Go proxy
+
+Unlike the VSCode/notebook editors (which use the Go proxy), the agent is embedded
+through a **Vercel-native reverse proxy** — a Next.js route at
+`src/app/api/agent-proxy/[[...path]]/route.ts`. That route:
+
+- resolves the current user's (or guest's) mapped **service principal** and mints
+  a Databricks bearer token via M2M OAuth (`src/lib/databricks-spn-authtoken.ts`),
+  so guests never hit the Databricks OAuth wall;
+- forwards HTTP + SSE (streaming chat) to `DATABRICKS_AGENT_APP_URL`, injecting the
+  bearer and relaxing frame headers for same-origin embedding;
+- rewrites the app's HTML (`<base href>` + forced light theme) so relative assets
+  resolve under `/api/agent-proxy` and the chat UI matches Firefly's light UI.
+
+**No Go proxy or Cloud Run is required for the agent.** The Go proxy is only for the
+code/notebook editors.
+
+### Enable it
+
+1. Set the environment variables (see `.env.example`):
+   ```env
+   NEXT_PUBLIC_AGENT_ENABLED=true
+   DATABRICKS_AGENT_APP_URL=https://your-agent-app.databricksapps.com
+   ```
+2. Ensure SPN auth is configured (`SPN_AUTH_*` and `FIREFLY_SPN_*`), since the proxy
+   reuses the same SSO→SPN mapping used elsewhere.
+
+### Build & deploy the agent app
+
+The deployable app is assembled from the pristine submodule plus the local overlay
+in `agent/` (agent code, chat-UI patches, bundle config):
+
+```bash
+# Fetch the submodule (first time only)
+git submodule update --init
+
+# Merge vendor submodule + agent/ overlay into ./agent-build (gitignored)
+bash scripts/assemble_agent.sh
+
+# Deploy the assembled app as a Databricks App bundle
+cd agent-build
+databricks bundle deploy
+databricks bundle run
+```
+
+Then point `DATABRICKS_AGENT_APP_URL` at the deployed app URL.
+
 ## Local Development
 
 ### 1. Start the Development Server
@@ -280,6 +362,9 @@ Navigate to your project in the Vercel dashboard:
    ENCRYPTION_KEY
    NEXT_PUBLIC_PROXY_URL
    DATABRICKS_APP_URL
+   # Agent panel (optional; see "Agent Panel" below)
+   NEXT_PUBLIC_AGENT_ENABLED
+   DATABRICKS_AGENT_APP_URL
    ```
 
 **Important**: For production deployment, you must use your actual domain name for certain URLs:
@@ -368,6 +453,7 @@ This application supports multiple authentication strategies:
 
 - **Organization Support**: Multi-tenant architecture with organization management
 - **Embedded Databricks Apps**: VSCode editor embedded without SSO exposure
+- **Agent Panel**: Slide-out Genie + managed-memory chat assistant, embedded via a Vercel-native SPN proxy (see [Agent Panel](#agent-panel-managed-memory-agent))
 - **Notebooks**: Interactive notebooks with full Databricks functionality
 - **SQL Editor**: Advanced SQL editor with visual query builder
 - **Data Catalog**: Browse Unity Catalog with a modern interface

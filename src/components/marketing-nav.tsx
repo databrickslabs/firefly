@@ -58,6 +58,13 @@ const solutions: { title: string; href: string; description: string; comingSoon?
     comingSoon: false,
   },
   {
+    title: "Agent Panel",
+    href: "/docs/solutions/agent",
+    description:
+      "Genie One + managed-memory chat assistant, embedded via a Vercel-native SPN proxy.",
+    comingSoon: false,
+  },
+  {
     title: "Pipeline Editor",
     href: "/docs/solutions/pipeline-editor",
     description:

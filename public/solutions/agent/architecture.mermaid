@@ -1,0 +1,45 @@
+sequenceDiagram
+    participant User
+    participant Browser as Browser<br/>(Agent panel iframe)
+    participant NextJS as Next.js Server<br/>(/api/agent-proxy)
+    participant DB as Database
+    participant OIDC as Databricks OIDC
+    participant App as Agent App<br/>(Databricks)
+    participant Genie as Genie One MCP
+    participant Memory as Managed Memory<br/>(UC store)
+
+    User->>Browser: Open Agent panel
+    Browser->>NextJS: GET /api/agent-proxy (same origin)
+
+    rect rgb(240, 248, 255)
+        Note over NextJS,OIDC: SSO-SPN Token Acquisition (guest supported)
+        NextJS->>NextJS: Resolve session + active organization
+        NextJS->>DB: Lookup user's mapped SPN + org workspaceUrl
+        DB-->>NextJS: SPN credentials (clientId, secret)
+        NextJS->>OIDC: POST /oidc/v1/token (client_credentials)
+        OIDC-->>NextJS: Workspace bearer token
+    end
+
+    rect rgb(255, 248, 240)
+        Note over NextJS: HTML rewrite (document only)
+        NextJS->>App: GET / with injected Bearer
+        App-->>NextJS: index.html
+        NextJS->>NextJS: Inject base tag + force light theme, no-store
+    end
+
+    NextJS-->>Browser: Proxied chat UI (assets under /api/agent-proxy)
+
+    rect rgb(240, 255, 240)
+        Note over Browser,App: Chat request (SSE streaming)
+        Browser->>NextJS: POST /api/agent-proxy/api/chat
+        NextJS->>App: Forward buffered body + Bearer
+        App->>App: Node chat server -> Python agent (/invocations)
+        App->>Genie: ask_genie_one (genie_ask + poll)
+        Genie-->>App: Workspace data answer
+        App->>Memory: read/write long-term memory
+        Memory-->>App: memory context
+        App-->>NextJS: SSE token stream
+        NextJS-->>Browser: SSE token stream
+    end
+
+    Browser->>User: Streamed answer (Powered by Genie)
