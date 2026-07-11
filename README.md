@@ -265,6 +265,11 @@ code/notebook editors.
    ```
 2. Ensure SPN auth is configured (`SPN_AUTH_*` and `FIREFLY_SPN_*`), since the proxy
    reuses the same SSO→SPN mapping used elsewhere.
+3. Make sure the runtime prerequisites are met for the signed-in (or guest) user,
+   or `/api/agent-proxy` returns `400`/`401`:
+   - the user's **active organization** has a `workspaceUrl` set, and
+   - there is an **SPN mapping** (`userSpns` row) for that user's email in that org
+     (the proxy mints the workspace bearer from this mapping).
 
 ### Build & deploy the agent app
 
