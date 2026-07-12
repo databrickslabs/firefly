@@ -564,7 +564,7 @@ Navigate to your project in the Vercel dashboard:
    DATABASE_URL
    BETTER_AUTH_SECRET
    BETTER_AUTH_URL (use your production URL)
-   NEXT_PUBLIC_BETTER_AUTH_URL (use your production URL)
+   # NEXT_PUBLIC_BETTER_AUTH_URL — omit for preview/dynamic URLs; see .env.example
    ENCRYPTION_KEY
    NEXT_PUBLIC_PROXY_URL
    DATABRICKS_APP_URL
@@ -589,14 +589,15 @@ Navigate to your project in the Vercel dashboard:
 
 **Important**: For production deployment, you must use your actual domain name for certain URLs:
 
-- **BETTER_AUTH_URL**: Use your production domain (e.g., `https://www.firefly-analytics.com`)
-- **NEXT_PUBLIC_BETTER_AUTH_URL**: Use your production domain (e.g., `https://www.firefly-analytics.com`)
+- **BETTER_AUTH_URL**: Use your production domain (e.g., `https://www.firefly-analytics.com`). This is server-side only and must match the Databricks OAuth redirect URI.
+- **NEXT_PUBLIC_BETTER_AUTH_URL**: **Do not set this unless you have a stable custom domain attached to every deployment.** This variable is baked in at Next.js build time. If it points to a different origin than the URL serving the page (e.g. a Vercel preview URL), the browser will block auth API calls with a CORS error. Leave it unset — the auth client automatically uses `window.location.origin`, which is always correct.
 - **NEXT_PUBLIC_PROXY_URL**: Use your deployed Go proxy URL (e.g., `https://proxy.firefly-analytics.com`)
 
-For our production deployment at FireFly Analytics:
+For production with a custom domain:
 ```env
 BETTER_AUTH_URL=https://www.firefly-analytics.com
-NEXT_PUBLIC_BETTER_AUTH_URL=https://www.firefly-analytics.com
+# NEXT_PUBLIC_BETTER_AUTH_URL — only set if using a custom domain on all deployments
+# NEXT_PUBLIC_BETTER_AUTH_URL=https://www.firefly-analytics.com
 NEXT_PUBLIC_PROXY_URL=https://app-proxy.firefly-analytics.com
 ```
 
@@ -621,7 +622,26 @@ Replace with your actual production domain. For our deployment, we use:
 https://www.firefly-analytics.com/api/oauth/databricks/callback
 ```
 
-### 5. Deploy
+### 5. Disable Vercel Preview Deployment Protection (if using preview URLs)
+
+Vercel projects have **SSO protection enabled by default** for preview deployments. This blocks unauthenticated requests — including the guest provisioning API (`/api/guest/*`) and any programmatic calls — with a `401 Protected deployment` response.
+
+To disable it for a project:
+
+```bash
+# Via Vercel CLI (Vercel CLI 54+)
+vercel project protection disable <project-name> --sso
+
+# Or via Vercel API
+curl -X PATCH "https://api.vercel.com/v9/projects/<project-id>" \
+  -H "Authorization: Bearer $VERCEL_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"ssoProtection": null}'
+```
+
+This only affects preview deployments. Production deployments with a custom domain are not protected by default.
+
+### 6. Deploy
 
 #### Option A: Deploy via Git
 
@@ -658,6 +678,55 @@ The Go proxy should be deployed separately (not on Vercel):
 
 Update `NEXT_PUBLIC_PROXY_URL` in Vercel environment variables to point to your deployed proxy.
 
+## Guest User Provisioning
+
+The guest login path lets external users access a specific Databricks workspace via a pre-provisioned service principal, without going through the Databricks OAuth wall. Provisioning is a three-step API sequence secured by `GUEST_API_SECRET` (`X-API-Key` header).
+
+### Prerequisites
+
+- `GUEST_API_SECRET` set in Vercel env (64-char hex, `openssl rand -hex 64`)
+- A Databricks M2M service principal with client-id + client-secret that has access to the target workspace
+- Vercel preview protection disabled if testing against a preview URL (see step 5 above)
+
+### Step 1 — Register the guest workspace
+
+```bash
+curl -X POST https://<your-app>/api/guest/workspaces \
+  -H "X-API-Key: $GUEST_API_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Acme Corp Workspace", "workspaceUrl": "https://dbc-xxxx.cloud.databricks.com"}'
+# Response: { "workspace": { "id": "<workspaceId>", "name": "...", "workspaceUrl": "..." } }
+```
+
+### Step 2 — Register the guest service principal
+
+```bash
+curl -X POST https://<your-app>/api/guest/spns \
+  -H "X-API-Key: $GUEST_API_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Acme Guest SPN",
+    "clientId": "<m2m-client-id>",
+    "clientSecret": "<m2m-client-secret>",
+    "guestWorkspaceId": "<workspaceId from step 1>"
+  }'
+# Response: { "spn": { "id": "<spnId>", "name": "...", "clientId": "...", "guestWorkspaceId": "..." } }
+```
+
+### Step 3 — Create the guest user and get a login URL
+
+```bash
+curl -X POST https://<your-app>/api/guest/users \
+  -H "X-API-Key: $GUEST_API_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"orgName": "Acme Corp", "spnId": "<spnId from step 2>"}'
+# Response: { "guestUser": { "id": "...", "email": "...", "loginUrl": "https://<BETTER_AUTH_URL>/guest-login?token=<ott>", "expiresAt": "...", ... } }
+```
+
+Send the `loginUrl` to your end-user. It contains a one-time token valid for 10 minutes. The user clicks it, the token is verified, and they are redirected to their organization's dashboard — no Databricks SSO required.
+
+> **Note**: The `loginUrl` hostname comes from the server-side `BETTER_AUTH_URL` env var. The auth client verifies the token against `window.location.origin` (or `NEXT_PUBLIC_BETTER_AUTH_URL` if set). These two must match, so `BETTER_AUTH_URL` should be set to the URL where the app is served. Do not set `NEXT_PUBLIC_BETTER_AUTH_URL` to a different origin (see `.env.example`).
+
 ## Architecture
 
 ### Authentication Strategies
@@ -667,7 +736,7 @@ This application supports multiple authentication strategies:
 1. **Login With Databricks**: Per-workspace authentication using Databricks native OAuth
 2. **Custom Federation**: Multi-tenant authentication with custom identity providers
 3. **Login With Okta**: Tenant-based authentication with service principal identity mapping
-4. **Login With Guest User**: Coming Soon
+4. **Login With Guest User**: Provisioned via a private REST API secured with `GUEST_API_SECRET`. See [Guest User Provisioning](#guest-user-provisioning) below.
 
 ### Key Features
 
