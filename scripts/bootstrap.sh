@@ -148,7 +148,7 @@ validate_url "$DATABRICKS_HOST"
 ask DB_PROFILE       "Databricks CLI profile name"      "firefly-deploy"
 ask UC_CATALOG       "Unity Catalog catalog"            "workspace"
 ask UC_SCHEMA        "Unity Catalog schema"             "default"
-ask AGENT_APP_NAME        "Databricks App name"                        "firefly-agent"
+ask AGENT_APP_NAME        "Databricks App name"                        "firefly-openai-managed-mem-v2"
 ask LAKEBASE_NAME         "Lakebase instance name"                     "firefly-lb"
 ask DATABRICKS_ACCOUNT_ID "Databricks account ID (from accounts.cloud.databricks.com URL)"
 ask REPO_DIR         "Local clone directory"            "$HOME/Projects/firefly"
@@ -177,7 +177,7 @@ confirm_phase "1" || { stop_if_done "1"; exit 0; }
 echo
 step "1a. Databricks CLI OAuth (opens browser)"
 run "databricks auth login --host '$DATABRICKS_HOST' --profile '$DB_PROFILE'"
-run "databricks workspace list --profile '$DB_PROFILE' 2>&1 | head -3"
+run "databricks workspace list / --profile '$DB_PROFILE' 2>&1 | head -3"
 
 echo
 step "1b. Neon CLI OAuth (opens browser)"
@@ -195,7 +195,7 @@ run "vercel login"
 run "vercel whoami"
 
 echo
-step "1c. pnpm (via npm to avoid corepack network block — GAP ENV-0)"
+step "1d. pnpm (via npm)"
 if command -v pnpm &>/dev/null; then
   ok "pnpm already installed: $(pnpm --version 2>/dev/null || echo '?')"
 else
@@ -220,7 +220,7 @@ run "git clone --branch genie-agent https://github.com/databrickslabs/firefly.gi
 run "cd '$REPO_DIR'"
 
 echo
-step "Submodule init (GAP-1: must precede assemble_agent.sh)"
+step "Submodule init (must run before assemble_agent.sh)"
 run "git -C '$REPO_DIR' submodule update --init"
 
 echo
@@ -234,49 +234,21 @@ header "Phase 3 — Provision Databricks resources"
 confirm_phase "3" || { stop_if_done "3"; exit 0; }
 
 echo
-step "3a. quickstart — MLflow experiment + Lakebase (GAP-2: --python 3.12 required)"
+step "3a. quickstart — MLflow experiment + Lakebase (--python 3.12 required)"
 run "cd '$REPO_DIR/agent-build' && uv run --python 3.12 python scripts/quickstart.py \
   --profile '$DB_PROFILE' --lakebase-create-new '$LAKEBASE_NAME'"
 
 echo
-step "3b. Patch databricks.yml — HOST / WORKSPACE_ID / GENIE_ONE_URL (GAP-4)"
-note "Fetching workspace numeric ID..."
-if [[ "$DRY_RUN" == "false" ]]; then
-  WORKSPACE_ID=$(databricks api get /api/2.0/preview/scim/v2/Me \
-    --profile "$DB_PROFILE" 2>/dev/null \
-    | python3 -c "import sys,json; \
-        u=json.load(sys.stdin).get('userName',''); \
-        print('')" || echo "")
-  # Fall back: parse from workspace host
-  WORKSPACE_ID=$(databricks workspace get-status / \
-    --profile "$DB_PROFILE" --output json 2>/dev/null \
-    | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('workspace_id',''))" \
-    || echo "")
-  if [[ -z "$WORKSPACE_ID" ]]; then
-    warn "Could not auto-detect workspace ID. Please enter it:"
-    warn "(Find it at: Settings → Workspace → Workspace ID in the Databricks UI)"
-    read -rp "  Workspace numeric ID: " WORKSPACE_ID
-  fi
+step "3b. Check catalog/schema bundle variables"
+note "HOST/WORKSPACE_ID/GENIE_ONE_URL are injected by quickstart — no manual edits needed."
+if [[ "$UC_CATALOG" != "workspace" || "$UC_SCHEMA" != "default" ]]; then
+  warn "UC_CATALOG=$UC_CATALOG UC_SCHEMA=$UC_SCHEMA differ from bundle defaults."
+  warn "Edit agent-build/databricks.yml: update catalog/schema vars and DATABRICKS_MEMORY_STORE."
+  [[ "$DRY_RUN" == "true" ]] && \
+    run "# Edit catalog/schema in '$REPO_DIR/agent-build/databricks.yml'"
 else
-  WORKSPACE_ID="<workspace-id>"
+  ok "Catalog/schema match bundle defaults (workspace/default) — no yml edits needed."
 fi
-note "Workspace ID: $WORKSPACE_ID"
-
-GENIE_ONE_URL="${DATABRICKS_HOST}/one?o=${WORKSPACE_ID}"
-
-note "Patching agent-build/databricks.yml..."
-run "python3 -c \"
-import re, pathlib
-p = pathlib.Path('$REPO_DIR/agent-build/databricks.yml')
-t = p.read_text()
-t = re.sub(r'DATABRICKS_HOST:.*', 'DATABRICKS_HOST: \\\"$DATABRICKS_HOST\\\"', t)
-t = re.sub(r'DATABRICKS_WORKSPACE_ID:.*', 'DATABRICKS_WORKSPACE_ID: \\\"$WORKSPACE_ID\\\"', t)
-t = re.sub(r'GENIE_ONE_URL:.*', 'GENIE_ONE_URL: \\\"$GENIE_ONE_URL\\\"', t)
-t = re.sub(r'catalog: main', 'catalog: $UC_CATALOG', t)
-t = re.sub(r'DATABRICKS_MEMORY_STORE: main\\.default', 'DATABRICKS_MEMORY_STORE: $UC_CATALOG.$UC_SCHEMA', t)
-p.write_text(t)
-print('patched')
-\""
 
 echo
 step "3c. Create UC wheels volume"
@@ -284,20 +256,20 @@ run "databricks volumes create '$UC_CATALOG' '$UC_SCHEMA' firefly_wheels MANAGED
   --profile '$DB_PROFILE'"
 
 echo
-step "3d. Vendor cp311 wheels (GAP-11/12/13/14: offline build required)"
+step "3d. Vendor cp311 wheels (required for offline build)"
 run "cd '$REPO_DIR/agent-build' && bash scripts/vendor_wheels.sh"
 
 echo
-step "3e. Verify sync.exclude rules (GAP-7/GAP-15)"
+step "3e. Verify sync.exclude rules"
 if [[ "$DRY_RUN" == "false" ]]; then
   YML="$REPO_DIR/agent/databricks.yml"
   if grep -q 'pyproject.toml' "$YML"; then
-    fail "pyproject.toml is in sync.exclude — remove it (GAP-7)"
+    fail "pyproject.toml is in sync.exclude — remove it"
   else
     ok "pyproject.toml not in sync.exclude"
   fi
   if ! grep -q 'uv.lock' "$YML"; then
-    warn "uv.lock is NOT in sync.exclude — add it so build runs plain uv sync (GAP-15)"
+    warn "uv.lock is NOT in sync.exclude — add it so build runs plain uv sync"
   else
     ok "uv.lock is in sync.exclude"
   fi
@@ -316,19 +288,16 @@ stop_if_done "3"
 header "Phase 4 — Deploy agent app"
 confirm_phase "4" || { stop_if_done "4"; exit 0; }
 
-step "Re-assemble (picks up yml edits; do NOT re-run quickstart — GAP-5)"
-run "bash '$REPO_DIR/scripts/assemble_agent.sh'"
+step "Bundle deploy + run (from agent-build/; do NOT re-run assemble_agent.sh)"
+note "assemble_agent.sh already ran in Phase 2; re-running would wipe quickstart's .env and wheels."
+run "cd '$REPO_DIR/agent-build' && databricks bundle deploy --profile '$DB_PROFILE' -t dev"
+run "cd '$REPO_DIR/agent-build' && databricks bundle run agent_openai_agents_sdk --profile '$DB_PROFILE' -t dev"
 
 echo
-step "Bundle deploy + run"
-run "databricks bundle deploy --profile '$DB_PROFILE' -t dev"
-run "databricks bundle run  --profile '$DB_PROFILE' -t dev"
-
-echo
-step "Poll until app_status.state = RUNNING (GAP-17: deployment state leads by ~44s)"
+step "Poll until app_status.state = RUNNING (deployment state leads by ~44s)"
 if [[ "$DRY_RUN" == "false" ]]; then
   for i in $(seq 1 24); do
-    STATE=$(databricks apps get "$AGENT_APP_NAME" --profile "$DB_PROFILE" \
+    STATE=$(databricks apps get "$AGENT_APP_NAME" -o json --profile "$DB_PROFILE" \
       | python3 -c "import sys,json; d=json.load(sys.stdin); \
           print(d['app_status']['state'])" 2>/dev/null || echo "UNKNOWN")
     echo "  [$i/24] app_status.state = $STATE"
@@ -338,45 +307,45 @@ if [[ "$DRY_RUN" == "false" ]]; then
     sleep 30
   done
 else
-  run "databricks apps get '$AGENT_APP_NAME' --profile '$DB_PROFILE' \
+  run "databricks apps get '$AGENT_APP_NAME' -o json --profile '$DB_PROFILE' \
     | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d['app_status']['state'])\""
 fi
 
 stop_if_done "4"
 
 # ─── Phase 5: UC managed memory ───────────────────────────────────────────────
-header "Phase 5 — UC managed memory (GAP-18)"
+header "Phase 5 — UC managed memory"
 confirm_phase "5" || { stop_if_done "5"; exit 0; }
 
 capture SP_CLIENT_ID \
-  "databricks apps get '$AGENT_APP_NAME' --profile '$DB_PROFILE' \
+  "databricks apps get '$AGENT_APP_NAME' -o json --profile '$DB_PROFILE' \
     | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d['service_principal_client_id'])\""
 note "App service principal: $SP_CLIENT_ID"
 
 run "cd '$REPO_DIR/agent-build' && \
   uv run --python 3.12 python scripts/setup_memory_store.py '$SP_CLIENT_ID' \
+    --memory-store '$UC_CATALOG.$UC_SCHEMA.firefly_managed_memory' \
     --profile '$DB_PROFILE'"
 
 stop_if_done "5"
 
 # ─── Phase 6: Grant SP data access ────────────────────────────────────────────
-header "Phase 6 — Grant agent SP access to data (GAP-9)"
+header "Phase 6 — Grant agent SP access to data"
 confirm_phase "6" || { stop_if_done "6"; exit 0; }
 
 note "Granting USE CATALOG on $UC_CATALOG..."
-run "databricks api post /api/2.1/unity-catalog/permissions/catalog \
+run "databricks api patch '/api/2.1/unity-catalog/permissions/catalog/$UC_CATALOG' \
   --profile '$DB_PROFILE' \
-  --json '{\"changes\":[{\"principal\":\"$SP_CLIENT_ID\",\"add\":[\"USE CATALOG\"]}], \
-    \"securable_full_name\":\"$UC_CATALOG\"}'"
+  --json '{\"changes\":[{\"principal\":\"$SP_CLIENT_ID\",\"add\":[\"USE CATALOG\"]}]}'"
 
 capture WAREHOUSE_ID \
-  "databricks warehouses list --profile '$DB_PROFILE' \
-    | python3 -c \"import sys,json; ws=json.load(sys.stdin).get('warehouses',[]); print(ws[0]['id'] if ws else '')\""
+  "databricks warehouses list -o json --profile '$DB_PROFILE' \
+    | python3 -c \"import sys,json; ws=json.load(sys.stdin); print(ws[0]['id'] if ws else '')\""
 
 if [[ -n "$WAREHOUSE_ID" && "$WAREHOUSE_ID" != "<WAREHOUSE_ID-placeholder>" ]]; then
   note "Granting CAN_USE on warehouse $WAREHOUSE_ID..."
   run "databricks api patch \
-    \"/api/2.0/preview/sql/permissions/warehouses/$WAREHOUSE_ID\" \
+    \"/api/2.0/permissions/warehouses/$WAREHOUSE_ID\" \
     --profile '$DB_PROFILE' \
     --json '{\"access_control_list\":[{\"service_principal_name\":\"$SP_CLIENT_ID\", \
       \"permission_level\":\"CAN_USE\"}]}'"
@@ -397,46 +366,33 @@ step "Create workspace SP"
 if [[ "$DRY_RUN" == "false" ]]; then
   GUEST_SP_RESP=$(databricks service-principals create \
     --display-name "firefly-guest-sp" \
+    -o json \
     --profile "$DB_PROFILE")
+  # CLI returns SCIM camelCase: applicationId, not application_id
   GUEST_SP_CLIENT_ID=$(echo "$GUEST_SP_RESP" \
-    | python3 -c "import sys,json; print(json.load(sys.stdin)['application_id'])")
+    | python3 -c "import sys,json; print(json.load(sys.stdin)['applicationId'])")
   GUEST_SP_NUM_ID=$(echo "$GUEST_SP_RESP" \
     | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
-  ok "Guest SP application_id (client ID): $GUEST_SP_CLIENT_ID"
+  ok "Guest SP client ID: $GUEST_SP_CLIENT_ID"
   ok "Guest SP numeric ID: $GUEST_SP_NUM_ID"
 else
-  run "databricks service-principals create --display-name 'firefly-guest-sp' --profile '$DB_PROFILE'"
+  run "databricks service-principals create --display-name 'firefly-guest-sp' -o json --profile '$DB_PROFILE'"
   GUEST_SP_CLIENT_ID="<guest-sp-client-id>"
   GUEST_SP_NUM_ID="<guest-sp-num-id>"
 fi
 
 echo
-step "Generate OAuth M2M secret via Accounts REST API"
+step "Generate OAuth M2M secret at workspace level (no account console needed)"
 if [[ "$DRY_RUN" == "false" ]]; then
-  ACCOUNTS_TOKEN=$(databricks auth token \
-    --host https://accounts.cloud.databricks.com \
-    --profile "$DB_PROFILE" 2>/dev/null \
-    | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))" \
-    || databricks auth token --profile "$DB_PROFILE" \
-       | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))")
-
-  GUEST_SP_SECRET=$(curl -sf -X POST \
-    "https://accounts.cloud.databricks.com/api/2.0/accounts/$DATABRICKS_ACCOUNT_ID/service-principals/$GUEST_SP_NUM_ID/credentials/secrets" \
-    -H "Authorization: Bearer $ACCOUNTS_TOKEN" \
+  GUEST_SP_SECRET=$(databricks service-principal-secrets-proxy create \
+    "$GUEST_SP_NUM_ID" -o json --profile "$DB_PROFILE" \
     | python3 -c "import sys,json; print(json.load(sys.stdin)['secret'])")
-
-  if [[ -z "$GUEST_SP_SECRET" ]]; then
-    warn "Accounts API call returned empty secret."
-    warn "Generate it manually: accounts.cloud.databricks.com → Service Principals"
-    warn "  → firefly-guest-sp → Secrets → Generate secret"
-    read -rsp "  Paste the secret (hidden): " GUEST_SP_SECRET; echo
-  fi
 
   python3 -c "import keyring; keyring.set_password('firefly-bootstrap','GUEST_SP_CLIENT_ID','$GUEST_SP_CLIENT_ID')"
   python3 -c "import keyring; keyring.set_password('firefly-bootstrap','GUEST_SP_SECRET','$GUEST_SP_SECRET')"
   ok "GUEST_SP_CLIENT_ID + GUEST_SP_SECRET → keyring[firefly-bootstrap]"
 else
-  run "curl -sf -X POST 'https://accounts.cloud.databricks.com/api/2.0/accounts/\$DATABRICKS_ACCOUNT_ID/service-principals/\$GUEST_SP_NUM_ID/credentials/secrets' ..."
+  run "databricks service-principal-secrets-proxy create '\$GUEST_SP_NUM_ID' -o json --profile '$DB_PROFILE'"
   run "keyring set firefly-bootstrap GUEST_SP_CLIENT_ID && keyring set firefly-bootstrap GUEST_SP_SECRET"
 fi
 
@@ -483,9 +439,11 @@ fi
 echo
 step "Drizzle migrations"
 if [[ "$DRY_RUN" == "false" ]]; then
+  run "cd '$REPO_DIR' && pnpm install"
   read_secret DB_URL "firefly-bootstrap" "DATABASE_URL"
   run "cd '$REPO_DIR' && DATABASE_URL='$DB_URL' node_modules/.bin/drizzle-kit push"
 else
+  run "cd '$REPO_DIR' && pnpm install"
   run "cd '$REPO_DIR' && DATABASE_URL=\$(keyring get firefly-bootstrap DATABASE_URL) node_modules/.bin/drizzle-kit push"
 fi
 
@@ -504,7 +462,7 @@ if [[ "$DRY_RUN" == "false" ]]; then
   BETTER_AUTH_SECRET=$(openssl rand -base64 32)
   ENCRYPTION_KEY=$(openssl rand -hex 32)
   GUEST_API_SECRET=$(openssl rand -hex 64)
-  AGENT_APP_URL=$(databricks apps get "$AGENT_APP_NAME" --profile "$DB_PROFILE" \
+  AGENT_APP_URL=$(databricks apps get "$AGENT_APP_NAME" -o json --profile "$DB_PROFILE" \
     | python3 -c "import sys,json; print(json.load(sys.stdin).get('url',''))")
   read_secret DB_URL "firefly-bootstrap" "DATABASE_URL"
 else
@@ -515,9 +473,9 @@ else
   DB_URL="<neon-connection-string>"
 fi
 
-step "8b. Tier 1 env vars — required for guest login (GAP-19/20)"
-note "DO NOT set NEXT_PUBLIC_BETTER_AUTH_URL (GAP-20: CORS on preview URLs)"
-note "Omit SPN_AUTH_OKTA_* entirely (GAP-19: plugin is conditional, absent = skipped)"
+step "8b. Tier 1 env vars — required for guest login"
+note "DO NOT set NEXT_PUBLIC_BETTER_AUTH_URL — causes CORS failures on preview deployments"
+note "Omit SPN_AUTH_OKTA_* entirely — the plugin is conditional; absent vars are skipped"
 
 for SCOPE in preview production; do
   note "Setting tier-1 vars for scope: $SCOPE"
@@ -546,7 +504,7 @@ note "To enable admin login later: replace 'placeholder' with real OAuth app cre
 note "from: accounts.cloud.databricks.com → App connections → Register an app"
 
 echo
-step "8c. Disable preview SSO protection (GAP-22)"
+step "8c. Disable preview SSO protection"
 run "vercel project protection disable '$VERCEL_PROJECT' --sso --scope '$VERCEL_TEAM'"
 
 echo
@@ -555,6 +513,7 @@ if [[ "$DRY_RUN" == "false" ]]; then
   PREVIEW_URL=$(vercel deploy --scope "$VERCEL_TEAM" 2>&1 | grep -E 'https://' | tail -1)
   ok "Preview URL: $PREVIEW_URL"
   python3 -c "import keyring; keyring.set_password('firefly-bootstrap', 'PREVIEW_URL', '$PREVIEW_URL')"
+  python3 -c "import keyring; keyring.set_password('firefly-bootstrap', 'GUEST_API_SECRET', '$GUEST_API_SECRET')"
 else
   run "vercel deploy --scope '$VERCEL_TEAM'"
   PREVIEW_URL="<preview-url>"
@@ -573,14 +532,14 @@ if [[ "$DRY_RUN" == "false" ]]; then
 fi
 
 step "App health check"
-run "databricks apps get '$AGENT_APP_NAME' --profile '$DB_PROFILE' \
+run "databricks apps get '$AGENT_APP_NAME' -o json --profile '$DB_PROFILE' \
   | python3 -c \"import sys,json; d=json.load(sys.stdin); \
       state=d['app_status']['state']; \
       print('app_status:', state); \
       exit(0 if state=='RUNNING' else 1)\""
 
 echo
-step "Guest login smoke test (GAP-21)"
+step "Guest login smoke test"
 if [[ "$DRY_RUN" == "false" ]]; then
   read_secret GUEST_API_SECRET_ "firefly-bootstrap" "GUEST_API_SECRET" 2>/dev/null || \
     GUEST_API_SECRET_="$GUEST_API_SECRET"
