@@ -3,6 +3,29 @@
 
 A Next.js application that provides a customized frontend for Databricks with multiple authentication strategies and embedded Databricks apps.
 
+## Quick Start (AI-assisted)
+
+For a fully automated, interactive-auth bootstrap — no manual token wrangling — use:
+
+| File | Purpose |
+|---|---|
+| [`BOOTSTRAP.md`](./BOOTSTRAP.md) | Harness-agnostic runbook; an AI agent works through it top-to-bottom, prompting for each value |
+| [`scripts/bootstrap.sh`](./scripts/bootstrap.sh) | Executable version of the same runbook with `--dry-run` and `--stop-after <phase>` flags |
+
+```bash
+# Dry run — see every command without executing anything
+bash scripts/bootstrap.sh --dry-run
+
+# Full interactive run (opens browser for each auth step)
+bash scripts/bootstrap.sh
+```
+
+The runbook covers all nine phases end-to-end: Databricks provisioning, Neon DB,
+Vercel deploy, guest service principal, and end-to-end verification. Manual setup
+instructions follow below.
+
+---
+
 ## Table of Contents
 
 - [Prerequisites](#prerequisites)
