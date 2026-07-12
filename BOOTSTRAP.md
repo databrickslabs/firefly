@@ -2,29 +2,55 @@
 
 Harness-agnostic, interactive-auth bootstrap for a fresh deployment of the
 Firefly frontend + Databricks managed-memory agent app. An AI agent should
-work through this file top-to-bottom, prompting the user for each input marked
-**[ASK]** and executing each command exactly as written.
+work through this file top-to-bottom, completing every
+**[ASK — REQUIRED, BLOCKING]** item in Phase 0 before running any later
+phase, then executing each command exactly as written.
 
 ---
 
 ## Phase 0 — Collect inputs
 
-Prompt the user for the following values. Store secrets in macOS Keychain
-(`keyring set <service> <key>`) — never in plaintext files.
+> **STOP. This is a blocking step.** Do not run any command from Phase 1
+> onward — including read-only smoke tests, `whoami`, or profile probes —
+> until the user has explicitly answered **every** `[ASK — REQUIRED, BLOCKING]` row below.
+>
+> Ask all `[ASK — REQUIRED, BLOCKING]` values in a single up-front prompt. The "Default" column
+> is a *fallback offered to the user*, NOT permission to proceed silently.
+> You MUST surface each value and get confirmation, even if you can infer it
+> from the environment (e.g. an existing CLI profile, `whoami`, or env var).
+> Detection ≠ consent: present what you detected as the suggested answer,
+> but still require the user to confirm or override it.
+
+Store secrets in macOS Keychain (`keyring set <service> <key>`) — never in
+plaintext files.
+
+### Required inputs — confirm each before proceeding to Phase 1
+
+- [ ] **[ASK — REQUIRED, BLOCKING]** `DATABRICKS_HOST` — workspace URL (e.g. `https://dbc-xxxx.cloud.databricks.com`)
+- [ ] **[ASK — REQUIRED, BLOCKING]** `DB_PROFILE` — name for the local Databricks CLI profile
+- [ ] **[ASK — REQUIRED, BLOCKING]** `UC_CATALOG` — Unity Catalog catalog to use (must allow MANAGE)
+- [ ] **[ASK — REQUIRED, BLOCKING]** `UC_SCHEMA` — schema within that catalog
+- [ ] **[ASK — REQUIRED, BLOCKING]** `AGENT_APP_NAME` — Databricks App name (dev target; bundle hardcodes this)
+- [ ] **[ASK — REQUIRED, BLOCKING]** `DATABRICKS_ACCOUNT_ID` — numeric account ID from `accounts.cloud.databricks.com` URL
+- [ ] **[ASK — REQUIRED, BLOCKING]** `LAKEBASE_NAME` — name for the new Lakebase instance
+- [ ] **[ASK — REQUIRED, BLOCKING]** `NEON_PROJECT_NAME` — name for the new Neon project
+- [ ] **[ASK — REQUIRED, BLOCKING]** `VERCEL_TEAM` — team slug (e.g. `acme-corp` from `vercel.com/<team-slug>/...` in the dashboard)
+- [ ] **[ASK — REQUIRED, BLOCKING]** `VERCEL_PROJECT` — new Vercel project name
+- [ ] **[ASK — REQUIRED, BLOCKING]** `REPO_DIR` — local directory to clone into (default: current working directory, `.`)
 
 | Variable | Default | How to get it |
 |---|---|---|
-| `DATABRICKS_HOST` | — | **[ASK]** `https://dbc-xxxx.cloud.databricks.com` |
-| `DB_PROFILE` | `firefly-deploy` | **[ASK]** name for the local Databricks CLI profile |
-| `UC_CATALOG` | `workspace` | **[ASK]** Unity Catalog catalog to use (must allow MANAGE) |
-| `UC_SCHEMA` | `default` | **[ASK]** schema within that catalog |
-| `AGENT_APP_NAME` | `firefly-openai-managed-mem-v2` | **[ASK]** Databricks App name (dev target; bundle hardcodes this) |
-| `DATABRICKS_ACCOUNT_ID` | — | **[ASK]** numeric account ID from `accounts.cloud.databricks.com` URL |
-| `LAKEBASE_NAME` | `firefly-lb` | **[ASK]** name for the new Lakebase instance |
-| `NEON_PROJECT_NAME` | `firefly-genie` | **[ASK]** name for the new Neon project |
-| `VERCEL_TEAM` | — | **[ASK]** `acme-corp` (from `vercel.com/<team-slug>/...` in the dashboard) |
-| `VERCEL_PROJECT` | `firefly-genie` | **[ASK]** new Vercel project name |
-| `REPO_DIR` | `~/Projects/firefly` | **[ASK]** local directory to clone into |
+| `DATABRICKS_HOST` | — | Workspace URL from the browser address bar |
+| `DB_PROFILE` | `firefly-deploy` | Any name for `~/.databricks/profiles` |
+| `UC_CATALOG` | `workspace` | Writable catalog with MANAGE permission |
+| `UC_SCHEMA` | `default` | Schema within that catalog |
+| `AGENT_APP_NAME` | `firefly-openai-managed-mem-v2` | Dev target; bundle hardcodes this |
+| `DATABRICKS_ACCOUNT_ID` | — | Numeric ID from `accounts.cloud.databricks.com` URL |
+| `LAKEBASE_NAME` | `firefly-lb` | Name for the new Lakebase instance |
+| `NEON_PROJECT_NAME` | `firefly-genie` | Name for the new Neon project |
+| `VERCEL_TEAM` | — | Team slug from `vercel.com/<team-slug>/...` in the dashboard |
+| `VERCEL_PROJECT` | `firefly-genie` | New Vercel project name |
+| `REPO_DIR` | `.` (current working directory) | Directory you're in when Phase 0 runs; must be empty if cloning fresh |
 
 ---
 
