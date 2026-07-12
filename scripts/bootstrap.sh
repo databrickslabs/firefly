@@ -148,8 +148,9 @@ validate_url "$DATABRICKS_HOST"
 ask DB_PROFILE       "Databricks CLI profile name"      "firefly-deploy"
 ask UC_CATALOG       "Unity Catalog catalog"            "workspace"
 ask UC_SCHEMA        "Unity Catalog schema"             "default"
-ask AGENT_APP_NAME   "Databricks App name"              "firefly-agent"
-ask LAKEBASE_NAME    "Lakebase instance name"           "firefly-lb"
+ask AGENT_APP_NAME        "Databricks App name"                        "firefly-agent"
+ask LAKEBASE_NAME         "Lakebase instance name"                     "firefly-lb"
+ask DATABRICKS_ACCOUNT_ID "Databricks account ID (from accounts.cloud.databricks.com URL)"
 ask REPO_DIR         "Local clone directory"            "$HOME/Projects/firefly"
 ask VERCEL_TEAM      "Vercel team slug (e.g. acme-corp — from vercel.com/<slug>/...)"
 ask NEON_PROJECT_NAME "Neon project name"               "firefly-genie"
@@ -159,8 +160,9 @@ note "All inputs collected. Summary:"
 note "  DATABRICKS_HOST  = $DATABRICKS_HOST"
 note "  DB_PROFILE       = $DB_PROFILE"
 note "  UC_CATALOG       = $UC_CATALOG / $UC_SCHEMA"
-note "  AGENT_APP_NAME   = $AGENT_APP_NAME"
-note "  LAKEBASE_NAME    = $LAKEBASE_NAME"
+note "  AGENT_APP_NAME        = $AGENT_APP_NAME"
+note "  LAKEBASE_NAME         = $LAKEBASE_NAME"
+note "  DATABRICKS_ACCOUNT_ID = $DATABRICKS_ACCOUNT_ID"
 note "  REPO_DIR         = $REPO_DIR"
 note "  VERCEL_TEAM      = $VERCEL_TEAM"
 note "  NEON_PROJECT_NAME = $NEON_PROJECT_NAME"
@@ -387,6 +389,59 @@ note "  GRANT USE SCHEMA, SELECT ON SCHEMA $UC_CATALOG.your_schema TO \`$SP_CLIE
 
 stop_if_done "6"
 
+# ─── Phase 6b: Create guest SP with M2M credentials ──────────────────────────
+header "Phase 6b — Create guest service principal"
+confirm_phase "6b" || { stop_if_done "6b"; exit 0; }
+
+step "Create workspace SP"
+if [[ "$DRY_RUN" == "false" ]]; then
+  GUEST_SP_RESP=$(databricks service-principals create \
+    --display-name "firefly-guest-sp" \
+    --profile "$DB_PROFILE")
+  GUEST_SP_CLIENT_ID=$(echo "$GUEST_SP_RESP" \
+    | python3 -c "import sys,json; print(json.load(sys.stdin)['application_id'])")
+  GUEST_SP_NUM_ID=$(echo "$GUEST_SP_RESP" \
+    | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+  ok "Guest SP application_id (client ID): $GUEST_SP_CLIENT_ID"
+  ok "Guest SP numeric ID: $GUEST_SP_NUM_ID"
+else
+  run "databricks service-principals create --display-name 'firefly-guest-sp' --profile '$DB_PROFILE'"
+  GUEST_SP_CLIENT_ID="<guest-sp-client-id>"
+  GUEST_SP_NUM_ID="<guest-sp-num-id>"
+fi
+
+echo
+step "Generate OAuth M2M secret via Accounts REST API"
+if [[ "$DRY_RUN" == "false" ]]; then
+  ACCOUNTS_TOKEN=$(databricks auth token \
+    --host https://accounts.cloud.databricks.com \
+    --profile "$DB_PROFILE" 2>/dev/null \
+    | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))" \
+    || databricks auth token --profile "$DB_PROFILE" \
+       | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))")
+
+  GUEST_SP_SECRET=$(curl -sf -X POST \
+    "https://accounts.cloud.databricks.com/api/2.0/accounts/$DATABRICKS_ACCOUNT_ID/service-principals/$GUEST_SP_NUM_ID/credentials/secrets" \
+    -H "Authorization: Bearer $ACCOUNTS_TOKEN" \
+    | python3 -c "import sys,json; print(json.load(sys.stdin)['secret'])")
+
+  if [[ -z "$GUEST_SP_SECRET" ]]; then
+    warn "Accounts API call returned empty secret."
+    warn "Generate it manually: accounts.cloud.databricks.com → Service Principals"
+    warn "  → firefly-guest-sp → Secrets → Generate secret"
+    read -rsp "  Paste the secret (hidden): " GUEST_SP_SECRET; echo
+  fi
+
+  python3 -c "import keyring; keyring.set_password('firefly-bootstrap','GUEST_SP_CLIENT_ID','$GUEST_SP_CLIENT_ID')"
+  python3 -c "import keyring; keyring.set_password('firefly-bootstrap','GUEST_SP_SECRET','$GUEST_SP_SECRET')"
+  ok "GUEST_SP_CLIENT_ID + GUEST_SP_SECRET → keyring[firefly-bootstrap]"
+else
+  run "curl -sf -X POST 'https://accounts.cloud.databricks.com/api/2.0/accounts/\$DATABRICKS_ACCOUNT_ID/service-principals/\$GUEST_SP_NUM_ID/credentials/secrets' ..."
+  run "keyring set firefly-bootstrap GUEST_SP_CLIENT_ID && keyring set firefly-bootstrap GUEST_SP_SECRET"
+fi
+
+stop_if_done "6b"
+
 # ─── Phase 7: Neon database ───────────────────────────────────────────────────
 header "Phase 7 — Neon database"
 confirm_phase "7" || { stop_if_done "7"; exit 0; }
@@ -518,6 +573,8 @@ step "Guest login smoke test (GAP-21)"
 if [[ "$DRY_RUN" == "false" ]]; then
   read_secret GUEST_API_SECRET_ "firefly-bootstrap" "GUEST_API_SECRET" 2>/dev/null || \
     GUEST_API_SECRET_="$GUEST_API_SECRET"
+  GUEST_SP_CLIENT_ID=$(python3 -c "import keyring; print(keyring.get_password('firefly-bootstrap','GUEST_SP_CLIENT_ID') or '')")
+  GUEST_SP_SECRET_VAL=$(python3 -c "import keyring; print(keyring.get_password('firefly-bootstrap','GUEST_SP_SECRET') or '')")
   WS=$(curl -sf -X POST "$PREVIEW_URL/api/guest/workspaces" \
     -H "X-API-Key: $GUEST_API_SECRET_" \
     -H "Content-Type: application/json" \
@@ -528,8 +585,8 @@ if [[ "$DRY_RUN" == "false" ]]; then
   SPN=$(curl -sf -X POST "$PREVIEW_URL/api/guest/spns" \
     -H "X-API-Key: $GUEST_API_SECRET_" \
     -H "Content-Type: application/json" \
-    -d "{\"name\":\"Bootstrap SPN\",\"clientId\":\"$SP_CLIENT_ID\", \
-         \"clientSecret\":\"placeholder\",\"guestWorkspaceId\":\"$WS_ID\"}")
+    -d "{\"name\":\"Bootstrap SPN\",\"clientId\":\"$GUEST_SP_CLIENT_ID\", \
+         \"clientSecret\":\"$GUEST_SP_SECRET_VAL\",\"guestWorkspaceId\":\"$WS_ID\"}")
   SPN_ID=$(echo "$SPN" | python3 -c "import sys,json; print(json.load(sys.stdin)['spn']['id'])")
   ok "SPN record created: $SPN_ID"
 

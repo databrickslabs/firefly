@@ -20,6 +20,7 @@ Prompt the user for the following values. Store secrets in macOS Keychain
 | `UC_CATALOG` | `workspace` | **[ASK]** Unity Catalog catalog to use (must allow MANAGE) |
 | `UC_SCHEMA` | `default` | **[ASK]** schema within that catalog |
 | `AGENT_APP_NAME` | `firefly-agent` | **[ASK]** Databricks App name to deploy |
+| `DATABRICKS_ACCOUNT_ID` | — | **[ASK]** numeric account ID from `accounts.cloud.databricks.com` URL |
 | `LAKEBASE_NAME` | `firefly-lb` | **[ASK]** name for the new Lakebase instance |
 | `NEON_PROJECT_NAME` | `firefly-genie` | **[ASK]** name for the new Neon project |
 | `VERCEL_TEAM` | — | **[ASK]** `acme-corp` (from `vercel.com/<team-slug>/...` in the dashboard) |
@@ -264,6 +265,59 @@ databricks api patch \
 
 ---
 
+## Phase 6b — Create guest service principal with M2M credentials
+
+The guest login flow (`/api/guest/spns`) requires a Databricks Service Principal
+with a known **client ID** and **client secret** (M2M OAuth credentials). The app SP
+from Phase 5 does not expose a secret — create a dedicated guest SP.
+
+```bash
+# 1. Create the service principal at workspace level
+GUEST_SP_RESP=$(databricks service-principals create \
+  --display-name "firefly-guest-sp" \
+  --profile "$DB_PROFILE")
+GUEST_SP_CLIENT_ID=$(echo "$GUEST_SP_RESP" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['application_id'])")
+GUEST_SP_NUM_ID=$(echo "$GUEST_SP_RESP" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+
+echo "Guest SP client ID (= application_id): $GUEST_SP_CLIENT_ID"
+echo "Guest SP numeric ID: $GUEST_SP_NUM_ID"
+
+# 2. Generate an OAuth M2M secret via the Databricks Accounts REST API
+#    (secrets are account-scoped even for workspace SPs)
+ACCOUNTS_TOKEN=$(databricks auth token \
+  --host https://accounts.cloud.databricks.com \
+  --profile "$DB_PROFILE" 2>/dev/null \
+  | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))" \
+  || databricks auth token --profile "$DB_PROFILE" \
+     | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))")
+
+GUEST_SP_SECRET=$(curl -sf -X POST \
+  "https://accounts.cloud.databricks.com/api/2.0/accounts/$DATABRICKS_ACCOUNT_ID/service-principals/$GUEST_SP_NUM_ID/credentials/secrets" \
+  -H "Authorization: Bearer $ACCOUNTS_TOKEN" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['secret'])")
+```
+
+> If the accounts REST call fails (token lacks account-admin scope), generate the
+> secret in the UI instead:
+> `accounts.cloud.databricks.com` → Service Principals → `firefly-guest-sp`
+> → Secrets → **Generate secret** → copy the value.
+
+```bash
+# 3. Store both values securely in keyring (never print them)
+python3 -c "import keyring; keyring.set_password('firefly-bootstrap','GUEST_SP_CLIENT_ID','$GUEST_SP_CLIENT_ID')"
+python3 -c "import keyring; keyring.set_password('firefly-bootstrap','GUEST_SP_SECRET','$GUEST_SP_SECRET')"
+
+# 4. Grant the guest SP the same data access as the app SP
+#    (replace workspace.your_schema with the schema containing your data)
+#    Run in a SQL warehouse session:
+#    GRANT USE CATALOG ON CATALOG $UC_CATALOG TO `$GUEST_SP_CLIENT_ID`;
+#    GRANT USE SCHEMA, SELECT ON SCHEMA $UC_CATALOG.$UC_SCHEMA TO `$GUEST_SP_CLIENT_ID`;
+```
+
+---
+
 ## Phase 7 — Neon database
 
 ```bash
@@ -379,17 +433,22 @@ databricks apps get "$AGENT_APP_NAME" --profile "$DB_PROFILE" \
 ### Guest login
 ```bash
 PREVIEW_URL="<paste Vercel preview URL>"
+
+# Load guest SP credentials from keyring (created in Phase 6b)
+GUEST_SP_CLIENT_ID=$(python3 -c "import keyring; print(keyring.get_password('firefly-bootstrap','GUEST_SP_CLIENT_ID'))")
+GUEST_SP_SECRET=$(python3 -c "import keyring; print(keyring.get_password('firefly-bootstrap','GUEST_SP_SECRET'))")
+
 # 1. Create a workspace record
 WS=$(curl -s -X POST "$PREVIEW_URL/api/guest/workspaces" \
   -H "X-API-Key: $GUEST_API_SECRET" -H "Content-Type: application/json" \
   -d "{\"name\":\"Test\",\"workspaceUrl\":\"$DATABRICKS_HOST\"}")
 WS_ID=$(echo "$WS" | python3 -c "import sys,json; print(json.load(sys.stdin)['workspace']['id'])")
 
-# 2. Create a SPN record (use the app SP or any M2M SPN)
+# 2. Register the guest SP (clientId = application_id from Phase 6b)
 SPN=$(curl -s -X POST "$PREVIEW_URL/api/guest/spns" \
   -H "X-API-Key: $GUEST_API_SECRET" -H "Content-Type: application/json" \
-  -d "{\"name\":\"Test SPN\",\"clientId\":\"$SP_CLIENT_ID\", \
-       \"clientSecret\":\"<sp-client-secret>\",\"guestWorkspaceId\":\"$WS_ID\"}")
+  -d "{\"name\":\"Test SPN\",\"clientId\":\"$GUEST_SP_CLIENT_ID\", \
+       \"clientSecret\":\"$GUEST_SP_SECRET\",\"guestWorkspaceId\":\"$WS_ID\"}")
 SPN_ID=$(echo "$SPN" | python3 -c "import sys,json; print(json.load(sys.stdin)['spn']['id'])")
 
 # 3. Create guest user → get login URL
@@ -446,7 +505,7 @@ echo "$GU" | python3 -c "import sys,json; print(json.load(sys.stdin)['guestUser'
 | GAP-18 | blocker | UC memory store must be created + SP granted READ/WRITE; not auto-provisioned |
 | GAP-19 | major | `SPN_AUTH_OKTA_*` missing crashes build; plugin now conditional (omit vars entirely) |
 | GAP-20 | blocker | `NEXT_PUBLIC_BETTER_AUTH_URL` must not be set for preview deployments (CORS) |
-| GAP-21 | major | Guest login API undocumented; 3-step sequence: workspace → spn → user |
+| GAP-21 | major | Guest login API undocumented; 3-step sequence: workspace → spn → user; guest SP creation (Phase 6b) not in original docs |
 | GAP-22 | minor | Vercel preview SSO protection blocks guest API; disable with `project protection` |
 
 ### Gaps refuted or superseded (not in happy path)
