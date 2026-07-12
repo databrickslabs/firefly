@@ -396,6 +396,30 @@ else
   run "keyring set firefly-bootstrap GUEST_SP_CLIENT_ID && keyring set firefly-bootstrap GUEST_SP_SECRET"
 fi
 
+echo
+step "Grant guest SP warehouse + agent app CAN_USE"
+if [[ -n "$WAREHOUSE_ID" && "$WAREHOUSE_ID" != "<WAREHOUSE_ID-placeholder>" ]]; then
+  note "Granting CAN_USE on warehouse $WAREHOUSE_ID for guest SP..."
+  run "databricks api patch \
+    \"/api/2.0/permissions/warehouses/$WAREHOUSE_ID\" \
+    --profile '$DB_PROFILE' \
+    --json '{\"access_control_list\":[{\"service_principal_name\":\"$GUEST_SP_CLIENT_ID\", \
+      \"permission_level\":\"CAN_USE\"}]}'"
+else
+  warn "WAREHOUSE_ID not set (run Phase 6 first). Grant guest SP warehouse CAN_USE manually."
+fi
+
+note "Granting CAN_USE on agent app $AGENT_APP_NAME for guest SP..."
+run "databricks api patch \
+  \"/api/2.0/permissions/apps/$AGENT_APP_NAME\" \
+  --profile '$DB_PROFILE' \
+  --json '{\"access_control_list\":[{\"service_principal_name\":\"$GUEST_SP_CLIENT_ID\", \
+    \"permission_level\":\"CAN_USE\"}]}'"
+
+note "Grant USE CATALOG / USE SCHEMA / SELECT via SQL warehouse if not already done:"
+note "  GRANT USE CATALOG ON CATALOG $UC_CATALOG TO \`$GUEST_SP_CLIENT_ID\`;"
+note "  GRANT USE SCHEMA, SELECT ON SCHEMA $UC_CATALOG.$UC_SCHEMA TO \`$GUEST_SP_CLIENT_ID\`;"
+
 stop_if_done "6b"
 
 # ─── Phase 7: Neon database ───────────────────────────────────────────────────

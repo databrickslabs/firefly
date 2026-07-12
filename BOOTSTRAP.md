@@ -248,6 +248,10 @@ The guest login flow (`/api/guest/spns`) requires a Databricks Service Principal
 with a known **client ID** and **client secret** (M2M OAuth credentials). The app SP
 from Phase 5 does not expose a secret — create a dedicated guest SP.
 
+The Firefly frontend proxies the agent panel with the guest SP's M2M token. Without
+**`CAN_USE` on the agent app**, the Databricks Apps front door rejects that token and
+the embedded panel redirects to Databricks OAuth instead of loading.
+
 ```bash
 # 1. Create the service principal at workspace level
 GUEST_SP_RESP=$(databricks service-principals create \
@@ -273,7 +277,49 @@ python3 -c "import keyring; keyring.set_password('firefly-bootstrap','GUEST_SP_S
 # 4. Grant the guest SP data access (run in a SQL warehouse session):
 #    GRANT USE CATALOG ON CATALOG $UC_CATALOG TO `$GUEST_SP_CLIENT_ID`;
 #    GRANT USE SCHEMA, SELECT ON SCHEMA $UC_CATALOG.$UC_SCHEMA TO `$GUEST_SP_CLIENT_ID`;
+
+# 5. SQL warehouse CAN_USE (required for Genie to run queries as the guest SP)
+# Re-use WAREHOUSE_ID from Phase 6 if still in shell; otherwise list warehouses again.
+databricks api patch \
+  "/api/2.0/permissions/warehouses/$WAREHOUSE_ID" \
+  --profile "$DB_PROFILE" \
+  --json "{\"access_control_list\":[{\"service_principal_name\":\"$GUEST_SP_CLIENT_ID\", \
+    \"permission_level\":\"CAN_USE\"}]}"
+
+# 6. Agent app CAN_USE (required — without this the app rejects the guest M2M token)
+databricks api patch \
+  "/api/2.0/permissions/apps/$AGENT_APP_NAME" \
+  --profile "$DB_PROFILE" \
+  --json "{\"access_control_list\":[{\"service_principal_name\":\"$GUEST_SP_CLIENT_ID\", \
+    \"permission_level\":\"CAN_USE\"}]}"
 ```
+
+---
+
+## Phase 6c — Confirm Genie has data to query
+
+Phases 6 and 6b grant catalog, schema, and warehouse access. On a **fresh
+workspace**, Genie One can still return empty or useless answers when the
+granted schema has **no tables** — the agent and MCP plumbing work, but there
+is nothing to query. Check now and record the result; do **not** create tables
+on the user's behalf.
+
+### Check
+
+```bash
+# Tables in the schema you granted in Phase 6?
+databricks tables list "$UC_CATALOG" "$UC_SCHEMA" --profile "$DB_PROFILE"
+# Empty output → note it and continue bootstrap. Tables present → proceed.
+```
+
+Or, in a SQL warehouse session:
+
+```sql
+SHOW TABLES IN $UC_CATALOG.$UC_SCHEMA;
+```
+
+If the check is empty, continue through Phases 7–9 (infra and guest login can
+still verify). At the end of this runbook, follow **Next steps — no UC data**.
 
 ---
 
@@ -453,6 +499,31 @@ echo "$GU" | python3 -c "import sys,json; print(json.load(sys.stdin)['guestUser'
 
 ---
 
+## Next steps — no UC data
+
+Apply this section **only if Phase 6c found no tables** in `$UC_CATALOG.$UC_SCHEMA`.
+Bootstrap can complete successfully — app, guest login, and memory may all work —
+but Genie will not answer data questions until queryable tables exist in a schema
+the agent SP can read.
+
+**Recommended next steps for the user:**
+
+1. **Choose a data source** — ingest production/analytics data, copy a slice from
+   the workspace `samples` catalog, or use your team's standard demo dataset.
+2. **Place tables in a granted schema** — the agent SP needs `USE CATALOG`,
+   `USE SCHEMA`, and `SELECT` on whatever schema holds the data (Phase 6).
+   Grant the guest SP the same if guest users will ask data questions (Phase 6b).
+3. **Confirm warehouse access** — a running SQL warehouse with `CAN_USE` for the
+   agent SP (Phase 6) is required for Genie to execute queries.
+4. **Re-check** — re-run the Phase 6c `tables list` / `SHOW TABLES` check.
+5. **Verify in the agent panel** — ask a question that requires real data (not just
+   "does the panel load?"). Empty or evasive answers after data is loaded usually
+   mean missing grants on the new schema/tables, not a broken deploy.
+
+Do not auto-create seed tables during bootstrap unless the user explicitly asks.
+
+---
+
 ## Dependency map
 
 | Concern | Tooling | Auth method |
@@ -464,3 +535,84 @@ echo "$GU" | python3 -c "import sys,json; print(json.load(sys.stdin)['guestUser'
 | Vercel deploy | `vercel` CLI | `vercel login` (browser OAuth) |
 | Vercel runtime | none (host only) | — |
 | GitHub / submodule | `git`, optionally `gh` | `gh auth login` or SSH |
+
+---
+
+## Report bootstrap issues
+
+If anything fails, behaves unexpectedly, or required a workaround during this
+runbook, **construct and file a GitHub issue on the user's behalf** so the
+bootstrap can be improved. Do not tell the user to "go file an issue" and stop —
+you draft it, they confirm, you submit.
+
+### When to file
+
+- A phase command failed or needed a manual fix not documented here
+- Phase 9 verification failed (or passed only after an undocumented workaround)
+- Phase 6c was empty and Genie could not answer data questions after the user loaded data
+- Any `[ASK — REQUIRED, BLOCKING]` value had to be overridden because the runbook was wrong
+
+### What you do
+
+1. **Collect during the run** — note phase, command, stderr/stdout (redact secrets),
+   non-default inputs (`$UC_CATALOG`, `$AGENT_APP_NAME`, etc.), and expected vs actual.
+2. **Draft the issue** — fill the template below from the session. Omit sections that
+   don't apply; never paste tokens, client secrets, or URLs with embedded credentials.
+3. **Show the user** — present the title and body; ask for a one-line confirmation or
+   edits.
+4. **File it** — write the body to a temp file, then create the issue from `$REPO_DIR`
+   (or this repo root) with `gh` authenticated:
+
+**Title:** `bootstrap(genie-agent): <short summary>`
+
+**Body template:**
+
+```markdown
+## Summary
+<one paragraph>
+
+## Phase / step
+<e.g. Phase 6b — agent app CAN_USE grant>
+
+## Commands run
+    <exact commands, secrets redacted — indent as a code block>
+
+## Error output
+    <stderr / API response, redacted>
+
+## Environment
+- Bootstrap branch: genie-agent
+- DATABRICKS_HOST: <host>
+- UC_CATALOG / UC_SCHEMA: <values>
+- AGENT_APP_NAME: <value>
+- Fresh workspace: yes / no
+
+## Expected vs actual
+- Expected: …
+- Actual: …
+
+## Workaround used (if any)
+…
+
+## Suggested runbook fix
+…
+```
+
+```bash
+ISSUE_BODY=$(mktemp)
+cat > "$ISSUE_BODY" <<'EOF'
+<paste filled-in body from template above>
+EOF
+
+gh issue create \
+  --repo databrickslabs/firefly \
+  --title "bootstrap(genie-agent): <short summary>" \
+  --body-file "$ISSUE_BODY"
+
+rm -f "$ISSUE_BODY"
+```
+
+5. **Return the issue URL** to the user.
+
+Do not open Databricks support tickets for bootstrap/runbook problems — use the
+repo issue tracker instead (see README project support note).
