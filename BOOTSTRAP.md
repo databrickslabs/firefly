@@ -368,7 +368,7 @@ vercel link --project "$VERCEL_PROJECT" --scope "$VERCEL_TEAM" --yes
 
 ### 8b. Set environment variables
 
-Minimum required set:
+#### Tier 1 — required for guest login path (Phase 9 verification)
 
 ```bash
 AGENT_APP_URL=$(databricks apps get "$AGENT_APP_NAME" --profile "$DB_PROFILE" \
@@ -377,7 +377,6 @@ BETTER_AUTH_SECRET=$(openssl rand -base64 32)
 ENCRYPTION_KEY=$(openssl rand -hex 32)
 GUEST_API_SECRET=$(openssl rand -hex 64)
 
-# Set each var (preview + production scopes):
 for SCOPE in preview production; do
   vercel env add DATABRICKS_AGENT_APP_URL  "$SCOPE" <<< "$AGENT_APP_URL"
   vercel env add DATABASE_URL              "$SCOPE" <<< "$(python3 -c "import keyring; print(keyring.get_password('firefly-bootstrap','DATABASE_URL'))")"
@@ -386,21 +385,39 @@ for SCOPE in preview production; do
   vercel env add ENCRYPTION_KEY            "$SCOPE" <<< "$ENCRYPTION_KEY"
   vercel env add NEXT_PUBLIC_AGENT_ENABLED "$SCOPE" <<< "true"
   vercel env add GUEST_API_SECRET          "$SCOPE" <<< "$GUEST_API_SECRET"
-  # Databricks OAuth (U2M) — required for admin login; guest path uses BYOD SPNs
-  vercel env add DATABRICKS_U2M_CLIENT_ID     "$SCOPE" <<< "<your-u2m-client-id>"
-  vercel env add DATABRICKS_U2M_CLIENT_SECRET "$SCOPE" <<< "<your-u2m-client-secret>"
-  vercel env add DATABRICKS_ACCOUNT_ID        "$SCOPE" <<< "<your-account-id>"
-  vercel env add SPN_AUTH_DATABRICKS_ACCOUNT_ID      "$SCOPE" <<< "<your-account-id>"
   vercel env add SPN_AUTH_DATABRICKS_ACCOUNTS_URL    "$SCOPE" <<< "https://accounts.cloud.databricks.com"
   vercel env add SPN_AUTH_DATABRICKS_WORKSPACE_URL   "$SCOPE" <<< "$DATABRICKS_HOST"
 done
+```
 
-# DO NOT set NEXT_PUBLIC_BETTER_AUTH_URL — it is baked at build time and breaks
-# preview deployments (CORS). The auth client falls back to window.location.origin.
-# GAP-20: setting this to a static value was the original CORS blocker.
+> **DO NOT set `NEXT_PUBLIC_BETTER_AUTH_URL`** — baked at build time, breaks preview
+> deployments (CORS). The auth client falls back to `window.location.origin`. (GAP-20)
+>
+> **Omit `SPN_AUTH_OKTA_*` entirely** — the plugin is conditional; absent vars are
+> skipped, not crashed. (GAP-19)
 
-# SPN_AUTH_OKTA_* are optional. Omit entirely if not using Okta federation.
-# GAP-19: the okta plugin is now conditional; absent vars no longer crash the build.
+#### Tier 2 — required only for admin Databricks OAuth login (not needed for guest path)
+
+```bash
+# These vars power the "Login with Databricks" button for workspace admins.
+# For a guest-only verification (Phase 9), set placeholder values to satisfy
+# the build; the auth routes will 404 at runtime if a user tries admin login,
+# but the guest flow is unaffected.
+#
+# auth-dynamic.ts passes these directly to genericOAuth config (lines 138-139)
+# without a conditional guard. Unlike the Okta plugin crash (GAP-19), genericOAuth
+# receives a plain object so undefined values do NOT crash the Next.js build —
+# they only fail at runtime when the admin login route is actually invoked.
+#
+# To enable admin login: replace placeholders with real values from a Databricks
+# OAuth app registered at accounts.cloud.databricks.com → App connections.
+
+for SCOPE in preview production; do
+  vercel env add DATABRICKS_U2M_CLIENT_ID     "$SCOPE" <<< "${DATABRICKS_U2M_CLIENT_ID:-placeholder}"
+  vercel env add DATABRICKS_U2M_CLIENT_SECRET "$SCOPE" <<< "${DATABRICKS_U2M_CLIENT_SECRET:-placeholder}"
+  vercel env add DATABRICKS_ACCOUNT_ID        "$SCOPE" <<< "$DATABRICKS_ACCOUNT_ID"
+  vercel env add SPN_AUTH_DATABRICKS_ACCOUNT_ID "$SCOPE" <<< "$DATABRICKS_ACCOUNT_ID"
+done
 ```
 
 ### 8c. Disable Vercel preview protection (needed for guest API calls)
@@ -414,8 +431,12 @@ vercel project protection disable "$VERCEL_PROJECT" --sso --scope "$VERCEL_TEAM"
 ### 8d. Deploy
 
 ```bash
-vercel deploy --scope "$VERCEL_TEAM"
-# Capture the preview URL printed at the end.
+PREVIEW_URL=$(vercel deploy --scope "$VERCEL_TEAM" 2>&1 | grep -E 'https://' | tail -1)
+echo "Preview URL: $PREVIEW_URL"
+
+# Store for Phase 9 (survives shell restart)
+python3 -c "import keyring; keyring.set_password('firefly-bootstrap','PREVIEW_URL','$PREVIEW_URL')"
+python3 -c "import keyring; keyring.set_password('firefly-bootstrap','GUEST_API_SECRET','$GUEST_API_SECRET')"
 ```
 
 ---
@@ -432,7 +453,9 @@ databricks apps get "$AGENT_APP_NAME" --profile "$DB_PROFILE" \
 
 ### Guest login
 ```bash
-PREVIEW_URL="<paste Vercel preview URL>"
+# Load everything from keyring — no values needed from memory
+PREVIEW_URL=$(python3 -c "import keyring; print(keyring.get_password('firefly-bootstrap','PREVIEW_URL'))")
+GUEST_API_SECRET=$(python3 -c "import keyring; print(keyring.get_password('firefly-bootstrap','GUEST_API_SECRET'))")
 
 # Load guest SP credentials from keyring (created in Phase 6b)
 GUEST_SP_CLIENT_ID=$(python3 -c "import keyring; print(keyring.get_password('firefly-bootstrap','GUEST_SP_CLIENT_ID'))")

@@ -515,12 +515,12 @@ else
   DB_URL="<neon-connection-string>"
 fi
 
-step "8b. Set environment variables (GAP-19/20)"
-note "Key rule: DO NOT set NEXT_PUBLIC_BETTER_AUTH_URL (GAP-20: CORS on preview URLs)"
-note "SPN_AUTH_OKTA_* omitted entirely (GAP-19: plugin is now conditional, absent = skipped)"
+step "8b. Tier 1 env vars — required for guest login (GAP-19/20)"
+note "DO NOT set NEXT_PUBLIC_BETTER_AUTH_URL (GAP-20: CORS on preview URLs)"
+note "Omit SPN_AUTH_OKTA_* entirely (GAP-19: plugin is conditional, absent = skipped)"
 
 for SCOPE in preview production; do
-  note "Setting vars for scope: $SCOPE"
+  note "Setting tier-1 vars for scope: $SCOPE"
   run "vercel env add DATABRICKS_AGENT_APP_URL  $SCOPE <<< '$AGENT_APP_URL'"
   run "vercel env add DATABASE_URL              $SCOPE <<< '$DB_URL'"
   run "vercel env add BETTER_AUTH_SECRET        $SCOPE <<< '$BETTER_AUTH_SECRET'"
@@ -531,8 +531,19 @@ for SCOPE in preview production; do
   run "vercel env add SPN_AUTH_DATABRICKS_ACCOUNTS_URL  $SCOPE <<< 'https://accounts.cloud.databricks.com'"
   run "vercel env add SPN_AUTH_DATABRICKS_WORKSPACE_URL $SCOPE <<< '$DATABRICKS_HOST'"
 done
-note "Set DATABRICKS_U2M_CLIENT_ID, DATABRICKS_U2M_CLIENT_SECRET, DATABRICKS_ACCOUNT_ID manually"
-note "if you have an OAuth app configured for admin login (not required for guest-only)."
+
+echo
+step "8b. Tier 2 env vars — admin Databricks OAuth (placeholder is safe for guest-only)"
+note "genericOAuth receives these as a plain object — undefined does NOT crash the build."
+note "Admin login will 404 at runtime with placeholders, but guest flow is unaffected."
+for SCOPE in preview production; do
+  run "vercel env add DATABRICKS_U2M_CLIENT_ID     $SCOPE <<< 'placeholder'"
+  run "vercel env add DATABRICKS_U2M_CLIENT_SECRET $SCOPE <<< 'placeholder'"
+  run "vercel env add DATABRICKS_ACCOUNT_ID        $SCOPE <<< '$DATABRICKS_ACCOUNT_ID'"
+  run "vercel env add SPN_AUTH_DATABRICKS_ACCOUNT_ID $SCOPE <<< '$DATABRICKS_ACCOUNT_ID'"
+done
+note "To enable admin login later: replace 'placeholder' with real OAuth app credentials"
+note "from: accounts.cloud.databricks.com → App connections → Register an app"
 
 echo
 step "8c. Disable preview SSO protection (GAP-22)"
