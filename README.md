@@ -1,6 +1,6 @@
 # FireFly Analytics - Databricks Custom Frontend
 
-[![Open in Cursor](https://img.shields.io/badge/Open%20in-Cursor-black?logo=cursor)](cursor://vscode.git/clone?url=https%3A%2F%2Fgithub.com%2Fdatabrickslabs%2Ffirefly.git&ref=genie-agent)
+[![Open in Cursor](https://img.shields.io/badge/Open%20in-Cursor-black?logo=cursor)](https://cursor.com/redirect?url=cursor%3A%2F%2Fvscode.git%2Fclone%3Furl%3Dhttps%253A%252F%252Fgithub.com%252Fdatabrickslabs%252Ffirefly.git%26ref%3Dgenie-agent)
 
 A Next.js application that provides a customized frontend for Databricks with multiple authentication strategies and embedded Databricks apps.
 
