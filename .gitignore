@@ -69,3 +69,4 @@ agent-build/
 # Python build artifacts
 __pycache__/
 *.pyc
+.env*

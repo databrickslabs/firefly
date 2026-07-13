@@ -1265,7 +1265,7 @@ export default async function DatabricksIdentityAuthPage() {
                 Analytics. Explore our solutions to see it in action.
               </p>
               <a
-                href="/databricks-idp"
+                href="/docs/solutions"
                 className="inline-block bg-white text-orange-600 px-6 py-2 rounded-lg font-semibold hover:bg-gray-100 transition-colors"
               >
                 Explore Solutions

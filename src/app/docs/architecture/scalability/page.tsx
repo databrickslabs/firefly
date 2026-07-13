@@ -568,14 +568,28 @@ spec:
           </Section>
 
           <Section id="apps-use-cases" title="Embedded Apps Use Cases">
-            <div className="grid md:grid-cols-3 gap-4 mb-6">
-              <div className="border rounded-lg p-4 bg-gradient-to-br from-blue-50 to-blue-100">
+            <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+              <Link
+                href="/docs/solutions/code-editor"
+                className="block border rounded-lg p-4 bg-gradient-to-br from-blue-50 to-blue-100 hover:from-blue-100 hover:to-blue-200 transition-colors"
+              >
                 <h4 className="font-semibold mb-2 text-blue-900">Code Editor</h4>
                 <p className="text-sm text-blue-800">
                   VSCode-based editor for notebooks, Python, SQL with full IDE
                   features (IntelliSense, debugging, Git).
                 </p>
-              </div>
+              </Link>
+
+              <Link
+                href="/docs/solutions/agent"
+                className="block border rounded-lg p-4 bg-gradient-to-br from-violet-50 to-violet-100 hover:from-violet-100 hover:to-violet-200 transition-colors"
+              >
+                <h4 className="font-semibold mb-2 text-violet-900">Agent Panel</h4>
+                <p className="text-sm text-violet-800">
+                  Genie One + managed-memory chat assistant embedded via the
+                  Vercel-native <code className="text-xs">/api/agent-proxy</code> route.
+                </p>
+              </Link>
 
               <div className="border rounded-lg p-4 bg-gradient-to-br from-green-50 to-green-100">
                 <h4 className="font-semibold mb-2 text-green-900">Notebook Viewer</h4>
@@ -593,6 +607,13 @@ spec:
                 </p>
               </div>
             </div>
+            <p className="text-sm text-muted-foreground">
+              See the{" "}
+              <Link href="/docs/solutions" className="text-blue-600 hover:underline">
+                full solutions index
+              </Link>{" "}
+              for all documented platform capabilities.
+            </p>
           </Section>
         </Section>
 

@@ -28,7 +28,9 @@ export default async function AgentPage() {
       <SectionContainer>
         <header className="mb-12 border-b pb-8">
           <div className="text-sm text-muted-foreground mb-2">
-            Solutions
+            <Link href="/docs/solutions" className="hover:text-foreground">
+              Solutions
+            </Link>
           </div>
           <PageTitle>Agent Panel</PageTitle>
           <p className="text-xl text-muted-foreground">
@@ -273,6 +275,36 @@ bash scripts/deploy_agent.sh <your-cli-profile>
               <h4 className="font-semibold mb-1">Embedding Databricks Apps</h4>
               <p className="text-sm text-muted-foreground">
                 The Go-proxy embedding path used by the code and notebook editors
+              </p>
+            </Link>
+
+            <Link
+              href="/docs/solutions/notebook-editor"
+              className="block border rounded-lg p-4 hover:bg-accent transition-colors"
+            >
+              <h4 className="font-semibold mb-1">Notebook Editor</h4>
+              <p className="text-sm text-muted-foreground">
+                Interactive Python notebooks powered by Marimo
+              </p>
+            </Link>
+
+            <Link
+              href="/docs/solutions/code-editor"
+              className="block border rounded-lg p-4 hover:bg-accent transition-colors"
+            >
+              <h4 className="font-semibold mb-1">Code Editor</h4>
+              <p className="text-sm text-muted-foreground">
+                VS Code-style development environment via Go proxy
+              </p>
+            </Link>
+
+            <Link
+              href="/docs/solutions/pipeline-editor"
+              className="block border rounded-lg p-4 hover:bg-accent transition-colors"
+            >
+              <h4 className="font-semibold mb-1">Pipeline Editor</h4>
+              <p className="text-sm text-muted-foreground">
+                Visual pipeline design with DLT integration
               </p>
             </Link>
 

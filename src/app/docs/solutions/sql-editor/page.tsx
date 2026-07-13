@@ -28,7 +28,9 @@ export default async function SQLEditorPage() {
       <SectionContainer>
         <header className="mb-12 border-b pb-8">
           <div className="text-sm text-muted-foreground mb-2">
-            Solutions
+            <Link href="/docs/solutions" className="hover:text-foreground">
+              Solutions
+            </Link>
           </div>
           <PageTitle>SQL Editor</PageTitle>
           <p className="text-xl text-muted-foreground">
@@ -398,6 +400,16 @@ function WarehouseSelector({ onSelect }) {
               <h4 className="font-semibold mb-1">Notebook Editor</h4>
               <p className="text-sm text-muted-foreground">
                 Interactive Python notebooks for data analysis
+              </p>
+            </Link>
+
+            <Link
+              href="/docs/solutions/agent"
+              className="block border rounded-lg p-4 hover:bg-accent transition-colors"
+            >
+              <h4 className="font-semibold mb-1">Agent Panel</h4>
+              <p className="text-sm text-muted-foreground">
+                Ask questions over workspace data with Genie One
               </p>
             </Link>
 

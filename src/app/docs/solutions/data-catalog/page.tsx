@@ -28,7 +28,9 @@ export default async function DataCatalogPage() {
       <SectionContainer>
         <header className="mb-12 border-b pb-8">
           <div className="text-sm text-muted-foreground mb-2">
-            Solutions
+            <Link href="/docs/solutions" className="hover:text-foreground">
+              Solutions
+            </Link>
           </div>
           <PageTitle>Data Catalog</PageTitle>
           <p className="text-xl text-muted-foreground">
@@ -386,6 +388,16 @@ const validateCatalogs = async (orgId: string) => {
               <h4 className="font-semibold mb-1">SSO-Mapped SPN Authentication</h4>
               <p className="text-sm text-muted-foreground">
                 Learn how API authentication works
+              </p>
+            </Link>
+
+            <Link
+              href="/docs/solutions/agent"
+              className="block border rounded-lg p-4 hover:bg-accent transition-colors"
+            >
+              <h4 className="font-semibold mb-1">Agent Panel</h4>
+              <p className="text-sm text-muted-foreground">
+                Natural-language queries over catalog data via Genie One
               </p>
             </Link>
 

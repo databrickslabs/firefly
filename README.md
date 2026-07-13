@@ -770,6 +770,7 @@ This application supports multiple authentication strategies:
 - **Notebooks**: Interactive notebooks with full Databricks functionality
 - **SQL Editor**: Advanced SQL editor with visual query builder
 - **Data Catalog**: Browse Unity Catalog with a modern interface
+- **Pipeline Editor**: Visual node-based pipeline design with Delta Live Tables integration
 
 ### Technology Stack
 
@@ -782,9 +783,22 @@ This application supports multiple authentication strategies:
 
 ## Documentation
 
-For detailed architectural documentation, visit:
-- [Embedding Databricks Apps w/o SSO](http://localhost:3000/docs/architecture/lakehouse-apps-proxy)
-- [Login With Databricks Authentication](http://localhost:3000/docs/architecture/authentication/databricks-identity)
+### Solutions
+
+- [All Solutions](/docs/solutions)
+- [Embedding Databricks Apps w/o SSO](/docs/solutions/embedding-apps)
+- [Notebook Editor](/docs/solutions/notebook-editor)
+- [Code Editor](/docs/solutions/code-editor)
+- [Agent Panel](/docs/solutions/agent)
+- [SQL Editor](/docs/solutions/sql-editor)
+- [Data Catalog](/docs/solutions/data-catalog)
+- [Pipeline Editor](/docs/solutions/pipeline-editor)
+
+### Architecture
+
+- [Embedding Databricks Apps via Proxy (hub)](/docs/architecture/lakehouse-apps-proxy)
+- [Architecture Overview](/docs/architecture/overview)
+- [Login With Databricks Authentication](/docs/architecture/authentication/databricks-identity)
 
 ## Project Support
 

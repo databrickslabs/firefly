@@ -14,6 +14,7 @@ import {
   GitBranch,
   Lock,
   Upload,
+  Bot,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -32,9 +33,29 @@ const FEATURE_TABS = [
       "Extension support for Python, SQL, and more",
     ],
     icon: Code,
+    docsHref: "/docs/solutions/code-editor",
     visual: {
       title: "Development Environment",
       items: ["VS Code Server", "Terminal Access", "Git Integration", "Extensions"],
+    },
+  },
+  {
+    id: "agent-panel",
+    label: "Agent Panel",
+    title: "Genie + Managed-Memory Chat",
+    description:
+      "A slide-out assistant that answers natural-language questions over workspace data and remembers context across sessions.",
+    features: [
+      "Genie One queries with source attribution",
+      "Managed long-term memory per user",
+      "Embedded via Vercel-native SPN proxy",
+      "Guest and BYOD users supported",
+    ],
+    icon: Bot,
+    docsHref: "/docs/solutions/agent",
+    visual: {
+      title: "Agent Panel",
+      items: ["Genie One", "Managed Memory", "Chat UI", "SPN Proxy"],
     },
   },
   {
@@ -50,6 +71,7 @@ const FEATURE_TABS = [
       "Automatic code generation",
     ],
     icon: GitBranch,
+    docsHref: "/docs/solutions/pipeline-editor",
     visual: {
       title: "Pipeline Studio",
       items: ["Source Connectors", "Transformations", "Data Preview", "Auto-Deploy"],
@@ -68,6 +90,7 @@ const FEATURE_TABS = [
       "Data masking and encryption",
     ],
     icon: Lock,
+    docsHref: "/docs/architecture/security",
     visual: {
       title: "Security Controls",
       items: ["RBAC", "Audit Logs", "Data Masking", "Encryption"],
@@ -86,6 +109,7 @@ const FEATURE_TABS = [
       "REST API data ingestion",
     ],
     icon: Upload,
+    docsHref: "/docs/solutions/data-catalog",
     visual: {
       title: "Data Sources",
       items: ["File Upload", "Cloud Storage", "Databases", "REST APIs"],
@@ -127,7 +151,7 @@ export default function Home() {
                 <Link href="/get-started">Get Started</Link>
               </Button>
               <Button asChild variant="outline">
-                <Link href="/docs/architecture/overview">Learn More</Link>
+                <Link href="/docs/solutions">View Solutions</Link>
               </Button>
             </div>
           </div>
@@ -253,9 +277,16 @@ export default function Home() {
                 ))}
               </ul>
 
-              <Button asChild variant="outline" className="mt-4">
-                <Link href="/docs/architecture/overview">Explore Architecture</Link>
-              </Button>
+              <div className="flex flex-wrap gap-3 mt-4">
+                {activeFeature.docsHref && (
+                  <Button asChild variant="outline">
+                    <Link href={activeFeature.docsHref}>View Documentation</Link>
+                  </Button>
+                )}
+                <Button asChild variant="ghost">
+                  <Link href="/docs/solutions">All Solutions</Link>
+                </Button>
+              </div>
             </div>
 
             {/* Right side - Visual card */}
@@ -327,6 +358,13 @@ export default function Home() {
           <div className="flex gap-4 justify-center">
             <Button asChild size="lg" variant="secondary">
               <Link href="/get-started">Get Started</Link>
+            </Button>
+            <Button
+              asChild
+              size="lg"
+              className="bg-white/20 text-white hover:bg-white/30 border-0"
+            >
+              <Link href="/docs/solutions">View Solutions Docs</Link>
             </Button>
             <Button
               asChild
