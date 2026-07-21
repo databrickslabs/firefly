@@ -191,6 +191,11 @@ run "neonctl me"
 
 echo
 step "1c. Vercel CLI OAuth (opens browser)"
+if command -v vercel &>/dev/null; then
+  ok "vercel already installed: $(vercel --version 2>/dev/null || echo '?')"
+else
+  run "npm install -g vercel"
+fi
 run "vercel login"
 run "vercel whoami"
 
