@@ -8,7 +8,7 @@
 #   bash scripts/bootstrap.sh --stop-after=1            # collect inputs + auth only
 #
 # Mirrors every phase in BOOTSTRAP.md exactly.
-# Secrets go straight to macOS Keychain — never printed, never written to files.
+# Secrets persist in a gitignored, chmod-600 .firefly-bootstrap/state.env under the repo.
 
 set -euo pipefail
 
@@ -78,26 +78,53 @@ ask() {
   ok "$varname = $val"
 }
 
-ask_secret() {
-  local varname="$1" service="$2" prompt="$3"
+# Secret storage: a gitignored, chmod-600 state.env under $REPO_DIR (no keyring
+# dependency — the target machine may not have Python `keyring`/Keychain wired up).
+STATE_DIR=""
+STATE_FILE=""
+init_state_dir() {
+  local base="${1:-${REPO_DIR:-$PWD}}"
+  STATE_DIR="${base}/.firefly-bootstrap"
+  STATE_FILE="${STATE_DIR}/state.env"
+  mkdir -p "$STATE_DIR"; chmod 700 "$STATE_DIR"
+}
+
+store_secret() {                      # store_secret KEY VALUE
+  local key="$1" val="$2"
+  init_state_dir
+  local tmp="${STATE_FILE}.tmp"
+  touch "$STATE_FILE"
+  grep -v "^export ${key}=" "$STATE_FILE" > "$tmp" 2>/dev/null || true
+  printf 'export %s=%q\n' "$key" "$val" >> "$tmp"
+  mv "$tmp" "$STATE_FILE"
+  chmod 600 "$STATE_FILE"
+  ok "$key → state.env"
+}
+
+load_secrets() {
+  init_state_dir
+  [[ -f "$STATE_FILE" ]] && source "$STATE_FILE" || true
+}
+
+ask_secret() {                        # ask_secret VARNAME <ignored> PROMPT
+  local varname="$1" prompt="$3"
   local val=""
   while [[ -z "$val" ]]; do
     read -rsp "  ${bold}$prompt${reset} (hidden): " val; echo
     [[ -z "$val" ]] && warn "Required — cannot be empty."
   done
-  python3 -c "import keyring; keyring.set_password('$service', '$varname', '''$val''')"
-  ok "$varname → keyring[$service]"
+  store_secret "$varname" "$val"
 }
 
-read_secret() {
-  local varname="$1" service="$2" key="$3"
-  local val
-  val=$(python3 -c "import keyring; v=keyring.get_password('$service','$key'); print(v or '')")
+read_secret() {                       # read_secret VARNAME <ignored> KEY
+  local varname="$1" key="$3"
+  load_secrets
+  local val="${!key:-}"
   if [[ -z "$val" ]]; then
-    fail "keyring[$service/$key] is empty"
+    fail "state.env: $key is empty (run the earlier phase that stores it first)"
     exit 1
   fi
-  eval "$varname='$val'"
+  eval "$varname=\$val"
 }
 
 confirm_phase() {
@@ -139,7 +166,7 @@ echo "${bold}╚═════════════════════�
 
 # ─── Phase 0: Collect inputs ─────────────────────────────────────────────────
 header "Phase 0 — Collect inputs"
-note "Secrets go directly to macOS Keychain. Nothing is written to disk."
+note "Secrets persist in .firefly-bootstrap/state.env (gitignored, chmod 600)."
 echo
 
 ask DATABRICKS_HOST  "Databricks workspace URL (https://dbc-xxxx.cloud.databricks.com)"
@@ -448,12 +475,11 @@ if [[ "$DRY_RUN" == "false" ]]; then
     "$GUEST_SP_NUM_ID" -o json --profile "$DB_PROFILE" \
     | python3 -c "import sys,json; print(json.load(sys.stdin)['secret'])")
 
-  python3 -c "import keyring; keyring.set_password('firefly-bootstrap','GUEST_SP_CLIENT_ID','$GUEST_SP_CLIENT_ID')"
-  python3 -c "import keyring; keyring.set_password('firefly-bootstrap','GUEST_SP_SECRET','$GUEST_SP_SECRET')"
-  ok "GUEST_SP_CLIENT_ID + GUEST_SP_SECRET → keyring[firefly-bootstrap]"
+  store_secret GUEST_SP_CLIENT_ID "$GUEST_SP_CLIENT_ID"
+  store_secret GUEST_SP_SECRET "$GUEST_SP_SECRET"
 else
   run "databricks service-principal-secrets-proxy create '\$GUEST_SP_NUM_ID' -o json --profile '$DB_PROFILE'"
-  run "keyring set firefly-bootstrap GUEST_SP_CLIENT_ID && keyring set firefly-bootstrap GUEST_SP_SECRET"
+  run "store_secret GUEST_SP_CLIENT_ID <id> && store_secret GUEST_SP_SECRET <secret>  # → state.env"
 fi
 
 echo
@@ -513,8 +539,7 @@ if [[ "$DRY_RUN" == "false" ]]; then
   ok "Project created: $PROJECT_ID"
 
   DB_URL=$(neonctl connection-string --project-id "$PROJECT_ID" --pooled)
-  python3 -c "import keyring; keyring.set_password('firefly-bootstrap', 'DATABASE_URL', '$DB_URL')"
-  ok "DATABASE_URL → keyring[firefly-bootstrap]"
+  store_secret DATABASE_URL "$DB_URL"
 else
   run "neonctl projects create --name '$NEON_PROJECT_NAME' --output json"
   run "neonctl connection-string --project-id '<project-id>' --pooled"
@@ -528,7 +553,7 @@ if [[ "$DRY_RUN" == "false" ]]; then
   run "cd '$REPO_DIR' && DATABASE_URL='$DB_URL' node_modules/.bin/drizzle-kit push"
 else
   run "cd '$REPO_DIR' && pnpm install"
-  run "cd '$REPO_DIR' && DATABASE_URL=\$(keyring get firefly-bootstrap DATABASE_URL) node_modules/.bin/drizzle-kit push"
+  run "cd '$REPO_DIR' && source .firefly-bootstrap/state.env && node_modules/.bin/drizzle-kit push"
 fi
 
 stop_if_done "7"
@@ -622,8 +647,8 @@ if [[ "$DRY_RUN" == "false" ]]; then
   DEPLOY_URL2=$(vercel deploy --scope "$VERCEL_TEAM" 2>&1 | grep -oE 'https://[^ ]*\.vercel\.app' | tail -1)
   vercel alias set "$DEPLOY_URL2" "$STABLE_ALIAS" --scope "$VERCEL_TEAM"
   ok "Redeployed; $PREVIEW_URL now serves BETTER_AUTH_URL=$PREVIEW_URL"
-  python3 -c "import keyring; keyring.set_password('firefly-bootstrap', 'PREVIEW_URL', '$PREVIEW_URL')"
-  python3 -c "import keyring; keyring.set_password('firefly-bootstrap', 'GUEST_API_SECRET', '$GUEST_API_SECRET')"
+  store_secret PREVIEW_URL "$PREVIEW_URL"
+  store_secret GUEST_API_SECRET "$GUEST_API_SECRET"
 else
   run "vercel env rm BETTER_AUTH_URL preview --yes; vercel env add BETTER_AUTH_URL preview <<< '$PREVIEW_URL'"
   run "vercel deploy --scope '$VERCEL_TEAM'                       # capture DEPLOY_URL2"
@@ -655,8 +680,8 @@ step "Guest login smoke test"
 if [[ "$DRY_RUN" == "false" ]]; then
   read_secret GUEST_API_SECRET_ "firefly-bootstrap" "GUEST_API_SECRET" 2>/dev/null || \
     GUEST_API_SECRET_="$GUEST_API_SECRET"
-  GUEST_SP_CLIENT_ID=$(python3 -c "import keyring; print(keyring.get_password('firefly-bootstrap','GUEST_SP_CLIENT_ID') or '')")
-  GUEST_SP_SECRET_VAL=$(python3 -c "import keyring; print(keyring.get_password('firefly-bootstrap','GUEST_SP_SECRET') or '')")
+  read_secret GUEST_SP_CLIENT_ID "firefly-bootstrap" "GUEST_SP_CLIENT_ID"
+  read_secret GUEST_SP_SECRET_VAL "firefly-bootstrap" "GUEST_SP_SECRET"
   WS=$(curl -sf -X POST "$PREVIEW_URL/api/guest/workspaces" \
     -H "X-API-Key: $GUEST_API_SECRET_" \
     -H "Content-Type: application/json" \

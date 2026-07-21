@@ -70,3 +70,6 @@ agent-build/
 __pycache__/
 *.pyc
 .env*
+
+# Bootstrap runner local state (secrets, resume markers)
+.firefly-bootstrap/
