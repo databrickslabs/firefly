@@ -382,7 +382,18 @@ stop_if_done "1"
 header "Phase 2 — Clone and assemble"
 confirm_phase "2" || { stop_if_done "2"; exit 0; }
 
-run "git clone --branch genie-agent https://github.com/databrickslabs/firefly.git '$REPO_DIR'"
+step "Clone the app repo (idempotent — safe to re-run)"
+if [[ "$DRY_RUN" == "true" ]]; then
+  run "git clone --branch genie-agent https://github.com/databrickslabs/firefly.git '$REPO_DIR'"
+elif [[ -d "$REPO_DIR/.git" ]]; then
+  ok "Repo already present at $REPO_DIR — reusing it (skipping clone)."
+elif [[ -e "$REPO_DIR" && -n "$(ls -A "$REPO_DIR" 2>/dev/null)" ]]; then
+  fail "$REPO_DIR exists and is non-empty but is not a git repo."
+  note "Pick a new REPO_DIR (re-run and decline reuse), or remove that directory, then re-run."
+  exit 1
+else
+  run "git clone --branch genie-agent https://github.com/databrickslabs/firefly.git '$REPO_DIR'"
+fi
 run "cd '$REPO_DIR'"
 
 echo
