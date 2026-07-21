@@ -305,6 +305,34 @@ derive_proxy_ca_bundle() {
   return 0
 }
 
+# uv does NOT read pip.conf or PIP_INDEX_URL (verified). On corporate networks that block
+# public PyPI and route pip through an internal mirror (Artifactory/Nexus/…), uv silently
+# hits pypi.org and fails — even though the user's `pip` works. Bridge the user's OWN
+# already-configured pip index into uv via UV_DEFAULT_INDEX. Never hardcode a mirror.
+detect_pip_index() {
+  local v f
+  if command -v python3 >/dev/null 2>&1; then
+    v=$(python3 -m pip config get global.index-url 2>/dev/null | tr -d '[:space:]')
+    [[ -n "$v" && "$v" != "None" ]] && { echo "$v"; return; }
+  fi
+  for f in "${PIP_CONFIG_FILE:-}" "$HOME/.config/pip/pip.conf" "$HOME/.pip/pip.conf" /etc/pip.conf; do
+    [[ -f "$f" ]] || continue
+    v=$(awk -F= '/^[[:space:]]*index-url[[:space:]]*=/{gsub(/[[:space:]]/,"",$2);print $2; exit}' "$f")
+    [[ -n "$v" ]] && { echo "$v"; return; }
+  done
+}
+
+bridge_pip_index_to_uv() {
+  # Respect an explicit uv config the user already set.
+  [[ -n "${UV_DEFAULT_INDEX:-}${UV_INDEX_URL:-}" ]] && return 0
+  [[ -f "$HOME/.config/uv/uv.toml" ]] && return 0
+  local idx; idx=$(detect_pip_index)
+  [[ -z "$idx" ]] && return 0
+  case "$idx" in *pypi.org/simple*) return 0 ;; esac   # already public PyPI — nothing to bridge
+  export UV_DEFAULT_INDEX="$idx"
+  PIP_BRIDGED_INDEX="$idx"
+}
+
 if [[ -n "${TLS_PEM_PATH:-}" && -f "${TLS_PEM_PATH}" ]]; then
   apply_tls_bundle "$TLS_PEM_PATH"
   ok "TLS trust from TLS_PEM_PATH → SSL_CERT_FILE / REQUESTS_CA_BUNDLE / NODE_EXTRA_CA_CERTS"
@@ -331,6 +359,18 @@ elif derive_proxy_ca_bundle; then
   fi
 else
   ok "No intercepting proxy detected (TLS to PyPI validates against the system store)."
+fi
+
+# Bridge the user's existing pip index mirror into uv (uv ignores pip.conf).
+if [[ "$DRY_RUN" == "true" ]]; then
+  run "# if pip is configured with a custom index-url, export UV_DEFAULT_INDEX to match"
+else
+  bridge_pip_index_to_uv
+  if [[ -n "${PIP_BRIDGED_INDEX:-}" ]]; then
+    ok "uv index bridged from pip config → UV_DEFAULT_INDEX=$PIP_BRIDGED_INDEX"
+  elif [[ -n "${UV_DEFAULT_INDEX:-}${UV_INDEX_URL:-}" ]]; then
+    note "uv index already set via env — leaving as-is."
+  fi
 fi
 
 note "All inputs collected. Summary:"
