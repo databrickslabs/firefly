@@ -65,6 +65,15 @@ capture() {
 ask() {
   local varname="$1" prompt="$2" default="${3:-}"
   local val=""
+  # A cached answer (from inputs.env) takes precedence as the default.
+  local cached="${!varname:-}"
+  [[ -n "$cached" ]] && default="$cached"
+  # When reusing saved answers, accept the cached value without prompting.
+  if [[ "${REUSE_INPUTS:-0}" == "1" && -n "$cached" ]]; then
+    eval "$varname='$cached'"
+    ok "$varname = $cached ${dim}(saved)${reset}"
+    return
+  fi
   if [[ -n "$default" ]]; then
     read -rp "  ${bold}$prompt${reset} [${dim}$default${reset}]: " val
     val="${val:-$default}"
@@ -75,6 +84,7 @@ ask() {
     done
   fi
   eval "$varname='$val'"
+  store_input "$varname" "$val"
   ok "$varname = $val"
 }
 
@@ -127,6 +137,58 @@ read_secret() {                       # read_secret VARNAME <ignored> KEY
   eval "$varname=\$val"
 }
 
+# ─── Input persistence + resume (#18) ─────────────────────────────────────────
+# Non-secret answers persist in ~/.firefly-bootstrap/inputs.env so re-runs don't
+# re-prompt. This lives in $HOME (not $REPO_DIR) because REPO_DIR is itself an
+# answer we cache — it must survive before the repo is cloned.
+INPUTS_DIR="$HOME/.firefly-bootstrap"
+INPUTS_FILE="$INPUTS_DIR/inputs.env"
+REUSE_INPUTS=0
+
+init_inputs_dir() { mkdir -p "$INPUTS_DIR"; chmod 700 "$INPUTS_DIR"; }
+
+store_input() {                       # store_input KEY VALUE
+  local key="$1" val="$2"
+  init_inputs_dir
+  local tmp="${INPUTS_FILE}.tmp"
+  touch "$INPUTS_FILE"
+  grep -v "^export ${key}=" "$INPUTS_FILE" > "$tmp" 2>/dev/null || true
+  printf 'export %s=%q\n' "$key" "$val" >> "$tmp"
+  mv "$tmp" "$INPUTS_FILE"
+  chmod 600 "$INPUTS_FILE"
+}
+
+load_inputs() { [[ -f "$INPUTS_FILE" ]] && source "$INPUTS_FILE" || true; }
+
+mark_phase_done() { store_input LAST_COMPLETED_PHASE "$1"; }
+phase_done()      { [[ "${LAST_COMPLETED_PHASE:-0}" -ge "$1" ]] 2>/dev/null; }
+
+reset_inputs() { rm -f "$INPUTS_FILE"; unset LAST_COMPLETED_PHASE; }
+
+# If a prior run left cached answers, show them and ask whether to reuse.
+maybe_reuse_inputs() {
+  [[ "$DRY_RUN" == "true" ]] && return 0
+  [[ -f "$INPUTS_FILE" ]] || return 0
+  load_inputs
+  echo
+  note "Found saved answers from a previous run (~/.firefly-bootstrap/inputs.env):"
+  local shown=0
+  for k in DATABRICKS_HOST UC_CATALOG UC_SCHEMA DATABRICKS_ACCOUNT_ID REPO_DIR VERCEL_TEAM VERCEL_PROJECT NEON_PROJECT_NAME; do
+    local v="${!k:-}"; [[ -n "$v" ]] && { echo "    ${dim}$k = $v${reset}"; shown=1; }
+  done
+  [[ "${LAST_COMPLETED_PHASE:-0}" -gt 0 ]] && note "Last run completed through Phase ${LAST_COMPLETED_PHASE}."
+  [[ "$shown" == "0" ]] && return 0
+  echo
+  read -rp "  ${bold}Reuse these saved answers?${reset} [Y/n]: " reuse_
+  if [[ "$reuse_" =~ ^[Nn]$ ]]; then
+    reset_inputs
+    note "Starting fresh — you'll be asked for each value."
+  else
+    REUSE_INPUTS=1
+    ok "Reusing saved answers (press Enter at any prompt to keep a value)."
+  fi
+}
+
 confirm_phase() {
   local phase="$1"
   if [[ "$DRY_RUN" == "true" ]]; then
@@ -140,6 +202,7 @@ confirm_phase() {
 
 stop_if_done() {
   local phase="$1"
+  [[ "$DRY_RUN" == "false" ]] && mark_phase_done "$phase"
   if [[ -n "$STOP_AFTER" && "$STOP_AFTER" == "$phase" ]]; then
     echo
     echo "${green}Stopped after Phase $phase.${reset}"
@@ -166,7 +229,8 @@ echo "${bold}╚═════════════════════�
 
 # ─── Phase 0: Collect inputs ─────────────────────────────────────────────────
 header "Phase 0 — Collect inputs"
-note "Secrets persist in .firefly-bootstrap/state.env (gitignored, chmod 600)."
+note "Answers persist in ~/.firefly-bootstrap/inputs.env; secrets in state.env (chmod 600)."
+maybe_reuse_inputs
 echo
 
 ask DATABRICKS_HOST  "Databricks workspace URL (https://dbc-xxxx.cloud.databricks.com)"
