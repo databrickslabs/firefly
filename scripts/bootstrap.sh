@@ -202,28 +202,46 @@ maybe_reuse_inputs() {
   fi
 }
 
+# Returns 0 (true) when the user wants to EXECUTE the phase body, 1 (false) otherwise.
+# Completed phases default to SKIP (Enter breezes past on a resumed run); pending phases
+# default to EXECUTE. run_phase() interprets a false return as skip-vs-stop.
 confirm_phase() {
   local phase="$1" ok_
-  local re=0; phase_done "$phase" && re=1
   if [[ "$DRY_RUN" == "true" ]]; then
-    if [[ "$re" == "1" ]]; then
-      echo "  ${yellow}[DRY-RUN]${reset} Would re-execute Phase $phase (completed in a prior run)"
-    else
-      echo "  ${yellow}[DRY-RUN]${reset} Would execute Phase $phase"
-    fi
+    echo "  ${yellow}[DRY-RUN]${reset} Would execute Phase $phase"
     return 0
   fi
   echo
-  # Default to Yes: this is a linear runner, so Enter should proceed. Only an explicit
-  # "n" declines (which stops the run via the caller's exit idiom — there is no
-  # skip-forward yet; that's the #18 resume follow-up).
-  if [[ "$re" == "1" ]]; then
-    note "Phase $phase already completed in a previous run — running it again is a REDEPLOY (idempotent: updates in place, no duplicates)."
-    read -rp "  ${bold}Re-execute Phase $phase?${reset} [Y/n]: " ok_
+  if phase_done "$phase"; then
+    note "Phase $phase already completed in a previous run — Enter SKIPS it (resume forward); 'y' re-executes (idempotent redeploy)."
+    read -rp "  ${bold}Re-execute Phase $phase?${reset} [y/N]: " ok_
+    [[ "$ok_" =~ ^[Yy]$ ]]
   else
     read -rp "  Execute Phase $phase? [Y/n]: " ok_
+    [[ ! "$ok_" =~ ^[Nn]$ ]]
   fi
-  [[ ! "$ok_" =~ ^[Nn]$ ]]
+}
+
+# Phase gate with skip-forward resume (#18). Wrap each phase body as:
+#     if run_phase "N"; then
+#       <body>
+#     fi
+#     stop_if_done "N"
+#   • execute (user accepts)                → run body
+#   • completed + declined (default on re-run) → SKIP body, advance to next phase
+#   • pending  + declined                   → deliberate STOP (exit; re-run resumes)
+run_phase() {
+  local phase="$1"
+  if confirm_phase "$phase"; then
+    return 0
+  fi
+  if phase_done "$phase"; then
+    note "⏭  Skipping Phase $phase (already completed) — resuming forward."
+    return 1
+  fi
+  echo
+  echo "${yellow}Stopped at Phase $phase (declined). Re-run to resume from here.${reset}"
+  exit 0
 }
 
 stop_if_done() {
@@ -447,7 +465,7 @@ stop_if_done "0"
 
 # ─── Phase 1: Auth ────────────────────────────────────────────────────────────
 header "Phase 1 — Auth"
-confirm_phase "1" || { stop_if_done "1"; exit 0; }
+if run_phase "1"; then
 
 echo
 step "1a. pnpm (corepack-managed; repo pins pnpm 10 via packageManager)"
@@ -552,11 +570,12 @@ else
   ok "uv installed to \$HOME/.local/bin ($(uv --version 2>/dev/null || echo '?'))"
 fi
 
+fi
 stop_if_done "1"
 
 # ─── Phase 2: Clone and assemble ─────────────────────────────────────────────
 header "Phase 2 — Clone and assemble"
-confirm_phase "2" || { stop_if_done "2"; exit 0; }
+if run_phase "2"; then
 
 step "Clone the app repo (idempotent — safe to re-run)"
 if [[ "$DRY_RUN" == "true" ]]; then
@@ -602,11 +621,12 @@ echo
 step "First assemble (before quickstart)"
 run "bash '$REPO_DIR/scripts/assemble_agent.sh'"
 
+fi
 stop_if_done "2"
 
 # ─── Phase 3: Provision Databricks resources ──────────────────────────────────
 header "Phase 3 — Provision Databricks resources"
-confirm_phase "3" || { stop_if_done "3"; exit 0; }
+if run_phase "3"; then
 
 echo
 step "3a. quickstart — MLflow experiment + Lakebase (--python 3.12 required)"
@@ -668,11 +688,12 @@ else
   run "grep -n 'exclude' '$REPO_DIR/agent/databricks.yml' || true"
 fi
 
+fi
 stop_if_done "3"
 
 # ─── Phase 4: Deploy agent app ────────────────────────────────────────────────
 header "Phase 4 — Deploy agent app"
-confirm_phase "4" || { stop_if_done "4"; exit 0; }
+if run_phase "4"; then
 
 step "Bundle deploy + run (from agent-build/; do NOT re-run assemble_agent.sh)"
 note "assemble_agent.sh already ran in Phase 2; re-running would wipe quickstart's .env and wheels."
@@ -698,11 +719,12 @@ else
     | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d['app_status']['state'])\""
 fi
 
+fi
 stop_if_done "4"
 
 # ─── Phase 5: UC managed memory ───────────────────────────────────────────────
 header "Phase 5 — UC managed memory"
-confirm_phase "5" || { stop_if_done "5"; exit 0; }
+if run_phase "5"; then
 
 capture SP_CLIENT_ID \
   "databricks apps get '$AGENT_APP_NAME' -o json --profile '$DB_PROFILE' \
@@ -714,11 +736,12 @@ run "cd '$REPO_DIR/agent-build' && \
     --memory-store '$UC_CATALOG.$UC_SCHEMA.firefly_managed_memory' \
     --profile '$DB_PROFILE'"
 
+fi
 stop_if_done "5"
 
 # ─── Phase 6: Grant SP data access ────────────────────────────────────────────
 header "Phase 6 — Grant agent SP access to data"
-confirm_phase "6" || { stop_if_done "6"; exit 0; }
+if run_phase "6"; then
 
 note "Granting USE CATALOG on $UC_CATALOG..."
 run "databricks api patch '/api/2.1/unity-catalog/permissions/catalog/$UC_CATALOG' \
@@ -743,11 +766,12 @@ fi
 note "Grant USE SCHEMA + SELECT on your data schemas via a SQL warehouse:"
 note "  GRANT USE SCHEMA, SELECT ON SCHEMA $UC_CATALOG.your_schema TO \`$SP_CLIENT_ID\`;"
 
+fi
 stop_if_done "6"
 
 # ─── Phase 6b: Create guest SP with M2M credentials ──────────────────────────
 header "Phase 6b — Create guest service principal"
-confirm_phase "6b" || { stop_if_done "6b"; exit 0; }
+if run_phase "6b"; then
 
 step "Create workspace SP"
 if [[ "$DRY_RUN" == "false" ]]; then
@@ -819,11 +843,12 @@ note "Grant USE CATALOG / USE SCHEMA / SELECT via SQL warehouse if not already d
 note "  GRANT USE CATALOG ON CATALOG $UC_CATALOG TO \`$GUEST_SP_CLIENT_ID\`;"
 note "  GRANT USE SCHEMA, SELECT ON SCHEMA $UC_CATALOG.$UC_SCHEMA TO \`$GUEST_SP_CLIENT_ID\`;"
 
+fi
 stop_if_done "6b"
 
 # ─── Phase 7: Neon database ───────────────────────────────────────────────────
 header "Phase 7 — Neon database"
-confirm_phase "7" || { stop_if_done "7"; exit 0; }
+if run_phase "7"; then
 
 note "Using neonctl credentials from Phase 1b (no API key needed)"
 
@@ -876,11 +901,12 @@ else
   run "cd '$REPO_DIR' && source .firefly-bootstrap/state.env && node_modules/.bin/drizzle-kit push"
 fi
 
+fi
 stop_if_done "7"
 
 # ─── Phase 8: Vercel frontend ─────────────────────────────────────────────────
 header "Phase 8 — Vercel frontend"
-confirm_phase "8" || { stop_if_done "8"; exit 0; }
+if run_phase "8"; then
 
 step "8a. Link Vercel project"
 run "cd '$REPO_DIR' && vercel link --project '$VERCEL_PROJECT' --scope '$VERCEL_TEAM' --yes"
@@ -976,11 +1002,12 @@ else
   PREVIEW_URL="https://$STABLE_ALIAS"
 fi
 
+fi
 stop_if_done "8"
 
 # ─── Phase 9: Verify ─────────────────────────────────────────────────────────
 header "Phase 9 — Verify"
-confirm_phase "9" || { stop_if_done "9"; exit 0; }
+if run_phase "9"; then
 
 if [[ "$DRY_RUN" == "false" ]]; then
   read_secret PREVIEW_URL "firefly-bootstrap" "PREVIEW_URL" 2>/dev/null || {
@@ -1033,6 +1060,7 @@ else
   run "# → SPN → user → loginUrl"
 fi
 
+fi
 stop_if_done "9"
 
 # ─── Done ─────────────────────────────────────────────────────────────────────
