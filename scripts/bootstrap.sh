@@ -6,6 +6,7 @@
 #   bash scripts/bootstrap.sh --dry-run   # prints commands, no infra touched
 #   bash scripts/bootstrap.sh --dry-run --stop-after=3  # stop after Phase 3
 #   bash scripts/bootstrap.sh --stop-after=1            # collect inputs + auth only
+#   bash scripts/bootstrap.sh --trust-proxy-ca          # auto-trust a detected proxy CA
 #
 # Mirrors every phase in BOOTSTRAP.md exactly.
 # Secrets persist in a gitignored, chmod-600 .firefly-bootstrap/state.env under the repo.
@@ -15,12 +16,18 @@ set -euo pipefail
 # ─── flags ────────────────────────────────────────────────────────────────────
 DRY_RUN=false
 STOP_AFTER=""
+# Non-interactive trust of an auto-detected intercepting-proxy root CA (CI/automation).
+# Also honored via env FIREFLY_TRUST_PROXY_CA=1. Off by default → we prompt with the
+# root CA's fingerprint before trusting anything.
+TRUST_PROXY_CA=false
+[[ "${FIREFLY_TRUST_PROXY_CA:-}" == "1" ]] && TRUST_PROXY_CA=true
 
 for arg in "$@"; do
   case $arg in
     --dry-run)         DRY_RUN=true ;;
     --stop-after=*)    STOP_AFTER="${arg#*=}" ;;
-    *) echo "Unknown flag: $arg  (use --dry-run, --stop-after=N)"; exit 1 ;;
+    --trust-proxy-ca)  TRUST_PROXY_CA=true ;;
+    *) echo "Unknown flag: $arg  (use --dry-run, --stop-after=N, --trust-proxy-ca)"; exit 1 ;;
   esac
 done
 
@@ -250,24 +257,80 @@ ask NEON_PROJECT_NAME "Neon project name"               "firefly-genie"
 ask VERCEL_PROJECT   "Vercel project name"              "firefly-genie"
 
 echo
-# TLS trust for intercepting corporate proxies (Zscaler/etc.). Python (quickstart,
-# Databricks SDK) and Node otherwise fail cert verification and hang until timeout.
+# uv ships its OWN bundled cert store (rustls/webpki) and ignores the OS keychain by
+# default, so it rejects an intercepting proxy's cert (UnknownIssuer) even when Node
+# and keychain-backed tools succeed. UV_SYSTEM_CERTS=1 makes uv trust the platform
+# store — harmless off-proxy (the store already trusts public CAs), required on-proxy.
+export UV_SYSTEM_CERTS="${UV_SYSTEM_CERTS:-1}"
+
+# TLS trust for intercepting corporate proxies (Zscaler / Databricks Forward Trust /
+# etc.). Python (quickstart, Databricks SDK), Node, and uv otherwise reject the proxy's
+# cert (UnknownIssuer / not-trusted) and fail or hang. Precedence:
+#   1. TLS_PEM_PATH given          → use it verbatim.
+#   2. Auto-detect a MITM by probing PyPI against the system trust store; if a PRIVATE
+#      root CA is presented, extract it, show CN + SHA-256, confirm (or --trust-proxy-ca),
+#      and build a LOCAL bundle (system roots + proxy CAs). System trust is never touched.
+#   3. No MITM detected            → nothing to do.
+apply_tls_bundle() {   # $1 = pem path — export the trust vars every toolchain reads
+  export TLS_PEM_PATH="$1" REQUESTS_CA_BUNDLE="$1" SSL_CERT_FILE="$1" NODE_EXTRA_CA_CERTS="$1"
+}
+
+# On success sets PROXY_CA_BUNDLE / PROXY_CA_ADDED / PROXY_CA_ROOT_CN / PROXY_CA_ROOT_FP.
+# Returns non-zero if TLS to PyPI already validates (no MITM) or no CA could be derived.
+derive_proxy_ca_bundle() {
+  local probe="pypi.org"
+  # If the system store already validates PyPI, there's no untrusted MITM to handle.
+  curl -sSf -o /dev/null --max-time 12 "https://${probe}/simple/" 2>/dev/null && return 1
+  local chain tmpd sysbundle capem f added=0 lastca=""
+  chain=$(printf '' | openssl s_client -connect "${probe}:443" -showcerts 2>/dev/null) || return 1
+  tmpd=$(mktemp -d) || return 1
+  awk -v d="$tmpd" '/-----BEGIN CERTIFICATE-----/{n++} n>0{print > (d"/c-" n ".pem")}' <<<"$chain"
+  sysbundle=$(python3 -c 'import certifi;print(certifi.where())' 2>/dev/null || echo /etc/ssl/cert.pem)
+  [[ -f "$sysbundle" ]] || sysbundle=/etc/ssl/cert.pem
+  init_inputs_dir
+  capem="$INPUTS_DIR/proxy-ca-bundle.pem"
+  cat "$sysbundle" > "$capem"
+  # c-1 is the server leaf; every cert after it is a CA in the presented chain.
+  for f in "$tmpd"/c-*.pem; do
+    [[ "$f" == "$tmpd/c-1.pem" ]] && continue
+    openssl x509 -in "$f" -noout >/dev/null 2>&1 || continue
+    cat "$f" >> "$capem"; added=$((added+1)); lastca="$f"
+  done
+  if [[ "$added" -eq 0 || -z "$lastca" ]]; then rm -f "$capem"; rm -rf "$tmpd"; return 1; fi
+  PROXY_CA_ROOT_CN=$(openssl x509 -in "$lastca" -noout -subject 2>/dev/null | sed -E 's/.*CN ?= ?//; s#.*/CN=##')
+  PROXY_CA_ROOT_FP=$(openssl x509 -in "$lastca" -noout -fingerprint -sha256 2>/dev/null | sed 's/.*=//')
+  rm -rf "$tmpd"
+  chmod 600 "$capem" 2>/dev/null || true
+  PROXY_CA_BUNDLE="$capem"; PROXY_CA_ADDED="$added"
+  return 0
+}
+
 if [[ -n "${TLS_PEM_PATH:-}" && -f "${TLS_PEM_PATH}" ]]; then
-  export REQUESTS_CA_BUNDLE="$TLS_PEM_PATH" SSL_CERT_FILE="$TLS_PEM_PATH" NODE_EXTRA_CA_CERTS="$TLS_PEM_PATH"
-  ok "TLS trust from TLS_PEM_PATH → REQUESTS_CA_BUNDLE / SSL_CERT_FILE / NODE_EXTRA_CA_CERTS"
-elif [[ "$DRY_RUN" == "false" ]]; then
-  read -rp "  ${bold}Behind an intercepting HTTPS proxy (Zscaler / corporate MITM)?${reset} [y/N]: " USE_PROXY
-  if [[ "$USE_PROXY" =~ ^[Yy]$ ]]; then
-    read -rp "  ${bold}Path to combined PEM/CA bundle:${reset} " TLS_PEM_PATH
-    if [[ -f "$TLS_PEM_PATH" ]]; then
-      export REQUESTS_CA_BUNDLE="$TLS_PEM_PATH" SSL_CERT_FILE="$TLS_PEM_PATH" NODE_EXTRA_CA_CERTS="$TLS_PEM_PATH"
-      ok "TLS trust → REQUESTS_CA_BUNDLE / SSL_CERT_FILE / NODE_EXTRA_CA_CERTS"
-    else
-      fail "PEM file not found: $TLS_PEM_PATH"; exit 1
-    fi
+  apply_tls_bundle "$TLS_PEM_PATH"
+  ok "TLS trust from TLS_PEM_PATH → SSL_CERT_FILE / REQUESTS_CA_BUNDLE / NODE_EXTRA_CA_CERTS"
+elif [[ "$DRY_RUN" == "true" ]]; then
+  run "# detect intercepting proxy; if a private CA is presented, confirm + build a local bundle"
+elif derive_proxy_ca_bundle; then
+  warn "Intercepting HTTPS proxy detected — its chain terminates in a PRIVATE root CA:"
+  note "  Root CN:    ${PROXY_CA_ROOT_CN:-<unknown>}"
+  note "  SHA-256:    ${PROXY_CA_ROOT_FP:-<unknown>}"
+  note "  Bundle:     $PROXY_CA_BUNDLE  (system roots + ${PROXY_CA_ADDED} proxy CA cert(s))"
+  APPROVE_CA=n
+  if [[ "$TRUST_PROXY_CA" == "true" ]]; then
+    APPROVE_CA=y
+    note "  --trust-proxy-ca set → trusting automatically."
+  else
+    echo "  ${bold}Trust this ONLY if the SHA-256 matches your organization's known root CA.${reset}"
+    read -rp "  ${bold}Trust this CA for this setup? [y/N]:${reset} " APPROVE_CA
+  fi
+  if [[ "$APPROVE_CA" =~ ^[Yy]$ ]]; then
+    apply_tls_bundle "$PROXY_CA_BUNDLE"
+    ok "TLS trust → SSL_CERT_FILE / REQUESTS_CA_BUNDLE / NODE_EXTRA_CA_CERTS (+ UV_SYSTEM_CERTS)"
+  else
+    warn "Declined. If installs fail with cert errors, re-run with TLS_PEM_PATH=<your bundle>."
   fi
 else
-  run "# prompt: intercepting proxy? → export REQUESTS_CA_BUNDLE/SSL_CERT_FILE/NODE_EXTRA_CA_CERTS"
+  ok "No intercepting proxy detected (TLS to PyPI validates against the system store)."
 fi
 
 note "All inputs collected. Summary:"
