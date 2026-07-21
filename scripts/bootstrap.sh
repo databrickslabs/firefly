@@ -235,8 +235,20 @@ confirm_phase "3" || { stop_if_done "3"; exit 0; }
 
 echo
 step "3a. quickstart — MLflow experiment + Lakebase (--python 3.12 required)"
+# Lakebase create-vs-reuse: --lakebase-create-new is non-idempotent (fails with
+# "project slug already exists" on re-run) AND it disables quickstart's own .env
+# reuse path. quickstart names resources deterministically, so if the project's
+# primary endpoint already exists, reuse it instead of trying to re-create.
+LB_ENDPOINT_PATH="projects/${LAKEBASE_NAME}/branches/${LAKEBASE_NAME}-branch/endpoints/primary"
+if [[ "$DRY_RUN" == "false" ]] \
+   && databricks api get "/api/2.0/postgres/${LB_ENDPOINT_PATH}" --profile "$DB_PROFILE" &>/dev/null; then
+  ok "Lakebase project '${LAKEBASE_NAME}' exists — reusing endpoint (idempotent re-run)."
+  LB_ARG="--lakebase-autoscaling-endpoint '${LB_ENDPOINT_PATH}'"
+else
+  LB_ARG="--lakebase-create-new '${LAKEBASE_NAME}'"
+fi
 run "cd '$REPO_DIR/agent-build' && uv run --python 3.12 python scripts/quickstart.py \
-  --profile '$DB_PROFILE' --lakebase-create-new '$LAKEBASE_NAME' --app-name '$AGENT_APP_NAME'"
+  --profile '$DB_PROFILE' ${LB_ARG} --app-name '$AGENT_APP_NAME'"
 
 echo
 step "3b. Check catalog/schema bundle variables"
