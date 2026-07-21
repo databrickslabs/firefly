@@ -167,10 +167,16 @@ store_input() {                       # store_input KEY VALUE
 
 load_inputs() { [[ -f "$INPUTS_FILE" ]] && source "$INPUTS_FILE" || true; }
 
-mark_phase_done() { store_input LAST_COMPLETED_PHASE "$1"; }
-phase_done()      { [[ "${LAST_COMPLETED_PHASE:-0}" -ge "$1" ]] 2>/dev/null; }
+# Track completed phases as a set (handles non-numeric ids like "6b"). Used to reword a
+# phase prompt as "Re-execute" on a resumed run, so a redeploy is a conscious choice.
+phase_done() { case " ${COMPLETED_PHASES:-} " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+mark_phase_done() {
+  phase_done "$1" || COMPLETED_PHASES="${COMPLETED_PHASES:+$COMPLETED_PHASES }$1"
+  store_input COMPLETED_PHASES "$COMPLETED_PHASES"
+  store_input LAST_COMPLETED_PHASE "$1"   # retained for backward-compatible state files
+}
 
-reset_inputs() { rm -f "$INPUTS_FILE"; unset LAST_COMPLETED_PHASE; }
+reset_inputs() { rm -f "$INPUTS_FILE"; unset LAST_COMPLETED_PHASE COMPLETED_PHASES; }
 
 # If a prior run left cached answers, show them and ask whether to reuse.
 maybe_reuse_inputs() {
@@ -183,7 +189,7 @@ maybe_reuse_inputs() {
   for k in DATABRICKS_HOST UC_CATALOG UC_SCHEMA DATABRICKS_ACCOUNT_ID REPO_DIR VERCEL_TEAM VERCEL_PROJECT NEON_PROJECT_NAME; do
     local v="${!k:-}"; [[ -n "$v" ]] && { echo "    ${dim}$k = $v${reset}"; shown=1; }
   done
-  [[ "${LAST_COMPLETED_PHASE:-0}" -gt 0 ]] && note "Last run completed through Phase ${LAST_COMPLETED_PHASE}."
+  [[ -n "${COMPLETED_PHASES:-}" ]] && note "Previously completed phases: ${COMPLETED_PHASES} (re-running any is a redeploy)."
   [[ "$shown" == "0" ]] && return 0
   echo
   read -rp "  ${bold}Reuse these saved answers?${reset} [Y/n]: " reuse_
@@ -197,15 +203,26 @@ maybe_reuse_inputs() {
 }
 
 confirm_phase() {
-  local phase="$1"
+  local phase="$1" ok_
+  local re=0; phase_done "$phase" && re=1
   if [[ "$DRY_RUN" == "true" ]]; then
-    echo "  ${yellow}[DRY-RUN]${reset} Would execute Phase $phase"
+    if [[ "$re" == "1" ]]; then
+      echo "  ${yellow}[DRY-RUN]${reset} Would re-execute Phase $phase (completed in a prior run)"
+    else
+      echo "  ${yellow}[DRY-RUN]${reset} Would execute Phase $phase"
+    fi
     return 0
   fi
   echo
-  # Default to Yes: this is a linear runner, so Enter should proceed. Only an
-  # explicit "n" declines (which stops the run via the caller's exit idiom).
-  read -rp "  Execute Phase $phase? [Y/n]: " ok_
+  # Default to Yes: this is a linear runner, so Enter should proceed. Only an explicit
+  # "n" declines (which stops the run via the caller's exit idiom — there is no
+  # skip-forward yet; that's the #18 resume follow-up).
+  if [[ "$re" == "1" ]]; then
+    note "Phase $phase already completed in a previous run — running it again is a REDEPLOY (idempotent: updates in place, no duplicates)."
+    read -rp "  ${bold}Re-execute Phase $phase?${reset} [Y/n]: " ok_
+  else
+    read -rp "  Execute Phase $phase? [Y/n]: " ok_
+  fi
   [[ ! "$ok_" =~ ^[Nn]$ ]]
 }
 
