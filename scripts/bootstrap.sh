@@ -277,8 +277,38 @@ run "neonctl me"
 
 echo
 step "1e. Databricks CLI OAuth (opens browser)"
+if command -v databricks &>/dev/null; then
+  ok "databricks already installed: $(databricks --version 2>/dev/null | head -1)"
+elif [[ "$DRY_RUN" == "true" ]]; then
+  run "# download + install Databricks CLI (official release) to \$HOME/bin"
+else
+  note "Installing Databricks CLI (official release; no Homebrew required)..."
+  DB_ARCH="$(uname -m)"; [[ "$DB_ARCH" == "arm64" ]] && DB_ARCH="arm64" || DB_ARCH="amd64"
+  DB_VER=$(curl -fsSL https://api.github.com/repos/databricks/cli/releases/latest \
+    | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'].lstrip('v'))")
+  DB_TMP=$(mktemp -d)
+  curl -fsSL "https://github.com/databricks/cli/releases/download/v${DB_VER}/databricks_cli_${DB_VER}_darwin_${DB_ARCH}.zip" -o "$DB_TMP/db.zip"
+  unzip -q "$DB_TMP/db.zip" -d "$DB_TMP"
+  mkdir -p "$HOME/bin" && cp "$DB_TMP/databricks" "$HOME/bin/databricks"
+  export PATH="$HOME/bin:$PATH"
+  rm -rf "$DB_TMP"
+  ok "databricks installed to \$HOME/bin ($(databricks --version 2>/dev/null | head -1))"
+fi
 run "databricks auth login --host '$DATABRICKS_HOST' --profile '$DB_PROFILE'"
 run "databricks workspace list / --profile '$DB_PROFILE' 2>&1 | head -3"
+
+echo
+step "1f. Python uv (used by the agent build in Phases 4–5)"
+if command -v uv &>/dev/null; then
+  ok "uv already installed: $(uv --version 2>/dev/null || echo '?')"
+elif [[ "$DRY_RUN" == "true" ]]; then
+  run "# install uv via astral.sh installer to \$HOME/.local/bin"
+else
+  note "Installing uv (astral.sh installer; no Homebrew required)..."
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$PATH"
+  ok "uv installed to \$HOME/.local/bin ($(uv --version 2>/dev/null || echo '?'))"
+fi
 
 stop_if_done "1"
 
