@@ -196,8 +196,10 @@ confirm_phase() {
     return 0
   fi
   echo
-  read -rp "  Execute Phase $phase? [y/N]: " ok_
-  [[ "$ok_" =~ ^[Yy]$ ]]
+  # Default to Yes: this is a linear runner, so Enter should proceed. Only an
+  # explicit "n" declines (which stops the run via the caller's exit idiom).
+  read -rp "  Execute Phase $phase? [Y/n]: " ok_
+  [[ ! "$ok_" =~ ^[Nn]$ ]]
 }
 
 stop_if_done() {
