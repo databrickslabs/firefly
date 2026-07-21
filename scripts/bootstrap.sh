@@ -947,19 +947,19 @@ note "Omit SPN_AUTH_OKTA_* entirely — the plugin is conditional; absent vars a
 
 for SCOPE in preview production; do
   note "Setting tier-1 vars for scope: $SCOPE"
-  run "vercel env add DATABRICKS_AGENT_APP_URL  $SCOPE <<< '$AGENT_APP_URL'"
-  run "vercel env add DATABASE_URL              $SCOPE <<< '$DB_URL'"
-  run "vercel env add BETTER_AUTH_SECRET        $SCOPE <<< '$BETTER_AUTH_SECRET'"
+  run "vercel env add DATABRICKS_AGENT_APP_URL  $SCOPE --value '$AGENT_APP_URL' --force --non-interactive --scope '$VERCEL_TEAM'"
+  run "vercel env add DATABASE_URL              $SCOPE --value '$DB_URL' --force --non-interactive --scope '$VERCEL_TEAM'"
+  run "vercel env add BETTER_AUTH_SECRET        $SCOPE --value '$BETTER_AUTH_SECRET' --force --non-interactive --scope '$VERCEL_TEAM'"
   # preview's BETTER_AUTH_URL is set AFTER deploy (step 8e) to the real serving
   # origin — a pre-deploy guess breaks guest one-time-token verification (#19).
   # production's canonical domain is stable, so set it here.
   [[ "$SCOPE" == "production" ]] && \
-    run "vercel env add BETTER_AUTH_URL         $SCOPE <<< 'https://$VERCEL_PROJECT.vercel.app'"
-  run "vercel env add ENCRYPTION_KEY            $SCOPE <<< '$ENCRYPTION_KEY'"
-  run "vercel env add NEXT_PUBLIC_AGENT_ENABLED $SCOPE <<< 'true'"
-  run "vercel env add GUEST_API_SECRET          $SCOPE <<< '$GUEST_API_SECRET'"
-  run "vercel env add SPN_AUTH_DATABRICKS_ACCOUNTS_URL  $SCOPE <<< 'https://accounts.cloud.databricks.com'"
-  run "vercel env add SPN_AUTH_DATABRICKS_WORKSPACE_URL $SCOPE <<< '$DATABRICKS_HOST'"
+    run "vercel env add BETTER_AUTH_URL         $SCOPE --value 'https://$VERCEL_PROJECT.vercel.app' --force --non-interactive --scope '$VERCEL_TEAM'"
+  run "vercel env add ENCRYPTION_KEY            $SCOPE --value '$ENCRYPTION_KEY' --force --non-interactive --scope '$VERCEL_TEAM'"
+  run "vercel env add NEXT_PUBLIC_AGENT_ENABLED $SCOPE --value 'true' --force --non-interactive --scope '$VERCEL_TEAM'"
+  run "vercel env add GUEST_API_SECRET          $SCOPE --value '$GUEST_API_SECRET' --force --non-interactive --scope '$VERCEL_TEAM'"
+  run "vercel env add SPN_AUTH_DATABRICKS_ACCOUNTS_URL  $SCOPE --value 'https://accounts.cloud.databricks.com' --force --non-interactive --scope '$VERCEL_TEAM'"
+  run "vercel env add SPN_AUTH_DATABRICKS_WORKSPACE_URL $SCOPE --value '$DATABRICKS_HOST' --force --non-interactive --scope '$VERCEL_TEAM'"
 done
 
 echo
@@ -967,10 +967,10 @@ step "8b. Tier 2 env vars — admin Databricks OAuth (placeholder is safe for gu
 note "genericOAuth receives these as a plain object — undefined does NOT crash the build."
 note "Admin login will 404 at runtime with placeholders, but guest flow is unaffected."
 for SCOPE in preview production; do
-  run "vercel env add DATABRICKS_U2M_CLIENT_ID     $SCOPE <<< 'placeholder'"
-  run "vercel env add DATABRICKS_U2M_CLIENT_SECRET $SCOPE <<< 'placeholder'"
-  run "vercel env add DATABRICKS_ACCOUNT_ID        $SCOPE <<< '$DATABRICKS_ACCOUNT_ID'"
-  run "vercel env add SPN_AUTH_DATABRICKS_ACCOUNT_ID $SCOPE <<< '$DATABRICKS_ACCOUNT_ID'"
+  run "vercel env add DATABRICKS_U2M_CLIENT_ID     $SCOPE --value 'placeholder' --force --non-interactive --scope '$VERCEL_TEAM'"
+  run "vercel env add DATABRICKS_U2M_CLIENT_SECRET $SCOPE --value 'placeholder' --force --non-interactive --scope '$VERCEL_TEAM'"
+  run "vercel env add DATABRICKS_ACCOUNT_ID        $SCOPE --value '$DATABRICKS_ACCOUNT_ID' --force --non-interactive --scope '$VERCEL_TEAM'"
+  run "vercel env add SPN_AUTH_DATABRICKS_ACCOUNT_ID $SCOPE --value '$DATABRICKS_ACCOUNT_ID' --force --non-interactive --scope '$VERCEL_TEAM'"
 done
 note "To enable admin login later: replace 'placeholder' with real OAuth app credentials"
 note "from: accounts.cloud.databricks.com → App connections → Register an app"
@@ -1000,8 +1000,9 @@ echo
 step "8e. Deploy — phase 2 of 2: set BETTER_AUTH_URL to the real URL, then redeploy"
 note "BETTER_AUTH_URL is read at runtime; it must equal the origin the guest actually opens (#19)."
 if [[ "$DRY_RUN" == "false" ]]; then
-  vercel env rm  BETTER_AUTH_URL preview --yes --scope "$VERCEL_TEAM" 2>/dev/null || true
-  vercel env add BETTER_AUTH_URL preview --scope "$VERCEL_TEAM" <<< "$PREVIEW_URL"
+  # --force overwrites the existing preview value (idempotent); --non-interactive avoids
+  # the "Git branch?" prompt (defaults to all Preview branches). No rm/herestring needed.
+  vercel env add BETTER_AUTH_URL preview --value "$PREVIEW_URL" --force --non-interactive --scope "$VERCEL_TEAM"
   # Redeploy so the running deployment serves BETTER_AUTH_URL=$PREVIEW_URL, then re-point the alias.
   DEPLOY_URL2=$(vercel deploy --scope "$VERCEL_TEAM" 2>&1 | grep -oE 'https://[^ ]*\.vercel\.app' | tail -1)
   vercel alias set "$DEPLOY_URL2" "$STABLE_ALIAS" --scope "$VERCEL_TEAM"
@@ -1009,7 +1010,7 @@ if [[ "$DRY_RUN" == "false" ]]; then
   store_secret PREVIEW_URL "$PREVIEW_URL"
   store_secret GUEST_API_SECRET "$GUEST_API_SECRET"
 else
-  run "vercel env rm BETTER_AUTH_URL preview --yes; vercel env add BETTER_AUTH_URL preview <<< '$PREVIEW_URL'"
+  run "vercel env add BETTER_AUTH_URL preview --value '$PREVIEW_URL' --force --non-interactive --scope '$VERCEL_TEAM'"
   run "vercel deploy --scope '$VERCEL_TEAM'                       # capture DEPLOY_URL2"
   run "vercel alias set <DEPLOY_URL2> '$STABLE_ALIAS' --scope '$VERCEL_TEAM'"
   PREVIEW_URL="https://$STABLE_ALIAS"
