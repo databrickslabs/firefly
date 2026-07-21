@@ -186,12 +186,20 @@ if command -v neonctl &>/dev/null; then
 else
   run "brew install neonctl"
 fi
-run "neonctl auth"
+if [[ "$DRY_RUN" == "false" ]] && neonctl me &>/dev/null; then
+  ok "neonctl already authenticated"
+else
+  run "neonctl auth"
+fi
 run "neonctl me"
 
 echo
 step "1c. Vercel CLI OAuth (opens browser)"
-run "vercel login"
+if [[ "$DRY_RUN" == "false" ]] && vercel whoami &>/dev/null; then
+  ok "vercel already authenticated: $(vercel whoami 2>/dev/null | tail -1)"
+else
+  run "vercel login"
+fi
 run "vercel whoami"
 
 echo
