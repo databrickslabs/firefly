@@ -196,27 +196,7 @@ header "Phase 1 — Auth"
 confirm_phase "1" || { stop_if_done "1"; exit 0; }
 
 echo
-step "1a. Databricks CLI OAuth (opens browser)"
-run "databricks auth login --host '$DATABRICKS_HOST' --profile '$DB_PROFILE'"
-run "databricks workspace list / --profile '$DB_PROFILE' 2>&1 | head -3"
-
-echo
-step "1b. Neon CLI OAuth (opens browser)"
-if command -v neonctl &>/dev/null; then
-  ok "neonctl already installed: $(neonctl --version 2>/dev/null || echo '?')"
-else
-  run "brew install neonctl"
-fi
-run "neonctl auth"
-run "neonctl me"
-
-echo
-step "1c. Vercel CLI OAuth (opens browser)"
-run "vercel login"
-run "vercel whoami"
-
-echo
-step "1d. pnpm (via npm)"
+step "1a. pnpm (install first — later CLIs and the frontend build need it)"
 if command -v pnpm &>/dev/null; then
   ok "pnpm already installed: $(pnpm --version 2>/dev/null || echo '?')"
 else
@@ -224,12 +204,54 @@ else
 fi
 
 echo
-step "1d. GitHub CLI"
+step "1b. Vercel CLI OAuth (opens browser)"
+if command -v vercel &>/dev/null; then
+  ok "vercel already installed: $(vercel --version 2>/dev/null || echo '?')"
+else
+  run "npm install -g vercel"
+fi
+run "vercel login"
+run "vercel whoami"
+
+echo
+step "1c. GitHub CLI"
+if command -v gh &>/dev/null; then
+  ok "gh already installed: $(gh --version 2>/dev/null | head -1)"
+elif [[ "$DRY_RUN" == "true" ]]; then
+  run "# download + install GitHub CLI (official release) to \$HOME/bin"
+else
+  note "Installing GitHub CLI (official release; no Homebrew required)..."
+  GH_ARCH="$(uname -m)"; [[ "$GH_ARCH" == "arm64" ]] && GH_ARCH="macOS_arm64" || GH_ARCH="macOS_amd64"
+  GH_TAG=$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest \
+    | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'].lstrip('v'))")
+  GH_TMP=$(mktemp -d)
+  curl -fsSL "https://github.com/cli/cli/releases/latest/download/gh_${GH_TAG}_${GH_ARCH}.zip" -o "$GH_TMP/gh.zip"
+  unzip -q "$GH_TMP/gh.zip" -d "$GH_TMP"
+  mkdir -p "$HOME/bin" && cp "$GH_TMP"/gh_*/bin/gh "$HOME/bin/gh"
+  export PATH="$HOME/bin:$PATH"
+  rm -rf "$GH_TMP"
+  ok "gh installed to \$HOME/bin"
+fi
 if gh auth status &>/dev/null; then
   ok "gh already authenticated: $(gh auth status 2>&1 | head -1)"
 else
   run "gh auth login"
 fi
+
+echo
+step "1d. Neon CLI OAuth (opens browser)"
+if command -v neonctl &>/dev/null; then
+  ok "neonctl already installed: $(neonctl --version 2>/dev/null || echo '?')"
+else
+  run "npm install -g neonctl"
+fi
+run "neonctl auth"
+run "neonctl me"
+
+echo
+step "1e. Databricks CLI OAuth (opens browser)"
+run "databricks auth login --host '$DATABRICKS_HOST' --profile '$DB_PROFILE'"
+run "databricks workspace list / --profile '$DB_PROFILE' 2>&1 | head -3"
 
 stop_if_done "1"
 
