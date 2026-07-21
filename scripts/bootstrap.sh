@@ -236,7 +236,7 @@ confirm_phase "3" || { stop_if_done "3"; exit 0; }
 echo
 step "3a. quickstart — MLflow experiment + Lakebase (--python 3.12 required)"
 run "cd '$REPO_DIR/agent-build' && uv run --python 3.12 python scripts/quickstart.py \
-  --profile '$DB_PROFILE' --lakebase-create-new '$LAKEBASE_NAME'"
+  --profile '$DB_PROFILE' --lakebase-create-new '$LAKEBASE_NAME' --app-name '$AGENT_APP_NAME'"
 
 echo
 step "3b. Check catalog/schema bundle variables"
