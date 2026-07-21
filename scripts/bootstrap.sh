@@ -381,10 +381,23 @@ confirm_phase "6b" || { stop_if_done "6b"; exit 0; }
 
 step "Create workspace SP"
 if [[ "$DRY_RUN" == "false" ]]; then
-  GUEST_SP_RESP=$(databricks service-principals create \
-    --display-name "firefly-guest-sp" \
-    -o json \
-    --profile "$DB_PROFILE")
+  # SCIM display names are NOT unique: `service-principals create` on a re-run
+  # makes a DUPLICATE SP (new client id + secret) and orphans the old one.
+  # Reuse the existing firefly-guest-sp if one is already present.
+  GUEST_SP_RESP=$(databricks service-principals list \
+    --filter 'displayName eq "firefly-guest-sp"' -o json --profile "$DB_PROFILE" 2>/dev/null \
+    | python3 -c "import sys,json
+l=json.load(sys.stdin) or []
+m=[s for s in l if s.get('displayName')=='firefly-guest-sp']
+print(json.dumps(m[0]) if m else '')" 2>/dev/null || echo "")
+  if [[ -n "$GUEST_SP_RESP" ]]; then
+    ok "Guest SP 'firefly-guest-sp' already exists — reusing (idempotent re-run)."
+  else
+    GUEST_SP_RESP=$(databricks service-principals create \
+      --display-name "firefly-guest-sp" \
+      -o json \
+      --profile "$DB_PROFILE")
+  fi
   # CLI returns SCIM camelCase: applicationId, not application_id
   GUEST_SP_CLIENT_ID=$(echo "$GUEST_SP_RESP" \
     | python3 -c "import sys,json; print(json.load(sys.stdin)['applicationId'])")
@@ -458,16 +471,23 @@ fi
 
 note "Creating Neon project..."
 if [[ "$DRY_RUN" == "false" ]]; then
-  if [[ -n "$ORG_ID" ]]; then
-    PROJECT_ID=$(neonctl projects create --name "$NEON_PROJECT_NAME" \
-      --org-id "$ORG_ID" --output json \
-      | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+  ORG_FLAG=(); [[ -n "$ORG_ID" ]] && ORG_FLAG=(--org-id "$ORG_ID")
+  # Neon project names are NOT unique (id-based): `projects create` on a re-run
+  # makes a SECOND project, orphans the first, and can trip the project quota.
+  # Reuse an existing project with the same name if present.
+  PROJECT_ID=$(NEON_PROJECT_NAME="$NEON_PROJECT_NAME" neonctl projects list "${ORG_FLAG[@]}" --output json 2>/dev/null \
+    | python3 -c "import os,sys,json
+d=json.load(sys.stdin)
+ps=d.get('projects',d) if isinstance(d,dict) else d
+name=os.environ['NEON_PROJECT_NAME']
+print(next((p['id'] for p in ps if p.get('name')==name),''))" 2>/dev/null || echo "")
+  if [[ -n "$PROJECT_ID" ]]; then
+    ok "Neon project '$NEON_PROJECT_NAME' exists — reusing ($PROJECT_ID)."
   else
-    PROJECT_ID=$(neonctl projects create --name "$NEON_PROJECT_NAME" \
-      --output json \
+    PROJECT_ID=$(neonctl projects create --name "$NEON_PROJECT_NAME" "${ORG_FLAG[@]}" --output json \
       | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+    ok "Project created: $PROJECT_ID"
   fi
-  ok "Project created: $PROJECT_ID"
 
   DB_URL=$(neonctl connection-string --project-id "$PROJECT_ID" --pooled)
   python3 -c "import keyring; keyring.set_password('firefly-bootstrap', 'DATABASE_URL', '$DB_URL')"
