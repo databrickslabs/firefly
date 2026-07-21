@@ -444,11 +444,11 @@ if [[ "$DRY_RUN" == "false" ]]; then
   if [[ -n "$ORG_ID" ]]; then
     PROJECT_ID=$(neonctl projects create --name "$NEON_PROJECT_NAME" \
       --org-id "$ORG_ID" --output json \
-      | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+      | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('project',{}).get('id') or d.get('id',''))")
   else
     PROJECT_ID=$(neonctl projects create --name "$NEON_PROJECT_NAME" \
       --output json \
-      | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+      | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('project',{}).get('id') or d.get('id',''))")
   fi
   ok "Project created: $PROJECT_ID"
 
