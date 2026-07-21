@@ -406,7 +406,11 @@ if command -v vercel &>/dev/null; then
 else
   run "npm install -g vercel"
 fi
-run "vercel login"
+if [[ "$DRY_RUN" == "false" ]] && vercel whoami &>/dev/null; then
+  ok "vercel already authenticated: $(vercel whoami 2>/dev/null | tail -1)"
+else
+  run "vercel login"
+fi
 run "vercel whoami"
 
 echo
@@ -441,7 +445,11 @@ if command -v neonctl &>/dev/null; then
 else
   run "npm install -g neonctl"
 fi
-run "neonctl auth"
+if [[ "$DRY_RUN" == "false" ]] && neonctl me &>/dev/null; then
+  ok "neonctl already authenticated"
+else
+  run "neonctl auth"
+fi
 run "neonctl me"
 
 echo
@@ -538,7 +546,7 @@ confirm_phase "3" || { stop_if_done "3"; exit 0; }
 echo
 step "3a. quickstart — MLflow experiment + Lakebase (--python 3.12 required)"
 run "cd '$REPO_DIR/agent-build' && uv run --python 3.12 python scripts/quickstart.py \
-  --profile '$DB_PROFILE' --lakebase-create-new '$LAKEBASE_NAME'"
+  --profile '$DB_PROFILE' --lakebase-create-new '$LAKEBASE_NAME' --app-name '$AGENT_APP_NAME'"
 
 echo
 step "3b. Catalog/schema → bundle vars (applied at deploy; no yml edit)"
