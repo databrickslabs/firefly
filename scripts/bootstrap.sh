@@ -156,6 +156,27 @@ ask VERCEL_TEAM      "Vercel team slug (e.g. acme-corp — from vercel.com/<slug
 ask NEON_PROJECT_NAME "Neon project name"               "firefly-genie"
 ask VERCEL_PROJECT   "Vercel project name"              "firefly-genie"
 
+echo
+# TLS trust for intercepting corporate proxies (Zscaler/etc.). Python (quickstart,
+# Databricks SDK) and Node otherwise fail cert verification and hang until timeout.
+if [[ -n "${TLS_PEM_PATH:-}" && -f "${TLS_PEM_PATH}" ]]; then
+  export REQUESTS_CA_BUNDLE="$TLS_PEM_PATH" SSL_CERT_FILE="$TLS_PEM_PATH" NODE_EXTRA_CA_CERTS="$TLS_PEM_PATH"
+  ok "TLS trust from TLS_PEM_PATH → REQUESTS_CA_BUNDLE / SSL_CERT_FILE / NODE_EXTRA_CA_CERTS"
+elif [[ "$DRY_RUN" == "false" ]]; then
+  read -rp "  ${bold}Behind an intercepting HTTPS proxy (Zscaler / corporate MITM)?${reset} [y/N]: " USE_PROXY
+  if [[ "$USE_PROXY" =~ ^[Yy]$ ]]; then
+    read -rp "  ${bold}Path to combined PEM/CA bundle:${reset} " TLS_PEM_PATH
+    if [[ -f "$TLS_PEM_PATH" ]]; then
+      export REQUESTS_CA_BUNDLE="$TLS_PEM_PATH" SSL_CERT_FILE="$TLS_PEM_PATH" NODE_EXTRA_CA_CERTS="$TLS_PEM_PATH"
+      ok "TLS trust → REQUESTS_CA_BUNDLE / SSL_CERT_FILE / NODE_EXTRA_CA_CERTS"
+    else
+      fail "PEM file not found: $TLS_PEM_PATH"; exit 1
+    fi
+  fi
+else
+  run "# prompt: intercepting proxy? → export REQUESTS_CA_BUNDLE/SSL_CERT_FILE/NODE_EXTRA_CA_CERTS"
+fi
+
 note "All inputs collected. Summary:"
 note "  DATABRICKS_HOST  = $DATABRICKS_HOST"
 note "  DB_PROFILE       = $DB_PROFILE"
