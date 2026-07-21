@@ -566,7 +566,11 @@ for SCOPE in preview production; do
   run "vercel env add DATABRICKS_AGENT_APP_URL  $SCOPE <<< '$AGENT_APP_URL'"
   run "vercel env add DATABASE_URL              $SCOPE <<< '$DB_URL'"
   run "vercel env add BETTER_AUTH_SECRET        $SCOPE <<< '$BETTER_AUTH_SECRET'"
-  run "vercel env add BETTER_AUTH_URL           $SCOPE <<< 'https://$VERCEL_PROJECT.vercel.app'"
+  # preview's BETTER_AUTH_URL is set AFTER deploy (step 8e) to the real serving
+  # origin — a pre-deploy guess breaks guest one-time-token verification (#19).
+  # production's canonical domain is stable, so set it here.
+  [[ "$SCOPE" == "production" ]] && \
+    run "vercel env add BETTER_AUTH_URL         $SCOPE <<< 'https://$VERCEL_PROJECT.vercel.app'"
   run "vercel env add ENCRYPTION_KEY            $SCOPE <<< '$ENCRYPTION_KEY'"
   run "vercel env add NEXT_PUBLIC_AGENT_ENABLED $SCOPE <<< 'true'"
   run "vercel env add GUEST_API_SECRET          $SCOPE <<< '$GUEST_API_SECRET'"
@@ -592,15 +596,39 @@ step "8c. Disable preview SSO protection"
 run "vercel project protection disable '$VERCEL_PROJECT' --sso --scope '$VERCEL_TEAM'"
 
 echo
-step "8d. Deploy"
+step "8d. Deploy — phase 1 of 2: discover the real URL and pin a stable alias"
+note "Vercel may serve at a suffixed domain if the project name was taken; never guess it (#19)."
+STABLE_ALIAS="${VERCEL_PROJECT}.vercel.app"
 if [[ "$DRY_RUN" == "false" ]]; then
-  PREVIEW_URL=$(vercel deploy --scope "$VERCEL_TEAM" 2>&1 | grep -E 'https://' | tail -1)
-  ok "Preview URL: $PREVIEW_URL"
+  DEPLOY_URL=$(vercel deploy --scope "$VERCEL_TEAM" 2>&1 | grep -oE 'https://[^ ]*\.vercel\.app' | tail -1)
+  ok "Deployment URL: $DEPLOY_URL"
+  # Pin a stable alias so BETTER_AUTH_URL stays valid across the redeploy below.
+  vercel alias set "$DEPLOY_URL" "$STABLE_ALIAS" --scope "$VERCEL_TEAM"
+  PREVIEW_URL="https://$STABLE_ALIAS"
+  ok "Stable alias: $PREVIEW_URL"
+else
+  run "vercel deploy --scope '$VERCEL_TEAM'                       # capture DEPLOY_URL"
+  run "vercel alias set <DEPLOY_URL> '$STABLE_ALIAS' --scope '$VERCEL_TEAM'"
+  PREVIEW_URL="https://$STABLE_ALIAS"
+fi
+
+echo
+step "8e. Deploy — phase 2 of 2: set BETTER_AUTH_URL to the real URL, then redeploy"
+note "BETTER_AUTH_URL is read at runtime; it must equal the origin the guest actually opens (#19)."
+if [[ "$DRY_RUN" == "false" ]]; then
+  vercel env rm  BETTER_AUTH_URL preview --yes --scope "$VERCEL_TEAM" 2>/dev/null || true
+  vercel env add BETTER_AUTH_URL preview --scope "$VERCEL_TEAM" <<< "$PREVIEW_URL"
+  # Redeploy so the running deployment serves BETTER_AUTH_URL=$PREVIEW_URL, then re-point the alias.
+  DEPLOY_URL2=$(vercel deploy --scope "$VERCEL_TEAM" 2>&1 | grep -oE 'https://[^ ]*\.vercel\.app' | tail -1)
+  vercel alias set "$DEPLOY_URL2" "$STABLE_ALIAS" --scope "$VERCEL_TEAM"
+  ok "Redeployed; $PREVIEW_URL now serves BETTER_AUTH_URL=$PREVIEW_URL"
   python3 -c "import keyring; keyring.set_password('firefly-bootstrap', 'PREVIEW_URL', '$PREVIEW_URL')"
   python3 -c "import keyring; keyring.set_password('firefly-bootstrap', 'GUEST_API_SECRET', '$GUEST_API_SECRET')"
 else
-  run "vercel deploy --scope '$VERCEL_TEAM'"
-  PREVIEW_URL="<preview-url>"
+  run "vercel env rm BETTER_AUTH_URL preview --yes; vercel env add BETTER_AUTH_URL preview <<< '$PREVIEW_URL'"
+  run "vercel deploy --scope '$VERCEL_TEAM'                       # capture DEPLOY_URL2"
+  run "vercel alias set <DEPLOY_URL2> '$STABLE_ALIAS' --scope '$VERCEL_TEAM'"
+  PREVIEW_URL="https://$STABLE_ALIAS"
 fi
 
 stop_if_done "8"
