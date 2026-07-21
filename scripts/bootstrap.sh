@@ -220,6 +220,28 @@ run "git clone --branch genie-agent https://github.com/databrickslabs/firefly.gi
 run "cd '$REPO_DIR'"
 
 echo
+step "Push to your GitHub fork (Vercel Git integration needs a repo you own)"
+if [[ "${SKIP_GITHUB_PUSH:-0}" == "1" ]]; then
+  warn "SKIP_GITHUB_PUSH=1 — skipping fork create/push"
+elif [[ "$DRY_RUN" == "true" ]]; then
+  run "gh repo create <you>/firefly --private --source '$REPO_DIR' --remote origin-fork --push"
+else
+  GH_USER=$(gh api user -q .login 2>/dev/null || echo "")
+  if [[ -n "$GH_USER" ]]; then
+    FORK_REPO="${GITHUB_FORK:-$GH_USER/firefly}"
+    if gh repo view "$FORK_REPO" &>/dev/null; then
+      git -C "$REPO_DIR" remote add origin-fork "https://github.com/${FORK_REPO}.git" 2>/dev/null || true
+      git -C "$REPO_DIR" push -u origin-fork genie-agent
+    else
+      gh repo create "$FORK_REPO" --private --source "$REPO_DIR" --remote origin-fork --push
+    fi
+    ok "Vercel will link to github.com/$FORK_REPO"
+  else
+    warn "Could not detect GitHub user — set GITHUB_FORK=<owner>/firefly or run 'gh auth login'"
+  fi
+fi
+
+echo
 step "Submodule init (must run before assemble_agent.sh)"
 run "git -C '$REPO_DIR' submodule update --init"
 
