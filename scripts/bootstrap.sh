@@ -298,6 +298,12 @@ echo
 # store — harmless off-proxy (the store already trusts public CAs), required on-proxy.
 export UV_SYSTEM_CERTS="${UV_SYSTEM_CERTS:-1}"
 
+# The gh / databricks / uv installers drop binaries into these user-local bin dirs (Phase 1).
+# Export them EVERY run at top level (not inside the Phase 1 body): with skip-forward resume
+# (#18), a run that skips Phase 1 must still find `databricks`/`uv`/`gh` in later phases —
+# otherwise Phase 8's `databricks apps get` fails with "command not found".
+export PATH="$HOME/bin:$HOME/.local/bin:$PATH"
+
 # TLS trust for intercepting corporate proxies (Zscaler / Databricks Forward Trust /
 # etc.). Python (quickstart, Databricks SDK), Node, and uv otherwise reject the proxy's
 # cert (UnknownIssuer / not-trusted) and fail or hang. Precedence:
