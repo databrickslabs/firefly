@@ -908,8 +908,22 @@ stop_if_done "7"
 header "Phase 8 — Vercel frontend"
 if run_phase "8"; then
 
-step "8a. Link Vercel project"
-run "cd '$REPO_DIR' && vercel link --project '$VERCEL_PROJECT' --scope '$VERCEL_TEAM' --yes"
+step "8a. Link Vercel project + connect the fork's Git remote"
+# The clone has TWO remotes (origin=upstream, origin-fork=your fork from #17). Plain
+# `vercel link --yes` still prompts "which remote?" interactively. --non-interactive
+# suppresses that; then we connect the fork EXPLICITLY by URL (deterministic — Vercel's
+# Git integration must point at the repo you can push to, never upstream).
+run "cd '$REPO_DIR' && vercel link --project '$VERCEL_PROJECT' --scope '$VERCEL_TEAM' --yes --non-interactive"
+if [[ "$DRY_RUN" == "false" ]]; then
+  FORK_URL=$(git -C "$REPO_DIR" remote get-url origin-fork 2>/dev/null || echo "")
+  if [[ -n "$FORK_URL" ]]; then
+    run "cd '$REPO_DIR' && vercel git connect '$FORK_URL' --scope '$VERCEL_TEAM' --non-interactive"
+  else
+    warn "No origin-fork remote — skipping explicit Git connect (set GITHUB_FORK / re-run Phase 2 push)."
+  fi
+else
+  run "cd '$REPO_DIR' && vercel git connect \"\$(git -C '$REPO_DIR' remote get-url origin-fork)\" --scope '$VERCEL_TEAM' --non-interactive"
+fi
 
 echo
 step "8b. Generate secrets"
