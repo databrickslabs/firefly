@@ -239,16 +239,10 @@ run "cd '$REPO_DIR/agent-build' && uv run --python 3.12 python scripts/quickstar
   --profile '$DB_PROFILE' --lakebase-create-new '$LAKEBASE_NAME'"
 
 echo
-step "3b. Check catalog/schema bundle variables"
-note "HOST/WORKSPACE_ID/GENIE_ONE_URL are injected by quickstart — no manual edits needed."
-if [[ "$UC_CATALOG" != "workspace" || "$UC_SCHEMA" != "default" ]]; then
-  warn "UC_CATALOG=$UC_CATALOG UC_SCHEMA=$UC_SCHEMA differ from bundle defaults."
-  warn "Edit agent-build/databricks.yml: update catalog/schema vars and DATABRICKS_MEMORY_STORE."
-  [[ "$DRY_RUN" == "true" ]] && \
-    run "# Edit catalog/schema in '$REPO_DIR/agent-build/databricks.yml'"
-else
-  ok "Catalog/schema match bundle defaults (workspace/default) — no yml edits needed."
-fi
+step "3b. Catalog/schema → bundle vars (applied at deploy; no yml edit)"
+note "HOST/WORKSPACE_ID/GENIE_ONE_URL are injected by quickstart."
+note "catalog=$UC_CATALOG schema=$UC_SCHEMA are passed via --var at deploy (Phase 4);"
+note "DATABRICKS_MEMORY_STORE resolves to $UC_CATALOG.$UC_SCHEMA.firefly_managed_memory."
 
 echo
 step "3c. Create UC wheels volume"
@@ -290,8 +284,9 @@ confirm_phase "4" || { stop_if_done "4"; exit 0; }
 
 step "Bundle deploy + run (from agent-build/; do NOT re-run assemble_agent.sh)"
 note "assemble_agent.sh already ran in Phase 2; re-running would wipe quickstart's .env and wheels."
-run "cd '$REPO_DIR/agent-build' && databricks bundle deploy --profile '$DB_PROFILE' -t dev"
-run "cd '$REPO_DIR/agent-build' && databricks bundle run agent_openai_agents_sdk --profile '$DB_PROFILE' -t dev"
+BUNDLE_VARS="--var catalog=$UC_CATALOG --var schema=$UC_SCHEMA"
+run "cd '$REPO_DIR/agent-build' && databricks bundle deploy --profile '$DB_PROFILE' -t dev $BUNDLE_VARS"
+run "cd '$REPO_DIR/agent-build' && databricks bundle run agent_openai_agents_sdk --profile '$DB_PROFILE' -t dev $BUNDLE_VARS"
 
 echo
 step "Poll until app_status.state = RUNNING (deployment state leads by ~44s)"
