@@ -333,6 +333,35 @@ bridge_pip_index_to_uv() {
   PIP_BRIDGED_INDEX="$idx"
 }
 
+# corepack fetches the repo's pinned package manager (packageManager: pnpm@10.x) from
+# registry.npmjs.org by default. On corporate networks that block public npm this 503s —
+# the same failure mode as uv hitting public PyPI. Bridge the user's OWN npm registry into
+# corepack via COREPACK_NPM_REGISTRY, and disable the interactive download prompt. Needed
+# because pnpm's npm "latest" dist-tag currently resolves to a 12.x ALPHA that ignores
+# onlyBuiltDependencies (→ ERR_PNPM_IGNORED_BUILDS); the pin routes us to stable pnpm 10.
+detect_npm_registry() {
+  local v f
+  if command -v npm >/dev/null 2>&1; then
+    v=$(npm config get registry 2>/dev/null | tr -d '[:space:]')
+    [[ -n "$v" && "$v" != "undefined" ]] && { echo "$v"; return; }
+  fi
+  for f in "$HOME/.npmrc" "${PREFIX:-/usr/local}/etc/npmrc" /etc/npmrc; do
+    [[ -f "$f" ]] || continue
+    v=$(awk -F= '/^[[:space:]]*registry[[:space:]]*=/{gsub(/[[:space:]]/,"",$2);print $2; exit}' "$f")
+    [[ -n "$v" ]] && { echo "$v"; return; }
+  done
+}
+
+bridge_npm_registry_to_corepack() {
+  export COREPACK_ENABLE_DOWNLOAD_PROMPT="${COREPACK_ENABLE_DOWNLOAD_PROMPT:-0}"
+  [[ -n "${COREPACK_NPM_REGISTRY:-}" ]] && return 0
+  local reg; reg=$(detect_npm_registry)
+  [[ -z "$reg" ]] && return 0
+  case "$reg" in *registry.npmjs.org*) return 0 ;; esac   # already public npm — nothing to bridge
+  export COREPACK_NPM_REGISTRY="$reg"
+  NPM_BRIDGED_REGISTRY="$reg"
+}
+
 if [[ -n "${TLS_PEM_PATH:-}" && -f "${TLS_PEM_PATH}" ]]; then
   apply_tls_bundle "$TLS_PEM_PATH"
   ok "TLS trust from TLS_PEM_PATH → SSL_CERT_FILE / REQUESTS_CA_BUNDLE / NODE_EXTRA_CA_CERTS"
@@ -373,6 +402,18 @@ else
   fi
 fi
 
+# Bridge the user's existing npm registry mirror into corepack (for the repo's pinned pnpm).
+if [[ "$DRY_RUN" == "true" ]]; then
+  run "# if npm has a custom registry, export COREPACK_NPM_REGISTRY to match (+ disable download prompt)"
+else
+  bridge_npm_registry_to_corepack
+  if [[ -n "${NPM_BRIDGED_REGISTRY:-}" ]]; then
+    ok "corepack registry bridged from npm config → COREPACK_NPM_REGISTRY=$NPM_BRIDGED_REGISTRY"
+  elif [[ -n "${COREPACK_NPM_REGISTRY:-}" ]]; then
+    note "corepack registry already set via env — leaving as-is."
+  fi
+fi
+
 note "All inputs collected. Summary:"
 note "  DATABRICKS_HOST  = $DATABRICKS_HOST"
 note "  DB_PROFILE       = $DB_PROFILE"
@@ -392,11 +433,18 @@ header "Phase 1 — Auth"
 confirm_phase "1" || { stop_if_done "1"; exit 0; }
 
 echo
-step "1a. pnpm (install first — later CLIs and the frontend build need it)"
-if command -v pnpm &>/dev/null; then
+step "1a. pnpm (corepack-managed; repo pins pnpm 10 via packageManager)"
+# pnpm's npm "latest" dist-tag currently resolves to a 12.x ALPHA that breaks installs
+# (ignores onlyBuiltDependencies → ERR_PNPM_IGNORED_BUILDS). Prefer corepack, which honors
+# the repo's `packageManager: pnpm@10.x` pin and fetches that exact version on demand
+# (via COREPACK_NPM_REGISTRY + NODE_EXTRA_CA_CERTS set in Phase 0).
+if command -v corepack &>/dev/null; then
+  run "corepack enable --install-directory '$HOME/bin'"
+  note "corepack enabled → pnpm version pinned by the repo's packageManager field."
+elif command -v pnpm &>/dev/null; then
   ok "pnpm already installed: $(pnpm --version 2>/dev/null || echo '?')"
 else
-  run "npm install -g pnpm"
+  run "npm install -g pnpm@10"   # avoid the 12.x alpha on the 'latest' tag
 fi
 
 echo
