@@ -534,7 +534,7 @@ run "vercel project protection disable '$VERCEL_PROJECT' --sso --scope '$VERCEL_
 echo
 step "8d. Deploy"
 if [[ "$DRY_RUN" == "false" ]]; then
-  PREVIEW_URL=$(vercel deploy --scope "$VERCEL_TEAM" 2>&1 | grep -E 'https://' | tail -1)
+  PREVIEW_URL=$(vercel deploy --scope "$VERCEL_TEAM" 2>&1 | grep -oE 'https://[^ ]*\.vercel\.app' | tail -1)
   ok "Preview URL: $PREVIEW_URL"
   python3 -c "import keyring; keyring.set_password('firefly-bootstrap', 'PREVIEW_URL', '$PREVIEW_URL')"
   python3 -c "import keyring; keyring.set_password('firefly-bootstrap', 'GUEST_API_SECRET', '$GUEST_API_SECRET')"
