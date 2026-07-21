@@ -264,8 +264,13 @@ fi
 
 echo
 step "3c. Create UC wheels volume"
-run "databricks volumes create '$UC_CATALOG' '$UC_SCHEMA' firefly_wheels MANAGED \
+if [[ "$DRY_RUN" == "false" ]] \
+   && databricks volumes read "${UC_CATALOG}.${UC_SCHEMA}.firefly_wheels" --profile "$DB_PROFILE" &>/dev/null; then
+  ok "UC volume ${UC_CATALOG}.${UC_SCHEMA}.firefly_wheels already exists — skipping create."
+else
+  run "databricks volumes create '$UC_CATALOG' '$UC_SCHEMA' firefly_wheels MANAGED \
   --profile '$DB_PROFILE'"
+fi
 
 echo
 step "3d. Vendor cp311 wheels (required for offline build)"
