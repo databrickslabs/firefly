@@ -49,7 +49,7 @@ of blocked public registries. Off-proxy these are no-ops. Never hardcode a mirro
 - [ ] **[ASK — REQUIRED, BLOCKING]** `UC_CATALOG` — Unity Catalog catalog to use (must allow MANAGE)
 - [ ] **[ASK — REQUIRED, BLOCKING]** `UC_SCHEMA` — schema within that catalog
 - [ ] **[ASK — REQUIRED, BLOCKING]** `AGENT_APP_NAME` — Databricks App name (dev target; bundle hardcodes this)
-- [ ] **[ASK — REQUIRED, BLOCKING]** `DATABRICKS_ACCOUNT_ID` — numeric account ID from `accounts.cloud.databricks.com` URL
+- [ ] **[ASK — REQUIRED, BLOCKING]** `DATABRICKS_ACCOUNT_ID` — account ID (a **UUID**, e.g. `32aad83d-ef89-4e74-9969-77784815fd46`) from `accounts.cloud.databricks.com` (Account Console → top-right menu). NB: the account ID is a UUID; the *workspace* ID is the numeric one.
 - [ ] **[ASK — REQUIRED, BLOCKING]** `LAKEBASE_NAME` — name for the new Lakebase instance
 - [ ] **[ASK — REQUIRED, BLOCKING]** `NEON_PROJECT_NAME` — name for the new Neon project
 - [ ] **[ASK — REQUIRED, BLOCKING]** `VERCEL_TEAM` — team slug (e.g. `acme-corp` from `vercel.com/<team-slug>/...` in the dashboard)
@@ -68,7 +68,7 @@ of blocked public registries. Off-proxy these are no-ops. Never hardcode a mirro
 | `UC_CATALOG` | `workspace` | Writable catalog with MANAGE permission |
 | `UC_SCHEMA` | `default` | Schema within that catalog |
 | `AGENT_APP_NAME` | `firefly-openai-managed-mem-v2` | Dev target; bundle hardcodes this |
-| `DATABRICKS_ACCOUNT_ID` | — | Numeric ID from `accounts.cloud.databricks.com` URL |
+| `DATABRICKS_ACCOUNT_ID` | — | Account **UUID** from `accounts.cloud.databricks.com` (not the numeric workspace ID) |
 | `LAKEBASE_NAME` | `firefly-lb` | Name for the new Lakebase instance |
 | `NEON_PROJECT_NAME` | `firefly-genie` | Name for the new Neon project |
 | `VERCEL_TEAM` | — | Team slug from `vercel.com/<team-slug>/...` in the dashboard |
