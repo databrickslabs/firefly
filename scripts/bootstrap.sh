@@ -21,6 +21,10 @@ STOP_AFTER=""
 # root CA's fingerprint before trusting anything.
 TRUST_PROXY_CA=false
 [[ "${FIREFLY_TRUST_PROXY_CA:-}" == "1" ]] && TRUST_PROXY_CA=true
+# Branch of databrickslabs/firefly to clone in Phase 2 (app code). Default genie-agent.
+# Override to test an unmerged branch end-to-end, e.g.:
+#   FIREFLY_BRANCH=integration/bootstrap-fixes bash scripts/bootstrap.sh
+FIREFLY_BRANCH="${FIREFLY_BRANCH:-genie-agent}"
 
 for arg in "$@"; do
   case $arg in
@@ -612,7 +616,7 @@ if run_phase "2"; then
 
 step "Clone the app repo (idempotent — safe to re-run)"
 if [[ "$DRY_RUN" == "true" ]]; then
-  run "git clone --branch genie-agent https://github.com/databrickslabs/firefly.git '$REPO_DIR'"
+  run "git clone --branch '$FIREFLY_BRANCH' https://github.com/databrickslabs/firefly.git '$REPO_DIR'"
 elif [[ -d "$REPO_DIR/.git" ]]; then
   ok "Repo already present at $REPO_DIR — reusing it (skipping clone)."
 elif [[ -e "$REPO_DIR" && -n "$(ls -A "$REPO_DIR" 2>/dev/null)" ]]; then
@@ -620,7 +624,7 @@ elif [[ -e "$REPO_DIR" && -n "$(ls -A "$REPO_DIR" 2>/dev/null)" ]]; then
   note "Pick a new REPO_DIR (re-run and decline reuse), or remove that directory, then re-run."
   exit 1
 else
-  run "git clone --branch genie-agent https://github.com/databrickslabs/firefly.git '$REPO_DIR'"
+  run "git clone --branch '$FIREFLY_BRANCH' https://github.com/databrickslabs/firefly.git '$REPO_DIR'"
 fi
 run "cd '$REPO_DIR'"
 
