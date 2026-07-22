@@ -313,7 +313,9 @@ export PATH="$HOME/bin:$HOME/.local/bin:$PATH"
 #      and build a LOCAL bundle (system roots + proxy CAs). System trust is never touched.
 #   3. No MITM detected            → nothing to do.
 apply_tls_bundle() {   # $1 = pem path — export the trust vars every toolchain reads
-  export TLS_PEM_PATH="$1" REQUESTS_CA_BUNDLE="$1" SSL_CERT_FILE="$1" NODE_EXTRA_CA_CERTS="$1"
+  # CURL_CA_BUNDLE is required for the Phase 9 smoke-test curls: curl uses the system
+  # store (/etc/ssl/cert.pem) by default and rejects the proxy's cert (000) otherwise.
+  export TLS_PEM_PATH="$1" REQUESTS_CA_BUNDLE="$1" SSL_CERT_FILE="$1" NODE_EXTRA_CA_CERTS="$1" CURL_CA_BUNDLE="$1"
 }
 
 # On success sets PROXY_CA_BUNDLE / PROXY_CA_ADDED / PROXY_CA_ROOT_CN / PROXY_CA_ROOT_FP.
@@ -923,6 +925,26 @@ step "8a. Link Vercel project (non-interactive)"
 # So we deliberately do NOT connect Git here. To enable push-to-deploy later, connect the
 # fork from the Vercel dashboard (Project → Settings → Git).
 run "cd '$REPO_DIR' && vercel link --project '$VERCEL_PROJECT' --scope '$VERCEL_TEAM' --yes --non-interactive"
+
+# A Vercel project created without a framework preset (framework:null) builds `next build`
+# but serves the output as STATIC → every route 404s despite a "Ready" deployment. Force
+# the Next.js preset on the linked project via the API (verified: flips all routes 200).
+if [[ "$DRY_RUN" == "false" ]]; then
+  V_TOKEN=$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/Library/Application Support/com.vercel.cli/auth.json")))["token"])' 2>/dev/null || echo "")
+  V_ORG=$(python3 -c "import json;print(json.load(open('$REPO_DIR/.vercel/project.json'))['orgId'])" 2>/dev/null || echo "")
+  V_PROJ=$(python3 -c "import json;print(json.load(open('$REPO_DIR/.vercel/project.json'))['projectId'])" 2>/dev/null || echo "")
+  if [[ -n "$V_TOKEN" && -n "$V_PROJ" ]]; then
+    curl -s -X PATCH "https://api.vercel.com/v9/projects/$V_PROJ?teamId=$V_ORG" \
+      -H "Authorization: Bearer $V_TOKEN" -H "Content-Type: application/json" \
+      -d '{"framework":"nextjs"}' -o /dev/null \
+      && ok "Vercel project framework → nextjs (else Next.js routes 404)" \
+      || warn "Couldn't PATCH framework=nextjs; if routes 404, set Framework Preset=Next.js in the dashboard."
+  else
+    warn "Couldn't read Vercel token/project id to set framework=nextjs; set it in the dashboard if routes 404."
+  fi
+else
+  run "# PATCH Vercel project framework=nextjs via API (else Next.js routes 404 despite 'Ready')"
+fi
 
 echo
 step "8b. Generate secrets"
