@@ -1162,10 +1162,22 @@ echo "${bold}${green}╔══════════════════�
 echo "${bold}${green}║  Bootstrap complete.                                      ║${reset}"
 echo "${bold}${green}╚══════════════════════════════════════════════════════════╝${reset}"
 echo
-[[ "$DRY_RUN" == "false" ]] && {
+if [[ "$DRY_RUN" == "false" ]]; then
+  # Lead the summary with the guest login URL — it's the one thing the user needs to open
+  # the app, so surface it first (not buried under the cleanup list). One-time, ~10 min.
+  echo "  ${bold}▶ OPEN THE APP — guest login (one-time link, valid ~10 min):${reset}"
+  echo "      ${bold}${LOGIN_URL:-<not minted — re-run and execute Phase 9 to create one>}${reset}"
+  echo
+  note "Frontend (preview): ${PREVIEW_URL:-<unknown>}"
+  note "Agent app:          $AGENT_APP_NAME (RUNNING)"
+  note "UC memory store:    $UC_CATALOG.$UC_SCHEMA.firefly_managed_memory"
+  echo
+  note "Link expired/used? Re-run and re-execute Phase 9 (Enter-skip through 0–8) to mint a"
+  note "fresh one — it reads PREVIEW_URL / GUEST_API_SECRET / guest-SP creds from state.env."
+  echo
   note "Resources to clean up when done:"
   note "  databricks apps delete $AGENT_APP_NAME --profile $DB_PROFILE"
   note "  databricks bundle destroy --profile $DB_PROFILE -t dev"
   note "  vercel remove $VERCEL_PROJECT --scope $VERCEL_TEAM"
   note "  Neon project: console.neon.tech → delete project"
-}
+fi
