@@ -21,10 +21,13 @@ STOP_AFTER=""
 # root CA's fingerprint before trusting anything.
 TRUST_PROXY_CA=false
 [[ "${FIREFLY_TRUST_PROXY_CA:-}" == "1" ]] && TRUST_PROXY_CA=true
-# Branch of databrickslabs/firefly to clone in Phase 2 (app code). Default genie-agent.
-# Override to test an unmerged branch end-to-end, e.g.:
-#   FIREFLY_BRANCH=integration/bootstrap-fixes bash scripts/bootstrap.sh
-FIREFLY_BRANCH="${FIREFLY_BRANCH:-genie-agent}"
+# Branch of databrickslabs/firefly to clone in Phase 2 (app code).
+# ⚠️⚠️ TEMPORARY TEST DEFAULT — REVERT TO "genie-agent" BEFORE MERGING ⚠️⚠️
+# While validating the integration branch, the default points at integration/bootstrap-fixes
+# so a plain run exercises ALL fixes (app + bootstrap) end-to-end with no env var. Restore:
+#   FIREFLY_BRANCH="${FIREFLY_BRANCH:-genie-agent}"
+# before merging to genie-agent (grep for "TEMPORARY TEST DEFAULT").
+FIREFLY_BRANCH="${FIREFLY_BRANCH:-integration/bootstrap-fixes}"
 
 for arg in "$@"; do
   case $arg in
