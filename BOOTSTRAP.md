@@ -494,8 +494,9 @@ for SCOPE in preview production; do
   add SPN_AUTH_DATABRICKS_ACCOUNTS_URL  "https://accounts.cloud.databricks.com"
   add SPN_AUTH_DATABRICKS_WORKSPACE_URL "$DATABRICKS_HOST"
   # Guest Catalog Explorer allowlist (#20): only lists catalogs matching an allowed prefix
-  # (default "firefly"). Align with the chosen catalog so guests can BROWSE seeded data.
-  add GUEST_ALLOWED_CATALOG_PREFIXES    "firefly,$UC_CATALOG"
+  # (app default "firefly"). Set it to the catalog chosen in Phase 0 so guests can BROWSE
+  # the data provisioned there (the app's memory store lives in $UC_CATALOG too).
+  add GUEST_ALLOWED_CATALOG_PREFIXES    "$UC_CATALOG"
   # production's canonical domain is stable → set now. preview's BETTER_AUTH_URL is set
   # AFTER deploy (8e) to the REAL serving origin — a pre-deploy guess breaks guest
   # one-time-token verification (#19).
