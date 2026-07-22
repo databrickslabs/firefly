@@ -163,7 +163,7 @@ GH_USER=$(gh api user -q .login 2>/dev/null || echo "")
 if [[ -n "$GH_USER" ]]; then
   FORK="${GITHUB_FORK:-$GH_USER/firefly}"
   gh repo view "$FORK" &>/dev/null \
-    && { git remote add origin-fork "https://github.com/${FORK}.git" 2>/dev/null || true; git push -u origin-fork genie-agent; } \
+    && { git remote add origin-fork "https://github.com/${FORK}.git" 2>/dev/null || true; git push -u origin-fork "$(git rev-parse --abbrev-ref HEAD)" || echo "fork push failed (optional; deploy is via 'vercel deploy')"; } \
     || gh repo create "$FORK" --private --source "$REPO_DIR" --remote origin-fork --push
 fi
 
@@ -480,6 +480,14 @@ BETTER_AUTH_SECRET=$(openssl rand -base64 32)
 ENCRYPTION_KEY=$(openssl rand -hex 32)
 GUEST_API_SECRET=$(openssl rand -hex 64)
 DB_URL=$(read_secret DATABASE_URL)   # from state.env
+
+# Clear stale JWKS. Phase 7 REUSES a same-named Neon project, but BETTER_AUTH_SECRET above is
+# freshly minted every run. Better Auth's jwt plugin stores a JWKS encrypted under that secret;
+# a leftover jwks row from an earlier run (different secret) fails to decrypt, so every
+# GET /api/auth/get-session 500s and guest logins silently bounce to the /sso-spn-login dead
+# end. Deleting it makes Better Auth regenerate under the current secret. No-op on a fresh DB.
+cd "$REPO_DIR" && DATABASE_URL="$DB_URL" node --input-type=module -e \
+  'import {neon} from "@neondatabase/serverless"; const sql=neon(process.env.DATABASE_URL); await sql.query("DELETE FROM jwks"); console.log("jwks cleared");'
 
 # Use --value (no stdin) + --force (idempotent overwrite) + --non-interactive. A plain
 # `vercel env add … <<< value` for PREVIEW scope stalls on a "? Git branch?" prompt.

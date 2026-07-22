@@ -22,12 +22,7 @@ STOP_AFTER=""
 TRUST_PROXY_CA=false
 [[ "${FIREFLY_TRUST_PROXY_CA:-}" == "1" ]] && TRUST_PROXY_CA=true
 # Branch of databrickslabs/firefly to clone in Phase 2 (app code).
-# ⚠️⚠️ TEMPORARY TEST DEFAULT — REVERT TO "genie-agent" BEFORE MERGING ⚠️⚠️
-# While validating the integration branch, the default points at integration/bootstrap-fixes
-# so a plain run exercises ALL fixes (app + bootstrap) end-to-end with no env var. Restore:
-#   FIREFLY_BRANCH="${FIREFLY_BRANCH:-genie-agent}"
-# before merging to genie-agent (grep for "TEMPORARY TEST DEFAULT").
-FIREFLY_BRANCH="${FIREFLY_BRANCH:-integration/bootstrap-fixes}"
+FIREFLY_BRANCH="${FIREFLY_BRANCH:-genie-agent}"
 
 for arg in "$@"; do
   case $arg in
@@ -643,7 +638,13 @@ else
     FORK_REPO="${GITHUB_FORK:-$GH_USER/firefly}"
     if gh repo view "$FORK_REPO" &>/dev/null; then
       git -C "$REPO_DIR" remote add origin-fork "https://github.com/${FORK_REPO}.git" 2>/dev/null || true
-      git -C "$REPO_DIR" push -u origin-fork genie-agent
+      # Push whatever branch is checked out (was hardcoded "genie-agent", which fails with
+      # "src refspec genie-agent does not match any" on any other branch, e.g. the
+      # integration/bootstrap-fixes test default). This push is OPTIONAL — the deploy uses the
+      # `vercel deploy` CLI, not Vercel's Git integration — so never let it abort the phase.
+      CUR_BRANCH=$(git -C "$REPO_DIR" rev-parse --abbrev-ref HEAD)
+      git -C "$REPO_DIR" push -u origin-fork "$CUR_BRANCH" \
+        || warn "Fork push failed (optional — deploy is via 'vercel deploy', not Git integration). Continuing."
     else
       gh repo create "$FORK_REPO" --private --source "$REPO_DIR" --remote origin-fork --push
     fi
@@ -994,6 +995,23 @@ else
   GUEST_API_SECRET="<random-hex>"
   AGENT_APP_URL="<databricks-app-url>"
   DB_URL="<neon-connection-string>"
+fi
+
+step "8b-2. Clear stale JWKS (reused-DB safety for the freshly-minted BETTER_AUTH_SECRET)"
+# Phase 7 REUSES a same-named Neon project, but we mint a NEW BETTER_AUTH_SECRET above on
+# every run. Better Auth's jwt plugin stores a JWKS whose private key is encrypted under that
+# secret; a jwks row left over from an earlier run (different secret) fails to decrypt, so
+# EVERY GET /api/auth/get-session 500s — which silently bounces guest logins to the
+# /sso-spn-login dead end. Clearing jwks makes Better Auth regenerate it under the current
+# secret (its own recommended remediation). No-op on a fresh DB. Uses @neondatabase/serverless
+# (already installed by Phase 7's pnpm install) so no psql dependency.
+if [[ "$DRY_RUN" == "false" ]]; then
+  ( cd "$REPO_DIR" && DATABASE_URL="$DB_URL" node --input-type=module -e \
+      'import {neon} from "@neondatabase/serverless"; const sql=neon(process.env.DATABASE_URL); await sql.query("DELETE FROM jwks"); console.log("jwks cleared");' ) \
+    && ok "Stale JWKS cleared (will regenerate under current BETTER_AUTH_SECRET)" \
+    || warn "Could not clear jwks — if guest login 500s on /api/auth/get-session, run: DELETE FROM jwks;"
+else
+  run "cd '$REPO_DIR' && DATABASE_URL='<neon>' node --input-type=module -e '<delete-from-jwks>'"
 fi
 
 step "8b. Tier 1 env vars — required for guest login"
