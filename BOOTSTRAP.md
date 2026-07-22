@@ -630,6 +630,30 @@ echo "$GU" | python3 -c "import sys,json; print(json.load(sys.stdin)['guestUser'
 # Requires Phase 5 (setup_memory_store.py) to have run successfully.
 ```
 
+### Deployment summary — REQUIRED final output
+
+End with a deployment-summary **table**, and make the **guest login URL the first row** — it is
+the one thing the user needs to open the app, so it belongs at the top of the table, verbatim
+and clickable, never buried below the resource rows. The login link is **one-time and expires
+~10 minutes** after it is minted (the "Guest login" block above), so mint it as the LAST step.
+
+**Render every URL as a clickable markdown link** — `[<url>](<url>)` — so the user can click
+straight from the summary (substitute the real value into *both* the label and the target):
+
+| Resource | Value |
+|---|---|
+| **▶ Guest login URL** (one-time, ~10 min) | **[`<loginUrl>`](<loginUrl>)** |
+| Frontend (preview) | [`<PREVIEW_URL>`](<PREVIEW_URL>) |
+| Agent app | `<AGENT_APP_NAME>` — RUNNING · [`<app URL>`](<app URL>) |
+| Lakebase | `<LAKEBASE_NAME>` |
+| Neon project | `<NEON_PROJECT_NAME>` |
+| UC memory store | `<UC_CATALOG>.<UC_SCHEMA>.firefly_managed_memory` |
+| Agent SP / Guest SP | `<ids>` |
+
+If the link is expired/used, mint a fresh one by re-running the three "Guest login" POSTs
+above (Phase 9) with the stored `PREVIEW_URL` / `GUEST_API_SECRET` / guest-SP creds
+(`$REPO_DIR/.firefly-bootstrap/state.env`).
+
 ---
 
 ## Next steps — no UC data
