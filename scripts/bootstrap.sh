@@ -626,33 +626,11 @@ else
 fi
 run "cd '$REPO_DIR'"
 
-echo
-step "Push to your GitHub fork (Vercel Git integration needs a repo you own)"
-if [[ "${SKIP_GITHUB_PUSH:-0}" == "1" ]]; then
-  warn "SKIP_GITHUB_PUSH=1 — skipping fork create/push"
-elif [[ "$DRY_RUN" == "true" ]]; then
-  run "gh repo create <you>/firefly --private --source '$REPO_DIR' --remote origin-fork --push"
-else
-  GH_USER=$(gh api user -q .login 2>/dev/null || echo "")
-  if [[ -n "$GH_USER" ]]; then
-    FORK_REPO="${GITHUB_FORK:-$GH_USER/firefly}"
-    if gh repo view "$FORK_REPO" &>/dev/null; then
-      git -C "$REPO_DIR" remote add origin-fork "https://github.com/${FORK_REPO}.git" 2>/dev/null || true
-      # Push whatever branch is checked out (was hardcoded "genie-agent", which fails with
-      # "src refspec genie-agent does not match any" on any other branch, e.g. the
-      # integration/bootstrap-fixes test default). This push is OPTIONAL — the deploy uses the
-      # `vercel deploy` CLI, not Vercel's Git integration — so never let it abort the phase.
-      CUR_BRANCH=$(git -C "$REPO_DIR" rev-parse --abbrev-ref HEAD)
-      git -C "$REPO_DIR" push -u origin-fork "$CUR_BRANCH" \
-        || warn "Fork push failed (optional — deploy is via 'vercel deploy', not Git integration). Continuing."
-    else
-      gh repo create "$FORK_REPO" --private --source "$REPO_DIR" --remote origin-fork --push
-    fi
-    ok "Vercel will link to github.com/$FORK_REPO"
-  else
-    warn "Could not detect GitHub user — set GITHUB_FORK=<owner>/firefly or run 'gh auth login'"
-  fi
-fi
+# NOTE: no GitHub fork push. The frontend is deployed with the `vercel deploy` CLI (Phase 8),
+# which uploads the local build directly — it does NOT use Vercel's Git integration, so a
+# user-owned GitHub repo is unnecessary. (This also drops a `gh` auth dependency and a
+# failure surface.) To enable push-to-deploy later, connect a repo in the Vercel dashboard:
+# Project → Settings → Git.
 
 echo
 step "Submodule init (must run before assemble_agent.sh)"
@@ -951,7 +929,7 @@ if run_phase "8"; then
 
 step "8a. Create + link Vercel project (no Git integration)"
 # `vercel link` on a NON-EXISTENT project CREATES it and then tries to wire up Git
-# auto-deploy — detecting the repo's remotes (origin=upstream, origin-fork=fork from #17),
+# auto-deploy — detecting the clone's `origin` remote (upstream databrickslabs/firefly),
 # prompting "which remote?", and calling Vercel's Git connect, which needs a Vercel↔GitHub
 # Login Connection many accounts lack (→ HTTP 400 "add a Login Connection"). We deploy via
 # the `vercel deploy` CLI and need NO Git integration, so PRE-CREATE the project

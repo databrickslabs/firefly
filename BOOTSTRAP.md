@@ -124,7 +124,7 @@ if ! vercel whoami &>/dev/null; then vercel login; fi
 vercel whoami
 ```
 
-### 1e. GitHub CLI (for the fork push in Phase 2 / submodule)
+### 1e. GitHub CLI (for the submodule; optional otherwise)
 
 ```bash
 command -v gh || {  # install official gh release to $HOME/bin (no Homebrew)
@@ -156,16 +156,9 @@ else
 fi
 cd "$REPO_DIR"
 
-# Push to your own GitHub fork. (Historically for Vercel's Git integration; the deploy now
-# uses the `vercel deploy` CLI and needs no Git integration — this push is optional and may
-# be removed. It requires `gh` auth from Phase 1e.)
-GH_USER=$(gh api user -q .login 2>/dev/null || echo "")
-if [[ -n "$GH_USER" ]]; then
-  FORK="${GITHUB_FORK:-$GH_USER/firefly}"
-  gh repo view "$FORK" &>/dev/null \
-    && { git remote add origin-fork "https://github.com/${FORK}.git" 2>/dev/null || true; git push -u origin-fork "$(git rev-parse --abbrev-ref HEAD)" || echo "fork push failed (optional; deploy is via 'vercel deploy')"; } \
-    || gh repo create "$FORK" --private --source "$REPO_DIR" --remote origin-fork --push
-fi
+# NOTE: no GitHub fork push. Phase 8 deploys with the `vercel deploy` CLI (uploads the local
+# build; no Vercel Git integration), so a user-owned GitHub repo is unnecessary. To enable
+# push-to-deploy later, connect a repo from the Vercel dashboard (Project → Settings → Git).
 
 # Submodule must be initialised before assemble_agent.sh runs.
 git submodule update --init
