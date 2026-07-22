@@ -53,6 +53,27 @@ open(p, "w").write(s)
 print("assemble: pinned %s in agent-build/pyproject.toml" % PIN)
 PY
 
+# 5c) Deterministic dependency pins for the whole graph (#64). The Apps build runs a plain
+# `uv sync` (uv.lock is excluded from sync — GAP-15), so without version pins it can
+# re-resolve a transitive dep to a newer release that lacks a Linux wheel (the greenlet
+# 3.5.4 crash). Export the lock to a CONSTRAINTS file — this BOUNDS versions without the
+# exact-match rigidity that made `uv sync --locked` fail (GAP-15) — and sync it; the app env
+# sets UV_CONSTRAINT to it (see agent/databricks.yml). Exported from the universal lock with
+# environment markers, which uv applies on the Linux/cp311 Apps host at install time.
+# Supersedes the one-off greenlet override above once validated. Non-fatal: if export fails,
+# warn and continue (the greenlet override still guards the known crash).
+if [[ -f "$BUILD/uv.lock" ]] && command -v uv >/dev/null 2>&1; then
+  if (cd "$BUILD" && uv export --frozen --no-hashes --no-emit-project \
+        -o constraints.txt) 2>/dev/null && [[ -s "$BUILD/constraints.txt" ]]; then
+    echo "assemble: wrote agent-build/constraints.txt ($(grep -c '==' "$BUILD/constraints.txt") pins) → UV_CONSTRAINT (#64)"
+  else
+    rm -f "$BUILD/constraints.txt"
+    echo "assemble: WARN — 'uv export' failed; relying on the greenlet override only (#63)." >&2
+  fi
+else
+  echo "assemble: WARN — no uv.lock or uv unavailable; skipping constraints.txt (#63 override still applies)." >&2
+fi
+
 # 6) Give agent-build its own git boundary. The parent repo gitignores
 # agent-build/, and `databricks bundle deploy` respects the enclosing repo's
 # ignore rules — without this, sync finds zero files ("no files to sync") and

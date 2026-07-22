@@ -61,6 +61,14 @@ resources:
           # scripts/vendor_wheels.sh once before `databricks bundle deploy`.
           - name: UV_FIND_LINKS
             value: "/app/python/source_code/vendor-wheels"
+          # Pin every dependency to the vendored/tested versions (#64). The build runs a
+          # plain `uv sync` (uv.lock is excluded — GAP-15), which can otherwise re-resolve a
+          # transitive dep to a newer release that lacks a Linux wheel (the greenlet 3.5.4
+          # crash). constraints.txt is generated from uv.lock at assemble time and synced to
+          # the source root; UV_CONSTRAINT *bounds* versions without the exact-match rigidity
+          # that made `uv sync --locked` fail (GAP-15). Absent file → uv ignores it (safe).
+          - name: UV_CONSTRAINT
+            value: "/app/python/source_code/constraints.txt"
           # --- Leave alone (resource bindings) ---------------------------------
           # Populated by `uv run quickstart` (experiment id + Lakebase endpoint).
           # Never fold these into a plaintext value:.
