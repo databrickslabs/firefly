@@ -1008,6 +1008,11 @@ for SCOPE in preview production; do
   run "vercel env add GUEST_API_SECRET          $SCOPE --value '$GUEST_API_SECRET' --force --non-interactive --scope '$VERCEL_TEAM'"
   run "vercel env add SPN_AUTH_DATABRICKS_ACCOUNTS_URL  $SCOPE --value 'https://accounts.cloud.databricks.com' --force --non-interactive --scope '$VERCEL_TEAM'"
   run "vercel env add SPN_AUTH_DATABRICKS_WORKSPACE_URL $SCOPE --value '$DATABRICKS_HOST' --force --non-interactive --scope '$VERCEL_TEAM'"
+  # Guest Catalog Explorer only lists catalogs whose name matches an allowed prefix
+  # (default "firefly"). Align it with the chosen UC catalog so guests can BROWSE the
+  # seeded data (#20). Keep "firefly" for the app's own catalogs. This only affects
+  # browsing; data access is still governed by the guest SP's UC grants.
+  run "vercel env add GUEST_ALLOWED_CATALOG_PREFIXES $SCOPE --value 'firefly,$UC_CATALOG' --force --non-interactive --scope '$VERCEL_TEAM'"
 done
 
 echo

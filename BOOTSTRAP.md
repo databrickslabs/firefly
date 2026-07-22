@@ -493,6 +493,9 @@ for SCOPE in preview production; do
   add GUEST_API_SECRET                  "$GUEST_API_SECRET"
   add SPN_AUTH_DATABRICKS_ACCOUNTS_URL  "https://accounts.cloud.databricks.com"
   add SPN_AUTH_DATABRICKS_WORKSPACE_URL "$DATABRICKS_HOST"
+  # Guest Catalog Explorer allowlist (#20): only lists catalogs matching an allowed prefix
+  # (default "firefly"). Align with the chosen catalog so guests can BROWSE seeded data.
+  add GUEST_ALLOWED_CATALOG_PREFIXES    "firefly,$UC_CATALOG"
   # production's canonical domain is stable → set now. preview's BETTER_AUTH_URL is set
   # AFTER deploy (8e) to the REAL serving origin — a pre-deploy guess breaks guest
   # one-time-token verification (#19).
@@ -504,6 +507,14 @@ done
 > CORS failures on preview deployments. The auth client falls back to `window.location.origin`.
 >
 > **Omit `SPN_AUTH_OKTA_*` entirely** — the plugin is conditional; absent vars are skipped.
+>
+> **`GUEST_ALLOWED_CATALOG_PREFIXES` (security note, #20):** the guest Catalog Explorer
+> only lists catalogs whose name starts with one of these (comma-separated, case-insensitive;
+> default `firefly`). Setting it to include your `UC_CATALOG` lets guests **browse** that
+> catalog's tree — still scoped by the guest SP's UC grants, and browse-only (it does not
+> affect Genie, which queries UC directly). If `UC_CATALOG` is the shared `workspace`
+> catalog, guests can browse the whole `workspace` tree — fine for a demo; narrow it (or use
+> a dedicated `firefly_*` catalog) if that's too broad.
 
 #### Tier 2 — required only for admin Databricks OAuth login (not needed for guest path)
 
