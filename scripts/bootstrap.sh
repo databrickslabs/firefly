@@ -416,23 +416,38 @@ if [[ -n "${TLS_PEM_PATH:-}" && -f "${TLS_PEM_PATH}" ]]; then
 elif [[ "$DRY_RUN" == "true" ]]; then
   run "# detect intercepting proxy; if a private CA is presented, confirm + build a local bundle"
 elif derive_proxy_ca_bundle; then
-  warn "Intercepting HTTPS proxy detected — its chain terminates in a PRIVATE root CA:"
+  warn "Intercepting HTTPS proxy detected — its chain terminates in a PRIVATE root CA."
   note "  Root CN:    ${PROXY_CA_ROOT_CN:-<unknown>}"
   note "  SHA-256:    ${PROXY_CA_ROOT_FP:-<unknown>}"
-  note "  Bundle:     $PROXY_CA_BUNDLE  (system roots + ${PROXY_CA_ADDED} proxy CA cert(s))"
-  APPROVE_CA=n
+  note "  Copied to:  $PROXY_CA_BUNDLE"
+  note "              (system roots + ${PROXY_CA_ADDED} proxy CA cert(s); your system trust store is NOT modified)"
   if [[ "$TRUST_PROXY_CA" == "true" ]]; then
-    APPROVE_CA=y
-    note "  --trust-proxy-ca set → trusting automatically."
-  else
-    echo "  ${bold}Trust this ONLY if the SHA-256 matches your organization's known root CA.${reset}"
-    read -rp "  ${bold}Trust this CA for this setup? [y/N]:${reset} " APPROVE_CA
-  fi
-  if [[ "$APPROVE_CA" =~ ^[Yy]$ ]]; then
     apply_tls_bundle "$PROXY_CA_BUNDLE"
-    ok "TLS trust → SSL_CERT_FILE / REQUESTS_CA_BUNDLE / NODE_EXTRA_CA_CERTS (+ UV_SYSTEM_CERTS)"
+    ok "--trust-proxy-ca set → using the copied CA (SSL_CERT_FILE / REQUESTS_CA_BUNDLE / NODE_EXTRA_CA_CERTS / CURL_CA_BUNDLE + UV_SYSTEM_CERTS)."
   else
-    warn "Declined. If installs fail with cert errors, re-run with TLS_PEM_PATH=<your bundle>."
+    echo "  ${bold}Only trust the copied CA if the SHA-256 above matches your organization's known root CA.${reset}"
+    echo "    ${bold}1)${reset} Trust this CA for this setup  — use the copied bundle above"
+    echo "    ${bold}2)${reset} Use my own PEM                — enter the path to a combined bundle"
+    echo "    ${bold}3)${reset} Don't use a cert              — proceed untrusted (installs may fail on-proxy)"
+    read -rp "  ${bold}Choose [1/2/3] (default 1):${reset} " TLS_CHOICE
+    case "${TLS_CHOICE:-1}" in
+      2)
+        read -rp "  Path to your combined PEM: " TLS_OWN_PEM
+        if [[ -n "$TLS_OWN_PEM" && -f "$TLS_OWN_PEM" ]]; then
+          apply_tls_bundle "$TLS_OWN_PEM"
+          ok "TLS trust from your PEM → SSL_CERT_FILE / REQUESTS_CA_BUNDLE / NODE_EXTRA_CA_CERTS / CURL_CA_BUNDLE"
+        else
+          warn "No readable PEM at '${TLS_OWN_PEM:-<empty>}' — proceeding untrusted. Re-run with TLS_PEM_PATH=<path> if installs fail."
+        fi
+        ;;
+      3)
+        warn "Proceeding without a proxy CA. If installs fail with cert errors, re-run and pick 1, or set TLS_PEM_PATH=<your bundle>."
+        ;;
+      *)
+        apply_tls_bundle "$PROXY_CA_BUNDLE"
+        ok "TLS trust → SSL_CERT_FILE / REQUESTS_CA_BUNDLE / NODE_EXTRA_CA_CERTS / CURL_CA_BUNDLE (+ UV_SYSTEM_CERTS)"
+        ;;
+    esac
   fi
 else
   ok "No intercepting proxy detected (TLS to PyPI validates against the system store)."
