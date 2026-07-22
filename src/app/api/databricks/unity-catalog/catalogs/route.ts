@@ -8,8 +8,17 @@ import { headers } from "next/headers";
 
 export const dynamic = "force-dynamic";
 
-// Catalogs that guest users are allowed to see
-const GUEST_ALLOWED_CATALOG_PREFIXES = ["firefly"];
+// Catalogs that guest users are allowed to browse in the Catalog Explorer (case-insensitive
+// prefix match). Env-configurable so a deployment can align it with the chosen UC catalog
+// WITHOUT a source edit — set GUEST_ALLOWED_CATALOG_PREFIXES="firefly,workspace" (comma-
+// separated). Defaults to ["firefly"] when unset. NOTE: widening this only affects what
+// guests can BROWSE; actual data access is still governed by the guest SP's UC grants.
+const GUEST_ALLOWED_CATALOG_PREFIXES = (
+  process.env.GUEST_ALLOWED_CATALOG_PREFIXES ?? "firefly"
+)
+  .split(",")
+  .map((p) => p.trim().toLowerCase())
+  .filter(Boolean);
 
 // Cache tag for catalog data
 export const CATALOGS_CACHE_TAG = "UNITY_CATALOG_CATALOGS";

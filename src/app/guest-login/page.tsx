@@ -19,6 +19,9 @@ function GuestLoginContent() {
   // Form state for manual login
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  // True when the user arrived via a login link (token or email/p params), so an error
+  // shows a clear "link problem" screen instead of a manual form they can't complete.
+  const [attemptedLink, setAttemptedLink] = useState(false);
 
   useEffect(() => {
     const token = searchParams.get("token");
@@ -27,10 +30,12 @@ function GuestLoginContent() {
 
     if (token) {
       // One-time token login (preferred, secure)
+      setAttemptedLink(true);
       setStatus("auto-login");
       verifyOneTimeToken(token);
     } else if (paramEmail && paramPassword) {
       // Legacy: email/password login
+      setAttemptedLink(true);
       setStatus("auto-login");
       doEmailLogin(
         decodeURIComponent(paramEmail),
@@ -121,7 +126,39 @@ function GuestLoginContent() {
     );
   }
 
-  // Manual login form (shown when no URL params or after error)
+  // A shared login link failed — show a clear message instead of a manual email/password
+  // form the guest has no credentials for. "Invalid token" = the one-time link was already
+  // used (opened/refreshed twice) or never existed; "expired" = older than its 10-min TTL.
+  if (status === "error" && attemptedLink) {
+    const expired = /expire/i.test(error || "");
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <Card className="w-full max-w-md">
+          <CardHeader className="text-center">
+            <CardTitle className="text-xl">This login link can’t be used</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-center">
+            <p className="text-muted-foreground">
+              {expired
+                ? "This guest login link has expired."
+                : "This guest login link is invalid or has already been used."}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Guest login links are <strong>single-use</strong> and expire{" "}
+              <strong>10 minutes</strong> after they’re created — opening one twice (a
+              refresh or back navigation counts) also invalidates it. Please ask whoever
+              shared it to send you a fresh link.
+            </p>
+            {error && (
+              <p className="text-xs text-muted-foreground/70">Details: {error}</p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Manual login form (shown when no URL params, or a manual-form submit failed)
   return (
     <div className="min-h-screen flex items-center justify-center bg-background">
       <Card className="w-full max-w-md">
