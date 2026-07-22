@@ -406,7 +406,7 @@ bridge_npm_registry_to_corepack() {
   local reg; reg=$(detect_npm_registry)
   [[ -z "$reg" ]] && return 0
   case "$reg" in *registry.npmjs.org*) return 0 ;; esac   # already public npm — nothing to bridge
-  export COREPACK_NPM_REGISTRY="$reg"
+  export COREPACK_NPM_REGISTRY="${reg%/}"   # strip trailing slash → avoid '//pnpm' 404s
   NPM_BRIDGED_REGISTRY="$reg"
 }
 
@@ -488,7 +488,12 @@ step "1a. pnpm (corepack-managed; repo pins pnpm 10 via packageManager)"
 # (via COREPACK_NPM_REGISTRY + NODE_EXTRA_CA_CERTS set in Phase 0).
 if command -v corepack &>/dev/null; then
   run "corepack enable --install-directory '$HOME/bin'"
-  note "corepack enabled → pnpm version pinned by the repo's packageManager field."
+  # Pre-activate a SPECIFIC stable pnpm. If the cloned repo has no packageManager pin,
+  # corepack otherwise asks the registry for `pnpm/latest` (a dist-tag endpoint corporate
+  # mirrors don't serve → HTTP 404). Activating an exact version downloads only the
+  # versioned tarball (which the mirror does serve) and skips 'latest' resolution entirely.
+  run "corepack prepare pnpm@${PNPM_VERSION:-10.34.5} --activate"
+  note "corepack enabled + pnpm@${PNPM_VERSION:-10.34.5} activated (repo packageManager, if present, still wins)."
 elif command -v pnpm &>/dev/null; then
   ok "pnpm already installed: $(pnpm --version 2>/dev/null || echo '?')"
 else
