@@ -29,6 +29,30 @@ if [[ -d "$OVERLAY/patches/e2e-chatbot-app-next" ]]; then
   cp -R "$OVERLAY/patches/e2e-chatbot-app-next/." "$BUILD"/e2e-chatbot-app-next/
 fi
 
+# 5b) Pin the transitive `greenlet` to the vendored Linux wheel (3.5.3). The upstream
+# template re-resolves deps at runtime (uv.lock is excluded from sync — GAP-15), so
+# `uv run` can pick a macOS-only newest greenlet (e.g. 3.5.4) from the index that has no
+# Linux wheel → the app crashes on the Linux Apps host. This override lives HERE (our
+# assembly), not in the submodule template, so it re-applies on every template re-copy.
+# Idempotent; handles a pre-existing [tool.uv] section.
+python3 - "$BUILD/pyproject.toml" <<'PY'
+import re, sys
+p = sys.argv[1]
+s = open(p).read()
+PIN = "greenlet==3.5.3"
+if PIN in s:
+    sys.exit(0)  # already pinned — no-op
+if re.search(r'^\[tool\.uv\]', s, re.M):
+    if re.search(r'^\s*override-dependencies\s*=\s*\[', s, re.M):
+        s = re.sub(r'(override-dependencies\s*=\s*\[)', r'\1"%s", ' % PIN, s, count=1)
+    else:
+        s = re.sub(r'(^\[tool\.uv\][^\n]*\n)', r'\1override-dependencies = ["%s"]\n' % PIN, s, count=1, flags=re.M)
+else:
+    s = s.rstrip() + '\n\n[tool.uv]\noverride-dependencies = ["%s"]\n' % PIN
+open(p, "w").write(s)
+print("assemble: pinned %s in agent-build/pyproject.toml" % PIN)
+PY
+
 # 6) Give agent-build its own git boundary. The parent repo gitignores
 # agent-build/, and `databricks bundle deploy` respects the enclosing repo's
 # ignore rules — without this, sync finds zero files ("no files to sync") and
