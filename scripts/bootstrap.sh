@@ -941,14 +941,15 @@ stop_if_done "7"
 header "Phase 8 — Vercel frontend"
 if run_phase "8"; then
 
-step "8a. Link Vercel project (non-interactive)"
-# The clone has TWO remotes (origin=upstream, origin-fork=fork from #17), so an interactive
-# `vercel link` asks "which remote?" — and an explicit `vercel git connect` adds its own
-# "do you still want to connect?" confirm. Neither is needed: we link the project by
-# name/id in --non-interactive mode (no git prompt), and Phase 8d/8e deploy via the
-# `vercel deploy` CLI, which uploads the local build directly and needs NO Git integration.
-# So we deliberately do NOT connect Git here. To enable push-to-deploy later, connect the
-# fork from the Vercel dashboard (Project → Settings → Git).
+step "8a. Create + link Vercel project (no Git integration)"
+# `vercel link` on a NON-EXISTENT project CREATES it and then tries to wire up Git
+# auto-deploy — detecting the repo's remotes (origin=upstream, origin-fork=fork from #17),
+# prompting "which remote?", and calling Vercel's Git connect, which needs a Vercel↔GitHub
+# Login Connection many accounts lack (→ HTTP 400 "add a Login Connection"). We deploy via
+# the `vercel deploy` CLI and need NO Git integration, so PRE-CREATE the project
+# (idempotent) — then `vercel link` just ATTACHES to an existing project and never touches
+# Git. (Enable push-to-deploy later from the dashboard: Project → Settings → Git.)
+run "vercel project add '$VERCEL_PROJECT' --scope '$VERCEL_TEAM' 2>/dev/null || true"
 run "cd '$REPO_DIR' && vercel link --project '$VERCEL_PROJECT' --scope '$VERCEL_TEAM' --yes --non-interactive"
 
 # A Vercel project created without a framework preset (framework:null) builds `next build`
