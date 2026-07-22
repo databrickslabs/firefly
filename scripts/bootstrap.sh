@@ -278,6 +278,11 @@ maybe_reuse_inputs
 echo
 
 ask DATABRICKS_HOST  "Databricks workspace URL (https://dbc-xxxx.cloud.databricks.com)"
+# Users often paste the full browser URL (…/?autoLogin=true&o=…&email=…). The Databricks
+# SDK reads DATABRICKS_HOST with precedence over the profile, and a query/path on the host
+# breaks host-metadata resolution ("Expecting value: line 1 column 1"). Keep only scheme://host.
+DATABRICKS_HOST=$(printf '%s' "$DATABRICKS_HOST" | sed -E 's|^(https?://[^/?#]+).*|\1|')
+store_input DATABRICKS_HOST "$DATABRICKS_HOST"
 validate_url "$DATABRICKS_HOST"
 
 ask DB_PROFILE       "Databricks CLI profile name"      "firefly-deploy"
