@@ -21,8 +21,26 @@ phase, then executing each command exactly as written.
 > Detection ≠ consent: present what you detected as the suggested answer,
 > but still require the user to confirm or override it.
 
-Store secrets in macOS Keychain (`keyring set <service> <key>`) — never in
-plaintext files.
+**Secret storage:** secrets persist in a gitignored, `chmod 600` file at
+`$REPO_DIR/.firefly-bootstrap/state.env` (sourced by later phases via
+`store_secret`/`read_secret`). This intentionally does **not** use macOS Keychain
+(`keyring`) — the target machine may not have Python `keyring`/Keychain wired up.
+The file is `0600` and gitignored; never print its contents.
+
+**Input persistence + resume:** non-secret answers persist to
+`~/.firefly-bootstrap/inputs.env`, so a re-run offers to reuse them without
+re-prompting. The runner tracks completed phases (`COMPLETED_PHASES`) and supports
+**skip-forward resume**: on a re-run, an already-completed phase prompts
+`Re-execute Phase N? [y/N]` and pressing Enter **skips** it and advances; a
+not-yet-run phase prompts `Execute Phase N? [Y/n]` (Enter proceeds, `n` stops).
+
+**Corporate networks (intercepting proxy / blocked public PyPI-npm):** Phase 0
+auto-detects a TLS-intercepting proxy and, on confirmation (or `--trust-proxy-ca`),
+builds a local CA bundle and exports `SSL_CERT_FILE` / `REQUESTS_CA_BUNDLE` /
+`NODE_EXTRA_CA_CERTS` / `CURL_CA_BUNDLE` (+ `UV_SYSTEM_CERTS=1`). It also bridges the
+user's existing `pip` index into `uv` (`UV_DEFAULT_INDEX`) and the `npm` registry into
+corepack (`COREPACK_NPM_REGISTRY`), so `uv`/corepack use the sanctioned mirrors instead
+of blocked public registries. Off-proxy these are no-ops. Never hardcode a mirror.
 
 ### Required inputs — confirm each before proceeding to Phase 1
 
@@ -36,12 +54,17 @@ plaintext files.
 - [ ] **[ASK — REQUIRED, BLOCKING]** `NEON_PROJECT_NAME` — name for the new Neon project
 - [ ] **[ASK — REQUIRED, BLOCKING]** `VERCEL_TEAM` — team slug (e.g. `acme-corp` from `vercel.com/<team-slug>/...` in the dashboard)
 - [ ] **[ASK — REQUIRED, BLOCKING]** `VERCEL_PROJECT` — new Vercel project name
-- [ ] **[ASK — REQUIRED, BLOCKING]** `REPO_DIR` — local directory to clone into (default: current working directory, `.`)
+- [ ] **[ASK — REQUIRED, BLOCKING]** `REPO_DIR` — local directory to clone into (created if missing; must be new/empty, **not** your home dir — default `$HOME/firefly`)
+
+> **`DATABRICKS_HOST` is auto-sanitized to `scheme://host`.** Pasting the full browser
+> URL (e.g. `…/?autoLogin=true&o=…&email=…`) is fine — everything after the host is
+> stripped. A query/path on the host otherwise pollutes the `DATABRICKS_HOST` env var
+> (which overrides the CLI profile) and breaks SDK host-metadata resolution.
 
 | Variable | Default | How to get it |
 |---|---|---|
 | `DATABRICKS_HOST` | — | Workspace URL from the browser address bar |
-| `DB_PROFILE` | `firefly-deploy` | Any name for `~/.databricks/profiles` |
+| `DB_PROFILE` | `firefly-deploy` | Any name for the profile in `~/.databrickscfg` |
 | `UC_CATALOG` | `workspace` | Writable catalog with MANAGE permission |
 | `UC_SCHEMA` | `default` | Schema within that catalog |
 | `AGENT_APP_NAME` | `firefly-openai-managed-mem-v2` | Dev target; bundle hardcodes this |
@@ -50,48 +73,70 @@ plaintext files.
 | `NEON_PROJECT_NAME` | `firefly-genie` | Name for the new Neon project |
 | `VERCEL_TEAM` | — | Team slug from `vercel.com/<team-slug>/...` in the dashboard |
 | `VERCEL_PROJECT` | `firefly-genie` | New Vercel project name |
-| `REPO_DIR` | `.` (current working directory) | Directory you're in when Phase 0 runs; must be empty if cloning fresh |
+| `REPO_DIR` | `$HOME/firefly` | New/empty dir to clone into — **not** `$PWD`/home (a non-empty non-git dir is refused) |
 
 ---
 
-## Phase 1 — Auth (interactive, no tokens stored in files)
+## Phase 1 — Auth + tooling (interactive, no tokens stored in files)
 
-### 1a. Databricks CLI OAuth
+> Install pnpm **first** (later CLIs and the frontend build need it). All CLI installs
+> use official releases into `$HOME/bin` / `$HOME/.local/bin` — **no Homebrew required**
+> (the target may not have it). Those dirs are added to `PATH` in Phase 0 so every phase
+> (including skip-forward resumes) finds the CLIs. Auth steps **skip if already logged in**.
+
+### 1a. pnpm via corepack (needed for Drizzle migrations + frontend build)
 
 ```bash
-databricks auth login --host $DATABRICKS_HOST --profile $DB_PROFILE
-# Opens browser → completes U2M OAuth → writes ~/.databricks/profiles
-databricks workspace list / --profile $DB_PROFILE   # smoke-test
+# pnpm's npm "latest" dist-tag currently resolves to a 12.x ALPHA that breaks installs
+# (ignores onlyBuiltDependencies → ERR_PNPM_IGNORED_BUILDS). Use corepack and pre-activate
+# an exact stable version so it never resolves "latest" (a dist-tag corporate mirrors 404).
+corepack enable --install-directory "$HOME/bin"
+corepack prepare pnpm@10.34.5 --activate      # downloads the exact tarball from the mirror
+# A repo `packageManager: pnpm@10.x` pin, if present, still takes precedence.
 ```
 
-### 1b. Neon CLI OAuth
+### 1b. Databricks CLI OAuth
 
 ```bash
-brew install neonctl          # or: npm install -g neonctl
-neonctl auth                  # opens browser → saves ~/.config/neonctl/credentials.json
-neonctl me                    # smoke-test
+command -v databricks || {  # install official release to $HOME/bin (no Homebrew)
+  DB_VER=$(curl -fsSL https://api.github.com/repos/databricks/cli/releases/latest \
+    | python3 -c "import sys,json;print(json.load(sys.stdin)['tag_name'].lstrip('v'))")
+  # download+unzip databricks_cli_${DB_VER}_darwin_<arch>.zip → $HOME/bin/databricks
+}
+databricks auth login --host "$DATABRICKS_HOST" --profile "$DB_PROFILE"
+# Opens browser → U2M OAuth → ~/.databrickscfg. (databricks has no "already authed" guard;
+# re-running just refreshes.) Smoke-test: databricks workspace list / --profile "$DB_PROFILE"
 ```
 
-### 1c. Vercel CLI OAuth
+### 1c. Neon CLI OAuth (skip if already authed)
 
 ```bash
-vercel login                  # opens browser → GitHub/email OAuth
-vercel whoami                 # confirm identity
+command -v neonctl || npm install -g neonctl
+if ! neonctl me &>/dev/null; then neonctl auth; fi   # only opens browser if needed
+neonctl me                                           # smoke-test / show identity
 ```
 
-### 1d. pnpm (needed for Drizzle migrations and frontend dev)
+### 1d. Vercel CLI OAuth (skip if already authed)
 
 ```bash
-npm install -g pnpm    # install via npm rather than corepack
-pnpm --version         # confirm
+command -v vercel || npm install -g vercel           # install BEFORE login
+if ! vercel whoami &>/dev/null; then vercel login; fi
+vercel whoami
 ```
 
-### 1e. GitHub (if needed for submodule)
+### 1e. GitHub CLI (for the fork push in Phase 2 / submodule)
 
 ```bash
-gh auth login                 # opens browser or prompts for PAT
-# Or confirm existing creds:
-ssh -T git@github.com 2>&1 | head -1
+command -v gh || {  # install official gh release to $HOME/bin (no Homebrew)
+  : ; }
+if ! gh auth status &>/dev/null; then gh auth login; fi   # browser or PAT
+```
+
+### 1f. uv (Python package manager; installs to $HOME/.local/bin)
+
+```bash
+command -v uv || curl -LsSf https://astral.sh/uv/install.sh | sh
+uv --version
 ```
 
 ---
@@ -99,9 +144,28 @@ ssh -T git@github.com 2>&1 | head -1
 ## Phase 2 — Clone and assemble
 
 ```bash
-git clone --branch genie-agent \
-  https://github.com/databrickslabs/firefly.git "$REPO_DIR"
+# Idempotent clone: reuse an existing repo at $REPO_DIR if it's already a git checkout;
+# clone if the dir is empty/absent; FAIL if it exists, is non-empty, and is not a git repo
+# (so we never clobber e.g. your home dir — see the REPO_DIR guidance in Phase 0).
+if [[ -d "$REPO_DIR/.git" ]]; then
+  echo "Repo already present at $REPO_DIR — reusing (skip clone)."
+elif [[ -e "$REPO_DIR" && -n "$(ls -A "$REPO_DIR" 2>/dev/null)" ]]; then
+  echo "ERROR: $REPO_DIR is non-empty and not a git repo — pick a new REPO_DIR." >&2; exit 1
+else
+  git clone --branch genie-agent https://github.com/databrickslabs/firefly.git "$REPO_DIR"
+fi
 cd "$REPO_DIR"
+
+# Push to your own GitHub fork. (Historically for Vercel's Git integration; the deploy now
+# uses the `vercel deploy` CLI and needs no Git integration — this push is optional and may
+# be removed. It requires `gh` auth from Phase 1e.)
+GH_USER=$(gh api user -q .login 2>/dev/null || echo "")
+if [[ -n "$GH_USER" ]]; then
+  FORK="${GITHUB_FORK:-$GH_USER/firefly}"
+  gh repo view "$FORK" &>/dev/null \
+    && { git remote add origin-fork "https://github.com/${FORK}.git" 2>/dev/null || true; git push -u origin-fork genie-agent; } \
+    || gh repo create "$FORK" --private --source "$REPO_DIR" --remote origin-fork --push
+fi
 
 # Submodule must be initialised before assemble_agent.sh runs.
 git submodule update --init
@@ -119,9 +183,21 @@ bash scripts/assemble_agent.sh
 
 ```bash
 cd "$REPO_DIR/agent-build"
+
+# Lakebase create-vs-reuse (idempotent): --lakebase-create-new fails on re-run
+# ("project slug already exists") AND disables quickstart's own .env-reuse path.
+# quickstart names resources deterministically, so if the project's primary endpoint
+# already exists, REUSE it; otherwise create new.
+LB_ENDPOINT="projects/${LAKEBASE_NAME}/branches/${LAKEBASE_NAME}-branch/endpoints/primary"
+if databricks api get "/api/2.0/postgres/${LB_ENDPOINT}" --profile "$DB_PROFILE" &>/dev/null; then
+  LB_ARG=(--lakebase-autoscaling-endpoint "$LB_ENDPOINT")   # reuse existing
+else
+  LB_ARG=(--lakebase-create-new "$LAKEBASE_NAME")           # create new
+fi
+
+# Pass --app-name so quickstart does NOT interactively prompt to bind an app.
 uv run --python 3.12 python scripts/quickstart.py \
-  --profile "$DB_PROFILE" \
-  --lakebase-create-new "$LAKEBASE_NAME"
+  --profile "$DB_PROFILE" "${LB_ARG[@]}" --app-name "$AGENT_APP_NAME"
 # --python 3.12 is required; omitting it picks the latest Python and fails on PyO3.
 # quickstart writes agent-build/.env with PGHOST/PGUSER/PGDATABASE/LAKEBASE_*
 # and patches agent-build/databricks.yml with the new experiment ID and Lakebase refs.
@@ -133,23 +209,21 @@ uv run --python 3.12 python scripts/quickstart.py \
 runtime by `quickstart.py` — **do not edit them manually**. The bundle also declares
 `catalog` and `schema` variables that default to `workspace` and `default`.
 
-If your workspace uses a different writable catalog or schema, override them now:
-
-```bash
-# Only needed if UC_CATALOG != "workspace" or UC_SCHEMA != "default"
-cd "$REPO_DIR/agent-build"
-# Edit databricks.yml: change the `catalog` and `schema` variable defaults,
-# and update DATABRICKS_MEMORY_STORE to match:
-#   catalog: <UC_CATALOG>
-#   schema:  <UC_SCHEMA>
-#   DATABRICKS_MEMORY_STORE: "<UC_CATALOG>.<UC_SCHEMA>.firefly_managed_memory"
-```
+`catalog` and `schema` are applied at **deploy time via `--var`** (Phase 4) — **do not
+edit `databricks.yml` manually**. `DATABRICKS_MEMORY_STORE` resolves from them to
+`$UC_CATALOG.$UC_SCHEMA.firefly_managed_memory`. Nothing to run here; the values you
+entered in Phase 0 are passed as `--var catalog=$UC_CATALOG --var schema=$UC_SCHEMA`
+on every `bundle deploy`/`bundle run`.
 
 ### 3c. Create the UC wheels volume
 
 ```bash
-databricks volumes create "$UC_CATALOG" "$UC_SCHEMA" firefly_wheels MANAGED \
-  --profile "$DB_PROFILE"
+# Idempotent: create only if the volume doesn't already exist (create errors on re-run).
+if databricks volumes read "${UC_CATALOG}.${UC_SCHEMA}.firefly_wheels" --profile "$DB_PROFILE" &>/dev/null; then
+  echo "UC volume ${UC_CATALOG}.${UC_SCHEMA}.firefly_wheels already exists — skipping."
+else
+  databricks volumes create "$UC_CATALOG" "$UC_SCHEMA" firefly_wheels MANAGED --profile "$DB_PROFILE"
+fi
 ```
 
 ### 3d. Vendor Python wheels (build-time offline install)
@@ -181,8 +255,10 @@ Three rules — all three must hold simultaneously:
 cd "$REPO_DIR/agent-build"
 
 # Deploy bundle (do NOT re-run assemble_agent.sh here — it wipes quickstart's .env)
-databricks bundle deploy --profile "$DB_PROFILE" -t dev
-databricks bundle run agent_openai_agents_sdk --profile "$DB_PROFILE" -t dev
+# Apply catalog/schema via --var (Phase 3b) — no databricks.yml edits.
+BUNDLE_VARS=(--var "catalog=$UC_CATALOG" --var "schema=$UC_SCHEMA")
+databricks bundle deploy --profile "$DB_PROFILE" -t dev "${BUNDLE_VARS[@]}"
+databricks bundle run agent_openai_agents_sdk --profile "$DB_PROFILE" -t dev "${BUNDLE_VARS[@]}"
 
 # Watch until app_status.state = RUNNING (deployment state leads by ~44s)
 databricks apps get "$AGENT_APP_NAME" -o json --profile "$DB_PROFILE" \
@@ -253,11 +329,16 @@ The Firefly frontend proxies the agent panel with the guest SP's M2M token. With
 the embedded panel redirects to Databricks OAuth instead of loading.
 
 ```bash
-# 1. Create the service principal at workspace level
-GUEST_SP_RESP=$(databricks service-principals create \
-  --display-name "firefly-guest-sp" \
-  -o json \
-  --profile "$DB_PROFILE")
+# 1. Create the service principal at workspace level — IDEMPOTENT: SCIM displayName is
+#    NOT unique, so a plain `create` on re-run makes a DUPLICATE SP (new id + secret) and
+#    orphans the old one. Reuse an existing firefly-guest-sp if present.
+GUEST_SP_RESP=$(databricks service-principals list \
+  --filter 'displayName eq "firefly-guest-sp"' -o json --profile "$DB_PROFILE" 2>/dev/null \
+  | python3 -c "import sys,json;l=json.load(sys.stdin) or [];m=[s for s in l if s.get('displayName')=='firefly-guest-sp'];print(json.dumps(m[0]) if m else '')")
+if [[ -z "$GUEST_SP_RESP" ]]; then
+  GUEST_SP_RESP=$(databricks service-principals create \
+    --display-name "firefly-guest-sp" -o json --profile "$DB_PROFILE")
+fi
 
 # Note: the CLI returns SCIM camelCase — use applicationId, not application_id
 GUEST_SP_CLIENT_ID=$(echo "$GUEST_SP_RESP" \
@@ -270,9 +351,9 @@ GUEST_SP_SECRET=$(databricks service-principal-secrets-proxy create \
   "$GUEST_SP_NUM_ID" -o json --profile "$DB_PROFILE" \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['secret'])")
 
-# 3. Store both values securely in keyring (never print them)
-python3 -c "import keyring; keyring.set_password('firefly-bootstrap','GUEST_SP_CLIENT_ID','$GUEST_SP_CLIENT_ID')"
-python3 -c "import keyring; keyring.set_password('firefly-bootstrap','GUEST_SP_SECRET','$GUEST_SP_SECRET')"
+# 3. Store both values in $REPO_DIR/.firefly-bootstrap/state.env (0600, gitignored) — never print them
+store_secret GUEST_SP_CLIENT_ID "$GUEST_SP_CLIENT_ID"
+store_secret GUEST_SP_SECRET    "$GUEST_SP_SECRET"
 
 # 4. Grant the guest SP data access (run in a SQL warehouse session):
 #    GRANT USE CATALOG ON CATALOG $UC_CATALOG TO `$GUEST_SP_CLIENT_ID`;
@@ -333,20 +414,20 @@ ORG_ID=$(neonctl orgs list --output json 2>/dev/null \
   | python3 -c "import sys,json; orgs=json.load(sys.stdin); print(orgs[0]['id'] if orgs else '')" \
   || echo "")
 
-# Create project
-if [[ -n "$ORG_ID" ]]; then
-  PROJECT_ID=$(neonctl projects create --name "$NEON_PROJECT_NAME" \
-    --org-id "$ORG_ID" --output json \
-    | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
-else
-  PROJECT_ID=$(neonctl projects create --name "$NEON_PROJECT_NAME" \
-    --output json \
+# Create project — IDEMPOTENT: Neon project names are NOT unique (id-based); a plain
+# `create` on re-run makes a SECOND project, orphans the first, and can hit the quota.
+# Reuse an existing project with the same name if present.
+ORG_FLAG=(); [[ -n "$ORG_ID" ]] && ORG_FLAG=(--org-id "$ORG_ID")
+PROJECT_ID=$(NEON_PROJECT_NAME="$NEON_PROJECT_NAME" neonctl projects list "${ORG_FLAG[@]}" --output json 2>/dev/null \
+  | python3 -c "import os,sys,json;d=json.load(sys.stdin);ps=d.get('projects',d) if isinstance(d,dict) else d;print(next((p['id'] for p in ps if p.get('name')==os.environ['NEON_PROJECT_NAME']),''))")
+if [[ -z "$PROJECT_ID" ]]; then
+  PROJECT_ID=$(neonctl projects create --name "$NEON_PROJECT_NAME" "${ORG_FLAG[@]}" --output json \
     | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
 fi
 
-# Get pooled connection string and store in keyring
+# Get pooled connection string and store in state.env (0600, gitignored)
 DB_URL=$(neonctl connection-string --project-id "$PROJECT_ID" --pooled)
-python3 -c "import keyring; keyring.set_password('firefly-bootstrap','DATABASE_URL','$DB_URL')"
+store_secret DATABASE_URL "$DB_URL"
 ```
 
 > The Neon API requires `org_id` in the project create body if the account is
@@ -356,20 +437,36 @@ python3 -c "import keyring; keyring.set_password('firefly-bootstrap','DATABASE_U
 
 ```bash
 cd "$REPO_DIR"
-pnpm install   # install node_modules if not already present
-DATABASE_URL=$(python3 -c "import keyring; print(keyring.get_password('firefly-bootstrap','DATABASE_URL'))")
-DATABASE_URL="$DATABASE_URL" node_modules/.bin/drizzle-kit push
+pnpm install   # via corepack (pnpm 10.34.5 activated in Phase 1a); installs node_modules
+DB_URL=$(read_secret DATABASE_URL)   # from .firefly-bootstrap/state.env
+DATABASE_URL="$DB_URL" node_modules/.bin/drizzle-kit push
 ```
 
 ---
 
 ## Phase 8 — Vercel frontend
 
-### 8a. Create and link project
+### 8a. Create + link project (no Git integration) + force Next.js preset
 
 ```bash
 cd "$REPO_DIR"
-vercel link --project "$VERCEL_PROJECT" --scope "$VERCEL_TEAM" --yes
+# Pre-create the project (idempotent) so `vercel link` only ATTACHES. Creating a NEW
+# project via link also tries to wire up Git auto-deploy — detecting the repo remotes,
+# prompting "which remote?", and calling Git connect, which needs a Vercel↔GitHub Login
+# Connection many accounts lack (→ HTTP 400). We deploy via the CLI and need NO Git
+# integration. (Enable push-to-deploy later from the dashboard: Project → Settings → Git.)
+vercel project add "$VERCEL_PROJECT" --scope "$VERCEL_TEAM" 2>/dev/null || true
+vercel link --project "$VERCEL_PROJECT" --scope "$VERCEL_TEAM" --yes --non-interactive
+
+# Force the Next.js framework preset. A project created with framework:null builds
+# `next build` but Vercel serves the output as STATIC → every route 404s despite a
+# "Ready" deployment. PATCH the preset via the API (flips all routes 200).
+V_TOKEN=$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/Library/Application Support/com.vercel.cli/auth.json")))["token"])')
+V_ORG=$(python3 -c "import json;print(json.load(open('$REPO_DIR/.vercel/project.json'))['orgId'])")
+V_PROJ=$(python3 -c "import json;print(json.load(open('$REPO_DIR/.vercel/project.json'))['projectId'])")
+curl -s -X PATCH "https://api.vercel.com/v9/projects/$V_PROJ?teamId=$V_ORG" \
+  -H "Authorization: Bearer $V_TOKEN" -H "Content-Type: application/json" \
+  -d '{"framework":"nextjs"}' -o /dev/null
 ```
 
 ### 8b. Set environment variables
@@ -382,17 +479,24 @@ AGENT_APP_URL=$(databricks apps get "$AGENT_APP_NAME" -o json --profile "$DB_PRO
 BETTER_AUTH_SECRET=$(openssl rand -base64 32)
 ENCRYPTION_KEY=$(openssl rand -hex 32)
 GUEST_API_SECRET=$(openssl rand -hex 64)
+DB_URL=$(read_secret DATABASE_URL)   # from state.env
 
+# Use --value (no stdin) + --force (idempotent overwrite) + --non-interactive. A plain
+# `vercel env add … <<< value` for PREVIEW scope stalls on a "? Git branch?" prompt.
 for SCOPE in preview production; do
-  vercel env add DATABRICKS_AGENT_APP_URL  "$SCOPE" <<< "$AGENT_APP_URL"
-  vercel env add DATABASE_URL              "$SCOPE" <<< "$(python3 -c "import keyring; print(keyring.get_password('firefly-bootstrap','DATABASE_URL'))")"
-  vercel env add BETTER_AUTH_SECRET        "$SCOPE" <<< "$BETTER_AUTH_SECRET"
-  vercel env add BETTER_AUTH_URL           "$SCOPE" <<< "https://$VERCEL_PROJECT.vercel.app"
-  vercel env add ENCRYPTION_KEY            "$SCOPE" <<< "$ENCRYPTION_KEY"
-  vercel env add NEXT_PUBLIC_AGENT_ENABLED "$SCOPE" <<< "true"
-  vercel env add GUEST_API_SECRET          "$SCOPE" <<< "$GUEST_API_SECRET"
-  vercel env add SPN_AUTH_DATABRICKS_ACCOUNTS_URL    "$SCOPE" <<< "https://accounts.cloud.databricks.com"
-  vercel env add SPN_AUTH_DATABRICKS_WORKSPACE_URL   "$SCOPE" <<< "$DATABRICKS_HOST"
+  add() { vercel env add "$1" "$SCOPE" --value "$2" --force --non-interactive --scope "$VERCEL_TEAM"; }
+  add DATABRICKS_AGENT_APP_URL          "$AGENT_APP_URL"
+  add DATABASE_URL                      "$DB_URL"
+  add BETTER_AUTH_SECRET                "$BETTER_AUTH_SECRET"
+  add ENCRYPTION_KEY                    "$ENCRYPTION_KEY"
+  add NEXT_PUBLIC_AGENT_ENABLED         "true"
+  add GUEST_API_SECRET                  "$GUEST_API_SECRET"
+  add SPN_AUTH_DATABRICKS_ACCOUNTS_URL  "https://accounts.cloud.databricks.com"
+  add SPN_AUTH_DATABRICKS_WORKSPACE_URL "$DATABRICKS_HOST"
+  # production's canonical domain is stable → set now. preview's BETTER_AUTH_URL is set
+  # AFTER deploy (8e) to the REAL serving origin — a pre-deploy guess breaks guest
+  # one-time-token verification (#19).
+  [[ "$SCOPE" == "production" ]] && add BETTER_AUTH_URL "https://$VERCEL_PROJECT.vercel.app"
 done
 ```
 
@@ -417,10 +521,11 @@ done
 # OAuth app registered at accounts.cloud.databricks.com → App connections.
 
 for SCOPE in preview production; do
-  vercel env add DATABRICKS_U2M_CLIENT_ID     "$SCOPE" <<< "${DATABRICKS_U2M_CLIENT_ID:-placeholder}"
-  vercel env add DATABRICKS_U2M_CLIENT_SECRET "$SCOPE" <<< "${DATABRICKS_U2M_CLIENT_SECRET:-placeholder}"
-  vercel env add DATABRICKS_ACCOUNT_ID        "$SCOPE" <<< "$DATABRICKS_ACCOUNT_ID"
-  vercel env add SPN_AUTH_DATABRICKS_ACCOUNT_ID "$SCOPE" <<< "$DATABRICKS_ACCOUNT_ID"
+  add() { vercel env add "$1" "$SCOPE" --value "$2" --force --non-interactive --scope "$VERCEL_TEAM"; }
+  add DATABRICKS_U2M_CLIENT_ID      "${DATABRICKS_U2M_CLIENT_ID:-placeholder}"
+  add DATABRICKS_U2M_CLIENT_SECRET  "${DATABRICKS_U2M_CLIENT_SECRET:-placeholder}"
+  add DATABRICKS_ACCOUNT_ID         "$DATABRICKS_ACCOUNT_ID"
+  add SPN_AUTH_DATABRICKS_ACCOUNT_ID "$DATABRICKS_ACCOUNT_ID"
 done
 ```
 
@@ -432,15 +537,29 @@ done
 vercel project protection disable "$VERCEL_PROJECT" --sso --scope "$VERCEL_TEAM"
 ```
 
-### 8d. Deploy
+### 8d. Deploy — phase 1 of 2: discover the real URL, pin a stable alias
 
 ```bash
-PREVIEW_URL=$(vercel deploy --scope "$VERCEL_TEAM" 2>&1 | grep -E 'https://' | tail -1)
-echo "Preview URL: $PREVIEW_URL"
+STABLE_ALIAS="${VERCEL_PROJECT}.vercel.app"
+# Parse ONLY the .vercel.app URL — Vercel may serve a suffixed domain if the name was
+# taken; never guess it (#15). Pin a stable alias so BETTER_AUTH_URL stays valid.
+DEPLOY_URL=$(vercel deploy --scope "$VERCEL_TEAM" 2>&1 | grep -oE 'https://[^ ]*\.vercel\.app' | tail -1)
+vercel alias set "$DEPLOY_URL" "$STABLE_ALIAS" --scope "$VERCEL_TEAM"
+PREVIEW_URL="https://$STABLE_ALIAS"
+```
+
+### 8e. Deploy — phase 2 of 2: set preview `BETTER_AUTH_URL`, redeploy (#19)
+
+```bash
+# BETTER_AUTH_URL is read at runtime and must equal the origin the guest actually opens.
+vercel env add BETTER_AUTH_URL preview --value "$PREVIEW_URL" --force --non-interactive --scope "$VERCEL_TEAM"
+# Redeploy so the running deployment serves the correct BETTER_AUTH_URL, then re-point the alias.
+DEPLOY_URL2=$(vercel deploy --scope "$VERCEL_TEAM" 2>&1 | grep -oE 'https://[^ ]*\.vercel\.app' | tail -1)
+vercel alias set "$DEPLOY_URL2" "$STABLE_ALIAS" --scope "$VERCEL_TEAM"
 
 # Store for Phase 9 (survives shell restart)
-python3 -c "import keyring; keyring.set_password('firefly-bootstrap','PREVIEW_URL','$PREVIEW_URL')"
-python3 -c "import keyring; keyring.set_password('firefly-bootstrap','GUEST_API_SECRET','$GUEST_API_SECRET')"
+store_secret PREVIEW_URL "$PREVIEW_URL"
+store_secret GUEST_API_SECRET "$GUEST_API_SECRET"
 ```
 
 ---
@@ -459,13 +578,14 @@ databricks apps get "$AGENT_APP_NAME" -o json --profile "$DB_PROFILE" \
 ### Guest login
 
 ```bash
-# Load everything from keyring — no values needed from memory
-PREVIEW_URL=$(python3 -c "import keyring; print(keyring.get_password('firefly-bootstrap','PREVIEW_URL'))")
-GUEST_API_SECRET=$(python3 -c "import keyring; print(keyring.get_password('firefly-bootstrap','GUEST_API_SECRET'))")
-
-# Load guest SP credentials from keyring (created in Phase 6b)
-GUEST_SP_CLIENT_ID=$(python3 -c "import keyring; print(keyring.get_password('firefly-bootstrap','GUEST_SP_CLIENT_ID'))")
-GUEST_SP_SECRET=$(python3 -c "import keyring; print(keyring.get_password('firefly-bootstrap','GUEST_SP_SECRET'))")
+# Load everything from state.env — no values needed from memory.
+# (Behind an intercepting proxy, the CURL_CA_BUNDLE exported in Phase 0 makes these curls
+# trust the proxy CA; without it curl returns 000 on the *.vercel.app origin.)
+PREVIEW_URL=$(read_secret PREVIEW_URL)
+GUEST_API_SECRET=$(read_secret GUEST_API_SECRET)
+# Guest SP credentials (created in Phase 6b)
+GUEST_SP_CLIENT_ID=$(read_secret GUEST_SP_CLIENT_ID)
+GUEST_SP_SECRET=$(read_secret GUEST_SP_SECRET)
 
 # 1. Create a workspace record
 WS=$(curl -s -X POST "$PREVIEW_URL/api/guest/workspaces" \
