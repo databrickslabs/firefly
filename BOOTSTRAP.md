@@ -148,7 +148,18 @@ neonctl me                                           # smoke-test / show identit
 ### 1d. Vercel CLI OAuth (skip if already authed)
 
 ```bash
-command -v vercel || npm install -g vercel           # install BEFORE login
+# Pin to a Tart-tested floor — do not chase npm `latest` (CLI deploy semantics move).
+# Override with VERCEL_CLI_VERSION=x.y.z to bump deliberately.
+VERCEL_CLI_VERSION="${VERCEL_CLI_VERSION:-56.3.1}"
+if command -v vercel &>/dev/null; then
+  VERCEL_CURRENT=$(vercel --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+  # Keep if current >= pin; otherwise install the pin.
+  if ! printf '%s\n%s\n' "$VERCEL_CLI_VERSION" "$VERCEL_CURRENT" | sort -C -V; then
+    npm install -g "vercel@${VERCEL_CLI_VERSION}"
+  fi
+else
+  npm install -g "vercel@${VERCEL_CLI_VERSION}"     # install BEFORE login
+fi
 if ! vercel whoami &>/dev/null; then vercel login; fi
 vercel whoami
 ```
@@ -527,10 +538,10 @@ for SCOPE in preview production; do
   # (app default "firefly"). Set it to the catalog chosen in Phase 0 so guests can BROWSE
   # the data provisioned there (the app's memory store lives in $UC_CATALOG too).
   add GUEST_ALLOWED_CATALOG_PREFIXES    "$UC_CATALOG"
-  # production's canonical domain is stable → set now. preview's BETTER_AUTH_URL is set
-  # AFTER deploy (8e) to the REAL serving origin — a pre-deploy guess breaks guest
-  # one-time-token verification (#19).
-  [[ "$SCOPE" == "production" ]] && add BETTER_AUTH_URL "https://$VERCEL_PROJECT.vercel.app"
+  # Do NOT set BETTER_AUTH_URL here. A new project's first `vercel deploy` is always
+  # production, and Vercel may assign a suffixed domain if the name was taken. Guessing
+  # https://$VERCEL_PROJECT.vercel.app breaks guest OTT verification (#19). Set it in 8e
+  # from the real deployment URL.
 done
 ```
 
@@ -579,25 +590,28 @@ done
 vercel project protection disable "$VERCEL_PROJECT" --sso --scope "$VERCEL_TEAM"
 ```
 
-### 8d. Deploy — phase 1 of 2: discover the real URL, pin a stable alias
+### 8d. Deploy — phase 1 of 2: discover the real production URL
 
 ```bash
-STABLE_ALIAS="${VERCEL_PROJECT}.vercel.app"
-# Parse ONLY the .vercel.app URL — Vercel may serve a suffixed domain if the name was
-# taken; never guess it (#15). Pin a stable alias so BETTER_AUTH_URL stays valid.
+# A new project's first `vercel deploy` is always production (even without --prod).
+# Parse ONLY the .vercel.app URL — Vercel may assign a suffixed domain if the name was
+# taken; never guess https://$VERCEL_PROJECT.vercel.app and never alias-pin that name (#19).
 DEPLOY_URL=$(vercel deploy --scope "$VERCEL_TEAM" 2>&1 | grep -oE 'https://[^ ]*\.vercel\.app' | tail -1)
-vercel alias set "$DEPLOY_URL" "$STABLE_ALIAS" --scope "$VERCEL_TEAM"
-PREVIEW_URL="https://$STABLE_ALIAS"
+PREVIEW_URL="$DEPLOY_URL"   # Phase 9 guest-entry URL (historical var name)
 ```
 
-### 8e. Deploy — phase 2 of 2: set preview `BETTER_AUTH_URL`, redeploy (#19)
+### 8e. Deploy — phase 2 of 2: set `BETTER_AUTH_URL`, redeploy `--prod` (#19)
 
 ```bash
 # BETTER_AUTH_URL is read at runtime and must equal the origin the guest actually opens.
-vercel env add BETTER_AUTH_URL preview --value "$PREVIEW_URL" --force --non-interactive --scope "$VERCEL_TEAM"
-# Redeploy so the running deployment serves the correct BETTER_AUTH_URL, then re-point the alias.
-DEPLOY_URL2=$(vercel deploy --scope "$VERCEL_TEAM" 2>&1 | grep -oE 'https://[^ ]*\.vercel\.app' | tail -1)
-vercel alias set "$DEPLOY_URL2" "$STABLE_ALIAS" --scope "$VERCEL_TEAM"
+# Bootstrap serves production, so set production only. Preview URLs are
+# per-deployment; pointing preview auth at the production origin would recreate
+# the origin mismatch. Do not use `vercel alias set` to
+# $VERCEL_PROJECT.vercel.app — that name may belong to another project.
+vercel env add BETTER_AUTH_URL production --value "$PREVIEW_URL" \
+  --force --non-interactive --scope "$VERCEL_TEAM"
+PREVIEW_URL=$(vercel deploy --prod --scope "$VERCEL_TEAM" 2>&1 \
+  | grep -oE 'https://[^ ]*\.vercel\.app' | tail -1)
 
 # Store for Phase 9 (survives shell restart)
 store_secret PREVIEW_URL "$PREVIEW_URL"
