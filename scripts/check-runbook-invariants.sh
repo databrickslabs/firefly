@@ -82,7 +82,29 @@ else
   echo "      that ignores onlyBuiltDependencies (ERR_PNPM_IGNORED_BUILDS)."
 fi
 
-# ── 5. The agent-facing invariant must stay documented. ──────────────────────
+# ── 5. The library must be sourceable from bash AND zsh. ─────────────────────
+# BOOTSTRAP.md Phase 0a tells the reader to `source scripts/lib/corp-network.sh` from their
+# own shell, and zsh is the macOS default. Bash-only idioms silently break there: `declare -F
+# name` is a function test in bash but declares a FLOAT in zsh (returns 0), so a
+# `declare -F x || x() {…}` guard skips the definition and every call dies with
+# "command not found". Caught on a live corp VM; assert both shells here.
+if [[ -f "$LIB" ]]; then
+  for sh in bash zsh; do
+    if ! command -v "$sh" >/dev/null 2>&1; then
+      pass "$sh not installed — skipping portability check."
+      continue
+    fi
+    if "$sh" -n "$LIB" 2>/dev/null && \
+       "$sh" -c "source '$LIB'; ok x >/dev/null && note x >/dev/null && warn x >/dev/null && fail x >/dev/null" >/dev/null 2>&1; then
+      pass "$LIB sources cleanly under $sh (helpers resolve)."
+    else
+      bad "$LIB is not usable under $sh — Phase 0a tells users to source it from their shell."
+      echo "      Avoid bash-only idioms (e.g. 'declare -F' is not a function test in zsh)."
+    fi
+  done
+fi
+
+# ── 6. The agent-facing invariant must stay documented. ──────────────────────
 # Actions is disabled on this repo, so AGENTS.md / CLAUDE.md are the only controls that
 # reach an agent editing the runbook — and an agent (a docs-sync commit) is what caused the
 # original regression. Deleting the written rule is precisely how ENV-0 was lost the first
@@ -97,7 +119,7 @@ for doc in AGENTS.md CLAUDE.md; do
   fi
 done
 
-# ── 6. README and the runbook must not contradict each other. ────────────────
+# ── 7. README and the runbook must not contradict each other. ────────────────
 # The README kept its correct "don't use corepack" guidance while the runbook switched to
 # requiring corepack, so the repo shipped two opposite instructions for months.
 if rg -q 'npm install -g pnpm' README.md; then

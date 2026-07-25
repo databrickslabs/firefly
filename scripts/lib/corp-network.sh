@@ -18,13 +18,25 @@
 # mirror — every value is read from the user's own configuration.
 
 # ─── minimal helpers (defined only if the caller hasn't already) ──────────────
-declare -F note >/dev/null 2>&1 || note() { echo "  $*"; }
-declare -F ok   >/dev/null 2>&1 || ok()   { echo "  ✓ $*"; }
-declare -F warn >/dev/null 2>&1 || warn() { echo "  ⚠ $*"; }
-declare -F fail >/dev/null 2>&1 || fail() { echo "  ✗ $*"; }
+# Must work under BOTH bash (bootstrap.sh) and zsh (a user sourcing this from their shell,
+# per BOOTSTRAP.md Phase 0a — zsh is the macOS default). `declare -F name` is NOT a
+# function test in zsh: it declares a float and returns 0, so a `declare -F x || x() {…}`
+# guard silently skips the definition and every call dies with "command not found".
+_ff_is_func() {
+  if [ -n "${ZSH_VERSION:-}" ]; then
+    eval '(( ${+functions[$1]} ))'
+  else
+    declare -F "$1" >/dev/null 2>&1
+  fi
+}
+
+_ff_is_func note || note() { echo "  $*"; }
+_ff_is_func ok   || ok()   { echo "  ✓ $*"; }
+_ff_is_func warn || warn() { echo "  ⚠ $*"; }
+_ff_is_func fail || fail() { echo "  ✗ $*"; }
 
 : "${INPUTS_DIR:=$HOME/.firefly-bootstrap}"
-declare -F init_inputs_dir >/dev/null 2>&1 || \
+_ff_is_func init_inputs_dir || \
   init_inputs_dir() { mkdir -p "$INPUTS_DIR"; chmod 700 "$INPUTS_DIR"; }
 
 # Single source of truth for the pnpm version this project installs. Must match the

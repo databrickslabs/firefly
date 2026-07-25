@@ -33,3 +33,13 @@ jobs:
           bash -n scripts/bootstrap.sh
           bash -n scripts/lib/corp-network.sh
           bash -n scripts/check-runbook-invariants.sh
+
+      # BOOTSTRAP.md Phase 0a asks users to source the library from their own shell, and
+      # zsh is the macOS default. Verify it is genuinely portable, not just bash-valid.
+      - name: Install zsh
+        run: sudo apt-get install -y zsh
+
+      - name: Library must be sourceable from zsh
+        run: |
+          zsh -n scripts/lib/corp-network.sh
+          zsh -c "source scripts/lib/corp-network.sh; ok ok; note note; warn warn; fail fail"
