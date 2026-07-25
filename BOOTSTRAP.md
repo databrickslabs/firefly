@@ -239,7 +239,28 @@ uv run --python 3.12 python scripts/quickstart.py \
 # --python 3.12 is required; omitting it picks the latest Python and fails on PyO3.
 # quickstart writes agent-build/.env with PGHOST/PGUSER/PGDATABASE/LAKEBASE_*
 # and patches agent-build/databricks.yml with the new experiment ID and Lakebase refs.
+
+# Confirm it actually finished before leaving this phase (see the warning below).
+assert_bundle_quickstart_ran databricks.yml || return 2>/dev/null || exit 1
 ```
+
+> ### This step is slow, and a partial run looks like a successful one
+>
+> Provisioning Lakebase takes **several minutes**, on top of a first-run `uv` sync that
+> downloads ~150 packages. Two failure modes look identical to success:
+>
+> * **Automated harnesses that time-slice long commands.** A wrapper that backgrounds a
+>   command after N seconds returns *its own* exit 0 while `quickstart.py` is still
+>   running. On 2026-07-25 a headless agent read that 0 at exactly 30.0 s, moved to
+>   Phase 4, and deployed an unpatched bundle. **A zero exit code from a wrapper is not
+>   evidence that quickstart finished.**
+> * **Stopping at the first quiet moment.** The last line before the long pause is
+>   `Creating new Lakebase: <name>`. That is the *start* of provisioning, not the end.
+>
+> The `assert_bundle_quickstart_ran` line above is the actual completion test: it passes
+> only once quickstart has rewritten `experiment_id` in `agent-build/databricks.yml`. If
+> it fails, quickstart has not finished — wait for it, or re-run this phase. Do not
+> continue to Phase 4; the deploy will fail with a 404 naming the placeholder id.
 
 ### 3b. Verify bundle variables (catalog/schema only)
 

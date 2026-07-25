@@ -568,8 +568,15 @@ if [[ "$DRY_RUN" == "false" ]] \
 else
   LB_ARG="--lakebase-create-new '${LAKEBASE_NAME}'"
 fi
+note "Lakebase provisioning takes several minutes; let this finish before Phase 4."
 run "cd '$REPO_DIR/agent-build' && uv run --python 3.12 python scripts/quickstart.py \
   --profile '$DB_PROFILE' ${LB_ARG} --app-name '$AGENT_APP_NAME'"
+# Completion test, not a formality: quickstart rewrites experiment_id in the bundle, so
+# this is the one observable that distinguishes "finished" from "still running" or
+# "exited early". A wrapper that backgrounds long commands returns 0 either way.
+if [[ "$DRY_RUN" == "false" ]]; then
+  assert_bundle_quickstart_ran "$REPO_DIR/agent-build/databricks.yml" || exit 1
+fi
 
 echo
 step "3b. Catalog/schema → bundle vars (applied at deploy; no yml edit)"
