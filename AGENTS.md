@@ -48,8 +48,34 @@ Verify any change with `bash scripts/check-runbook-invariants.sh`.
 - **Never work around a blocked registry** with `--registry https://registry.npmjs.org`, by
   disabling TLS verification, or by editing `/etc/hosts`. Bridge the user's own configured
   mirror; never hardcode a mirror URL.
+- **Every helper `BOOTSTRAP.md` calls must be defined in a `scripts/lib/*.sh` that the
+  runbook itself sources.** Not in `bootstrap.sh`, not left to the reader. The runbook
+  called `store_secret` / `read_secret` for ten days with no definition anywhere in the
+  file, while `bootstrap.sh`'s version took `(VARNAME, _, KEY)` and every runbook call site
+  used `$(read_secret KEY)` — so even copying it across did not work. A headless agent
+  invented its own, used bash-only `${!key}`, and got `bad substitution` under zsh.
+- **Runnable blocks must parse under bash *and* zsh.** zsh is the macOS default and the
+  reader pastes these into their own shell. No `${!var}`, no `declare -F` as a function
+  test, no `mapfile`/`readarray` (macOS also ships bash 3.2).
+- **A code block must do what it looks like it does.** `command -v X || { # install X }`
+  and `{ : ; }` shipped as the Phase 1b/1e installers: they read as installs and are
+  no-ops, which is invisible on any machine that already has the tool.
+- **Never parse structured output with `grep`.** The `sync.exclude` list opens with a
+  comment naming `pyproject.toml` and `vendor-wheels/`, so `grep -q pyproject.toml` reports
+  it excluded when it is not — `bootstrap.sh` failed a correct config that way, and an
+  agent's `-\s` regex read the same list as empty and passed. Use
+  `check_sync_exclude_rules`. Same rule for CLI JSON: use the shared parsers.
+- **Never derive an id from a `create` response you then act on.** `neonctl projects
+  create` succeeds server-side before any parse of its output can fail, so a parse bug
+  orphans a real project. Create, then look the id up by name; fail closed if it is empty.
 
 Historical note: this regressed once already. `e91322d` deleted the "do not use corepack"
 guard and its rationale, then `99f2cc2` — a docs-sync commit — reintroduced corepack as the
 first executable command in the runbook. Deleting the reason is what made reintroducing the
 bug look reasonable. Keep the rationale attached to the rule.
+
+The same `99f2cc2` is also the origin of three of the defects listed above: it back-ported
+`bootstrap.sh`'s *idempotency* fix for Neon while dropping the *parsing* fix from the same
+block, replaced self-contained `keyring` one-liners with calls to functions it did not
+carry across, and added the two comment-only installers. Blanket "sync the docs to the
+script" commits are how this class of bug arrives. Edit the shared library instead.

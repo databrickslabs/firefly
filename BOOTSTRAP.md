@@ -44,11 +44,16 @@ blocked public registries. Off-proxy every bridge is a no-op, so it is always sa
 ```bash
 # Run from the repo root. Safe to re-run; no-ops when public registries are reachable.
 source scripts/lib/corp-network.sh
+source scripts/lib/runbook.sh        # store_secret / read_secret, CLI installers, checks
 firefly_bridge_corp_network
 
 # Confirm what got set (empty output just means nothing needed bridging):
 env | grep -E 'UV_DEFAULT_INDEX|COREPACK_NPM_REGISTRY|NODE_EXTRA_CA_CERTS|SSL_CERT_FILE'
 ```
+
+**Keep this shell.** Both `source` lines define functions that later phases call
+(`store_secret`, `read_secret`, `firefly_install_*`, the Phase 3e/4 checks). If you
+open a new terminal, re-run both lines from the repo root before continuing.
 
 If it reports an intercepting proxy and you have verified the SHA-256 against your
 organization's known root CA, trust it for this session:
@@ -127,11 +132,7 @@ pnpm --version                              # must print 10.34.5
 ### 1b. Databricks CLI OAuth
 
 ```bash
-command -v databricks || {  # install official release to $HOME/bin (no Homebrew)
-  DB_VER=$(curl -fsSL https://api.github.com/repos/databricks/cli/releases/latest \
-    | python3 -c "import sys,json;print(json.load(sys.stdin)['tag_name'].lstrip('v'))")
-  # download+unzip databricks_cli_${DB_VER}_darwin_<arch>.zip → $HOME/bin/databricks
-}
+firefly_install_databricks_cli   # no-op if present; installs the official release to $HOME/bin
 databricks auth login --host "$DATABRICKS_HOST" --profile "$DB_PROFILE"
 # Opens browser → U2M OAuth → ~/.databrickscfg. (databricks has no "already authed" guard;
 # re-running just refreshes.) Smoke-test: databricks workspace list / --profile "$DB_PROFILE"
@@ -167,8 +168,7 @@ vercel whoami
 ### 1e. GitHub CLI (for the submodule; optional otherwise)
 
 ```bash
-command -v gh || {  # install official gh release to $HOME/bin (no Homebrew)
-  : ; }
+firefly_install_gh   # no-op if present; installs the official release to $HOME/bin
 if ! gh auth status &>/dev/null; then gh auth login; fi   # browser or PAT
 ```
 
@@ -216,6 +216,11 @@ bash scripts/assemble_agent.sh
 
 ```bash
 cd "$REPO_DIR/agent-build"
+
+# Everything below this point is uv-driven. Confirm the package index answers first;
+# otherwise the first failure is a bare uv stack trace naming pypi.org, eight phases
+# from the actual cause. Requires the Phase 0a `source` lines.
+firefly_preflight_pypi_index || return 2>/dev/null || exit 1
 
 # Lakebase create-vs-reuse (idempotent): --lakebase-create-new fails on re-run
 # ("project slug already exists") AND disables quickstart's own .env-reuse path.
@@ -272,6 +277,10 @@ bash scripts/vendor_wheels.sh
 
 ### 3e. Confirm sync.exclude rules in agent/databricks.yml
 
+```bash
+check_sync_exclude_rules "$REPO_DIR/agent/databricks.yml"
+```
+
 Three rules — all three must hold simultaneously:
 
 | Path | Must be in sync.exclude? | Why |
@@ -280,12 +289,22 @@ Three rules — all three must hold simultaneously:
 | `uv.lock` | **Yes** — exclude it | Forces plain `uv sync` (not `--locked`), so `UV_FIND_LINKS` re-resolves with local wheels |
 | `vendor-wheels/**` | **No** — upload it | Local wheels must be present for the build to use them |
 
+> Run the command rather than eyeballing the table or grepping. The `exclude:` list
+> opens with comment lines that mention `pyproject.toml` and `vendor-wheels/`, so a
+> plain `grep` reports both as excluded when they are not — and a naive `-\s` scan
+> reads the list as empty and passes anything. Both mistakes have been made here.
+
 ---
 
 ## Phase 4 — Deploy the agent app
 
 ```bash
 cd "$REPO_DIR/agent-build"
+
+# Refuse to deploy a bundle whose resource bindings quickstart never rewrote. The
+# committed experiment id is a placeholder for the authoring workspace; deploying it
+# returns "Node ID <id> does not exist (404)", which names the id and nothing else.
+assert_bundle_quickstart_ran databricks.yml || return 2>/dev/null || exit 1
 
 # Deploy bundle (do NOT re-run assemble_agent.sh here — it wipes quickstart's .env)
 # Apply catalog/schema via --var (Phase 3b) — no databricks.yml edits.
@@ -459,12 +478,18 @@ ORG_ID=$(neonctl orgs list --output json 2>/dev/null \
 # `create` on re-run makes a SECOND project, orphans the first, and can hit the quota.
 # Reuse an existing project with the same name if present.
 ORG_FLAG=(); [[ -n "$ORG_ID" ]] && ORG_FLAG=(--org-id "$ORG_ID")
-PROJECT_ID=$(NEON_PROJECT_NAME="$NEON_PROJECT_NAME" neonctl projects list "${ORG_FLAG[@]}" --output json 2>/dev/null \
-  | python3 -c "import os,sys,json;d=json.load(sys.stdin);ps=d.get('projects',d) if isinstance(d,dict) else d;print(next((p['id'] for p in ps if p.get('name')==os.environ['NEON_PROJECT_NAME']),''))")
+PROJECT_ID=$(firefly_neon_project_id "${ORG_FLAG[@]}")
 if [[ -z "$PROJECT_ID" ]]; then
-  PROJECT_ID=$(neonctl projects create --name "$NEON_PROJECT_NAME" "${ORG_FLAG[@]}" --output json \
-    | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+  # Resolve the id by re-listing, NOT by parsing the create response. `create`
+  # succeeds server-side before any parse of its output can fail, so a parse bug
+  # there silently orphans a real project — which is how two projects named
+  # firefly-genie appeared. One lookup path, and it self-heals.
+  neonctl projects create --name "$NEON_PROJECT_NAME" "${ORG_FLAG[@]}" --output json >/dev/null
+  PROJECT_ID=$(firefly_neon_project_id "${ORG_FLAG[@]}")
 fi
+# An empty id makes the next call ambiguous ("Multiple projects found") and stores
+# an empty DATABASE_URL, which only surfaces later in drizzle-kit. Stop here instead.
+[[ -n "$PROJECT_ID" ]] || { echo "ERROR: no Neon project id for '$NEON_PROJECT_NAME'" >&2; return 2>/dev/null || exit 1; }
 
 # Get pooled connection string and store in state.env (0600, gitignored)
 DB_URL=$(neonctl connection-string --project-id "$PROJECT_ID" --pooled)

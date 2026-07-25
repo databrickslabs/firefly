@@ -71,6 +71,21 @@ Applies to `BOOTSTRAP.md`, `README.md`, `scripts/bootstrap.sh`, `scripts/lib/**`
   while serving packages normally. Probe the actual operation (`npm view pnpm@<pin>`).
 - **NEVER bypass a blocked registry** via `--registry https://registry.npmjs.org`, disabling
   TLS, or `/etc/hosts` edits. Bridge the user's own mirror; never hardcode one.
+- **NEVER let `BOOTSTRAP.md` call a helper it does not source.** Every helper lives in a
+  `scripts/lib/*.sh` that the runbook sources in Phase 0a. It called `store_secret` /
+  `read_secret` with no definition anywhere in the file, and `bootstrap.sh`'s version had
+  an incompatible signature, so copying it across did not help either.
+- **ALWAYS keep runnable blocks bash- AND zsh-parseable** (zsh is the macOS default; macOS
+  bash is 3.2). No `${!var}`, no `declare -F` as a function test, no `mapfile`.
+- **NEVER ship a block that only looks executable** — `{ # comment }` and `{ : ; }` were
+  the Phase 1b/1e CLI installers, and installed nothing.
+- **NEVER `grep` structured output.** The `sync.exclude` comment names `pyproject.toml`, so
+  a bare grep reports it excluded. Use `check_sync_exclude_rules` / the shared parsers.
+- **NEVER trust a `create` response for an id you then act on.** `neonctl projects create`
+  succeeds server-side before the parse fails, orphaning a project. Create, then look up
+  by name, then fail closed on empty.
 
 This already regressed once: the guard was deleted (`e91322d`), then a docs-sync commit
-(`99f2cc2`) reintroduced corepack. Keep the rationale next to the rule.
+(`99f2cc2`) reintroduced corepack. Keep the rationale next to the rule. That same commit
+also caused three of the defects above, by syncing prose while dropping the code behind
+it — edit the shared library, never re-sync the two files by hand.
