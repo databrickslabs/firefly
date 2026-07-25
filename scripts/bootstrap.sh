@@ -901,7 +901,17 @@ run "cd '$REPO_DIR' && vercel link --project '$VERCEL_PROJECT' --scope '$VERCEL_
 # but serves the output as STATIC → every route 404s despite a "Ready" deployment. Force
 # the Next.js preset on the linked project via the API (verified: flips all routes 200).
 if [[ "$DRY_RUN" == "false" ]]; then
-  V_TOKEN=$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/Library/Application Support/com.vercel.cli/auth.json")))["token"])' 2>/dev/null || echo "")
+  # Token sources in order: explicit env (CI / non-interactive), then the CLI's store on
+  # macOS, then its XDG location. This is load-bearing twice — the framework preset below
+  # (without it every route 404s) and the origin resolution in 8a-2 — so a single
+  # hardcoded path made it a silent 404 or a hard stop for anyone storing auth elsewhere.
+  V_TOKEN="${VERCEL_TOKEN:-}"
+  for _v_auth in "$HOME/Library/Application Support/com.vercel.cli/auth.json" \
+                 "$HOME/.local/share/com.vercel.cli/auth.json"; do
+    [[ -n "$V_TOKEN" ]] && break
+    [[ -f "$_v_auth" ]] || continue
+    V_TOKEN=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("token",""))' "$_v_auth" 2>/dev/null || echo "")
+  done
   V_ORG=$(python3 -c "import json;print(json.load(open('$REPO_DIR/.vercel/project.json'))['orgId'])" 2>/dev/null || echo "")
   V_PROJ=$(python3 -c "import json;print(json.load(open('$REPO_DIR/.vercel/project.json'))['projectId'])" 2>/dev/null || echo "")
   if [[ -n "$V_TOKEN" && -n "$V_PROJ" ]]; then
@@ -915,6 +925,62 @@ if [[ "$DRY_RUN" == "false" ]]; then
   fi
 else
   run "# PATCH Vercel project framework=nextjs via API (else Next.js routes 404 despite 'Ready')"
+fi
+
+echo
+step "8a-2. Resolve the origin Vercel serves this project on (API, not the CLI's stdout)"
+# `<name>.vercel.app` is globally unique across all Vercel accounts; when the name is
+# taken Vercel assigns a RANDOM suffix (`demo` -> `demo-zeta-seven-61`), so the host is
+# unguessable. Read it instead — and read it HERE, because the domain is allocated at
+# project-creation time and is therefore known before the first deploy.
+# Resolving pre-deploy is also what makes this correct on a RE-RUN: discovering the URL
+# from `vercel deploy` output only yields the production domain on a project's FIRST
+# deploy; on any later run a bare deploy is a preview with a per-deployment host, which
+# silently becomes BETTER_AUTH_URL and reproduces #19 while reporting success.
+if [[ "$DRY_RUN" == "false" ]]; then
+  if [[ -z "$V_TOKEN" || -z "$V_PROJ" ]]; then
+    fail "Cannot read the Vercel API token / project id — refusing to guess the app origin."
+    note "Set VERCEL_TOKEN, or re-run 'vercel login' so the CLI writes its auth store."
+    exit 1
+  fi
+  V_TMP=$(mktemp -d)
+  curl -sf -H "Authorization: Bearer $V_TOKEN" \
+    "https://api.vercel.com/v9/projects/$V_PROJ/domains?teamId=$V_ORG" > "$V_TMP/domains.json" || true
+  curl -sf -H "Authorization: Bearer $V_TOKEN" \
+    "https://api.vercel.com/v9/projects/$V_PROJ?teamId=$V_ORG" > "$V_TMP/project.json" || true
+  APP_ORIGIN=$(python3 - "$V_TMP/domains.json" "$V_TMP/project.json" <<'PY' || true
+import json, sys
+try:
+    domains = json.load(open(sys.argv[1])); project = json.load(open(sys.argv[2]))
+except Exception:
+    raise SystemExit
+# Where production actually serves. Populated once a production deployment exists, and it
+# can disagree with /domains, so it wins when present.
+alias = [a for a in (((project.get("targets") or {}).get("production") or {}).get("alias") or []) if a]
+if alias:
+    print("https://" + alias[0]); raise SystemExit
+# Pre-deploy: the single verified .vercel.app assigned when the project was created.
+hosts = [d["name"] for d in (domains.get("domains") or [])
+         if d.get("verified") and not d.get("gitBranch") and not d.get("redirect")
+         and str(d.get("name", "")).endswith(".vercel.app")]
+if len(hosts) == 1:
+    print("https://" + hosts[0])
+PY
+)
+  rm -rf "$V_TMP"
+  if [[ -z "$APP_ORIGIN" ]]; then
+    fail "No verified .vercel.app domain for '$VERCEL_PROJECT' — refusing to guess one (#19)."
+    note "Inspect with: vercel project inspect '$VERCEL_PROJECT' --scope '$VERCEL_TEAM'"
+    exit 1
+  fi
+  ok "App origin: $APP_ORIGIN"
+  if [[ "$APP_ORIGIN" != "https://$VERCEL_PROJECT.vercel.app" ]]; then # fence-ok: detects the collision
+    note "'$VERCEL_PROJECT.vercel.app' belongs to another account — using the assigned domain." # fence-ok: diagnostic
+  fi
+  store_secret APP_ORIGIN "$APP_ORIGIN"
+else
+  run "# GET /v9/projects/<id>/domains -> APP_ORIGIN (real serving host, never guessed)"
+  APP_ORIGIN="<resolved-vercel-origin>"
 fi
 
 echo
@@ -960,10 +1026,11 @@ for SCOPE in preview production; do
   run "vercel env add DATABRICKS_AGENT_APP_URL  $SCOPE --value '$AGENT_APP_URL' --force --non-interactive --scope '$VERCEL_TEAM'"
   run "vercel env add DATABASE_URL              $SCOPE --value '$DB_URL' --force --non-interactive --scope '$VERCEL_TEAM'"
   run "vercel env add BETTER_AUTH_SECRET        $SCOPE --value '$BETTER_AUTH_SECRET' --force --non-interactive --scope '$VERCEL_TEAM'"
-  # BETTER_AUTH_URL is set AFTER the first deploy (step 8e) to the real serving
-  # origin — never guess https://$VERCEL_PROJECT.vercel.app (#19). A new project's
-  # first `vercel deploy` is production (Vercel API); a pre-deploy guess breaks
-  # guest one-time-token verification when the name was taken / suffixed.
+  # Production is the bootstrap's serving target and its origin is already known from
+  # 8a-2, so set it now — one deploy, no second pass. Preview is deliberately left unset:
+  # preview URLs are per-deployment, so pointing preview auth at production is wrong.
+  [[ "$SCOPE" == "production" ]] && \
+    run "vercel env add BETTER_AUTH_URL         $SCOPE --value '$APP_ORIGIN' --force --non-interactive --scope '$VERCEL_TEAM'"
   run "vercel env add ENCRYPTION_KEY            $SCOPE --value '$ENCRYPTION_KEY' --force --non-interactive --scope '$VERCEL_TEAM'"
   run "vercel env add NEXT_PUBLIC_AGENT_ENABLED $SCOPE --value 'true' --force --non-interactive --scope '$VERCEL_TEAM'"
   run "vercel env add GUEST_API_SECRET          $SCOPE --value '$GUEST_API_SECRET' --force --non-interactive --scope '$VERCEL_TEAM'"
@@ -995,37 +1062,37 @@ step "8c. Disable preview SSO protection"
 run "vercel project protection disable '$VERCEL_PROJECT' --sso --scope '$VERCEL_TEAM'"
 
 echo
-step "8d. Deploy — phase 1 of 2: discover the real production URL"
-note "A new project's first vercel deploy is always production (even without --prod)."
-note "Vercel may assign a suffixed domain if the project name was taken; never guess it (#19)."
+step "8d. Deploy (single pass — production env already points at the real origin)"
+# Always --prod. A bare `vercel deploy` is production only on a project's FIRST deploy;
+# on a re-run it produces a preview with a per-deployment host, which is how a
+# discover-from-stdout flow silently sets BETTER_AUTH_URL to a dead origin (#19).
 if [[ "$DRY_RUN" == "false" ]]; then
-  DEPLOY_URL=$(vercel deploy --scope "$VERCEL_TEAM" 2>&1 | grep -oE 'https://[^ ]*\.vercel\.app' | tail -1)
-  [[ -z "$DEPLOY_URL" ]] && { fail "Could not parse Vercel deployment URL from CLI output"; exit 1; }
-  ok "Deployment URL: $DEPLOY_URL"
-  # PREVIEW_URL is the Phase 9 guest-entry URL (historical name); it is the real
-  # production origin from this first deploy — not ${VERCEL_PROJECT}.vercel.app.
-  PREVIEW_URL="$DEPLOY_URL"
-else
-  run "vercel deploy --scope '$VERCEL_TEAM'                       # capture real DEPLOY_URL"
-  PREVIEW_URL="<deployment-url>"
-fi
-
-echo
-step "8e. Deploy — phase 2 of 2: set BETTER_AUTH_URL to the real URL, then redeploy --prod"
-note "BETTER_AUTH_URL is read at runtime; it must equal the origin the guest actually opens (#19)."
-note "Set production only, then redeploy --prod (bootstrap's serving target)."
-note "Preview URLs are per-deployment; do not point preview auth at the production origin."
-if [[ "$DRY_RUN" == "false" ]]; then
-  vercel env add BETTER_AUTH_URL production --value "$PREVIEW_URL" --force --non-interactive --scope "$VERCEL_TEAM"
-  # Redeploy production so the running deployment serves BETTER_AUTH_URL=$PREVIEW_URL.
-  DEPLOY_URL2=$(vercel deploy --prod --scope "$VERCEL_TEAM" 2>&1 | grep -oE 'https://[^ ]*\.vercel\.app' | tail -1)
-  [[ -n "$DEPLOY_URL2" ]] && PREVIEW_URL="$DEPLOY_URL2"
-  ok "Production redeployed; guest URL $PREVIEW_URL serves BETTER_AUTH_URL=$PREVIEW_URL"
+  DEPLOY_URL=$(vercel deploy --prod --scope "$VERCEL_TEAM" 2>&1 | grep -oE 'https://[^ ]*\.vercel\.app' | tail -1)
+  ok "Deployed: ${DEPLOY_URL:-<none parsed>}"
+  PREVIEW_URL="$APP_ORIGIN"   # Phase 9 guest-entry URL (historical var name)
   store_secret PREVIEW_URL "$PREVIEW_URL"
   store_secret GUEST_API_SECRET "$GUEST_API_SECRET"
 else
-  run "vercel env add BETTER_AUTH_URL production --value '$PREVIEW_URL' --force --non-interactive --scope '$VERCEL_TEAM'"
-  run "vercel deploy --prod --scope '$VERCEL_TEAM'                # capture production URL"
+  run "vercel deploy --prod --scope '$VERCEL_TEAM'"
+  PREVIEW_URL="$APP_ORIGIN"
+fi
+
+echo
+step "8e. Verify production serves the origin BETTER_AUTH_URL points at"
+# #19 reports success at every earlier step and only surfaces later as "Invalid token"
+# on the guest link, so the match is asserted here rather than assumed.
+if [[ "$DRY_RUN" == "false" ]]; then
+  SERVING=$(curl -sf -H "Authorization: Bearer $V_TOKEN" \
+    "https://api.vercel.com/v9/projects/$V_PROJ?teamId=$V_ORG" \
+    | python3 -c 'import json,sys; t=(json.load(sys.stdin).get("targets") or {}).get("production") or {}; print("\n".join(t.get("alias") or []))' 2>/dev/null || true)
+  if grep -qxF "${APP_ORIGIN#https://}" <<<"$SERVING"; then
+    ok "Production serves $APP_ORIGIN"
+  else
+    fail "Production does NOT serve $APP_ORIGIN (aliases: $(tr '\n' ' ' <<<"$SERVING"))"
+    exit 1
+  fi
+else
+  run "# assert targets.production.alias contains APP_ORIGIN"
 fi
 
 fi
