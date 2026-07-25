@@ -1001,11 +1001,10 @@ for SCOPE in preview production; do
   run "vercel env add DATABRICKS_AGENT_APP_URL  $SCOPE --value '$AGENT_APP_URL' --force --non-interactive --scope '$VERCEL_TEAM'"
   run "vercel env add DATABASE_URL              $SCOPE --value '$DB_URL' --force --non-interactive --scope '$VERCEL_TEAM'"
   run "vercel env add BETTER_AUTH_SECRET        $SCOPE --value '$BETTER_AUTH_SECRET' --force --non-interactive --scope '$VERCEL_TEAM'"
-  # preview's BETTER_AUTH_URL is set AFTER deploy (step 8e) to the real serving
-  # origin — a pre-deploy guess breaks guest one-time-token verification (#19).
-  # production's canonical domain is stable, so set it here.
-  [[ "$SCOPE" == "production" ]] && \
-    run "vercel env add BETTER_AUTH_URL         $SCOPE --value 'https://$VERCEL_PROJECT.vercel.app' --force --non-interactive --scope '$VERCEL_TEAM'"
+  # BETTER_AUTH_URL is set AFTER the first deploy (step 8e) to the real serving
+  # origin — never guess https://$VERCEL_PROJECT.vercel.app (#19). A new project's
+  # first `vercel deploy` is production (Vercel API); a pre-deploy guess breaks
+  # guest one-time-token verification when the name was taken / suffixed.
   run "vercel env add ENCRYPTION_KEY            $SCOPE --value '$ENCRYPTION_KEY' --force --non-interactive --scope '$VERCEL_TEAM'"
   run "vercel env add NEXT_PUBLIC_AGENT_ENABLED $SCOPE --value 'true' --force --non-interactive --scope '$VERCEL_TEAM'"
   run "vercel env add GUEST_API_SECRET          $SCOPE --value '$GUEST_API_SECRET' --force --non-interactive --scope '$VERCEL_TEAM'"
@@ -1037,40 +1036,37 @@ step "8c. Disable preview SSO protection"
 run "vercel project protection disable '$VERCEL_PROJECT' --sso --scope '$VERCEL_TEAM'"
 
 echo
-step "8d. Deploy — phase 1 of 2: discover the real URL and pin a stable alias"
-note "Vercel may serve at a suffixed domain if the project name was taken; never guess it (#19)."
-STABLE_ALIAS="${VERCEL_PROJECT}.vercel.app"
+step "8d. Deploy — phase 1 of 2: discover the real production URL"
+note "A new project's first vercel deploy is always production (even without --prod)."
+note "Vercel may assign a suffixed domain if the project name was taken; never guess it (#19)."
 if [[ "$DRY_RUN" == "false" ]]; then
   DEPLOY_URL=$(vercel deploy --scope "$VERCEL_TEAM" 2>&1 | grep -oE 'https://[^ ]*\.vercel\.app' | tail -1)
+  [[ -z "$DEPLOY_URL" ]] && { fail "Could not parse Vercel deployment URL from CLI output"; exit 1; }
   ok "Deployment URL: $DEPLOY_URL"
-  # Pin a stable alias so BETTER_AUTH_URL stays valid across the redeploy below.
-  vercel alias set "$DEPLOY_URL" "$STABLE_ALIAS" --scope "$VERCEL_TEAM"
-  PREVIEW_URL="https://$STABLE_ALIAS"
-  ok "Stable alias: $PREVIEW_URL"
+  # PREVIEW_URL is the Phase 9 guest-entry URL (historical name); it is the real
+  # production origin from this first deploy — not ${VERCEL_PROJECT}.vercel.app.
+  PREVIEW_URL="$DEPLOY_URL"
 else
-  run "vercel deploy --scope '$VERCEL_TEAM'                       # capture DEPLOY_URL"
-  run "vercel alias set <DEPLOY_URL> '$STABLE_ALIAS' --scope '$VERCEL_TEAM'"
-  PREVIEW_URL="https://$STABLE_ALIAS"
+  run "vercel deploy --scope '$VERCEL_TEAM'                       # capture real DEPLOY_URL"
+  PREVIEW_URL="<deployment-url>"
 fi
 
 echo
-step "8e. Deploy — phase 2 of 2: set BETTER_AUTH_URL to the real URL, then redeploy"
+step "8e. Deploy — phase 2 of 2: set BETTER_AUTH_URL to the real URL, then redeploy --prod"
 note "BETTER_AUTH_URL is read at runtime; it must equal the origin the guest actually opens (#19)."
+note "Set production only, then redeploy --prod (bootstrap's serving target)."
+note "Preview URLs are per-deployment; do not point preview auth at the production origin."
 if [[ "$DRY_RUN" == "false" ]]; then
-  # --force overwrites the existing preview value (idempotent); --non-interactive avoids
-  # the "Git branch?" prompt (defaults to all Preview branches). No rm/herestring needed.
-  vercel env add BETTER_AUTH_URL preview --value "$PREVIEW_URL" --force --non-interactive --scope "$VERCEL_TEAM"
-  # Redeploy so the running deployment serves BETTER_AUTH_URL=$PREVIEW_URL, then re-point the alias.
-  DEPLOY_URL2=$(vercel deploy --scope "$VERCEL_TEAM" 2>&1 | grep -oE 'https://[^ ]*\.vercel\.app' | tail -1)
-  vercel alias set "$DEPLOY_URL2" "$STABLE_ALIAS" --scope "$VERCEL_TEAM"
-  ok "Redeployed; $PREVIEW_URL now serves BETTER_AUTH_URL=$PREVIEW_URL"
+  vercel env add BETTER_AUTH_URL production --value "$PREVIEW_URL" --force --non-interactive --scope "$VERCEL_TEAM"
+  # Redeploy production so the running deployment serves BETTER_AUTH_URL=$PREVIEW_URL.
+  DEPLOY_URL2=$(vercel deploy --prod --scope "$VERCEL_TEAM" 2>&1 | grep -oE 'https://[^ ]*\.vercel\.app' | tail -1)
+  [[ -n "$DEPLOY_URL2" ]] && PREVIEW_URL="$DEPLOY_URL2"
+  ok "Production redeployed; guest URL $PREVIEW_URL serves BETTER_AUTH_URL=$PREVIEW_URL"
   store_secret PREVIEW_URL "$PREVIEW_URL"
   store_secret GUEST_API_SECRET "$GUEST_API_SECRET"
 else
-  run "vercel env add BETTER_AUTH_URL preview --value '$PREVIEW_URL' --force --non-interactive --scope '$VERCEL_TEAM'"
-  run "vercel deploy --scope '$VERCEL_TEAM'                       # capture DEPLOY_URL2"
-  run "vercel alias set <DEPLOY_URL2> '$STABLE_ALIAS' --scope '$VERCEL_TEAM'"
-  PREVIEW_URL="https://$STABLE_ALIAS"
+  run "vercel env add BETTER_AUTH_URL production --value '$PREVIEW_URL' --force --non-interactive --scope '$VERCEL_TEAM'"
+  run "vercel deploy --prod --scope '$VERCEL_TEAM'                # capture production URL"
 fi
 
 fi
@@ -1082,7 +1078,7 @@ if run_phase "9"; then
 
 if [[ "$DRY_RUN" == "false" ]]; then
   read_secret PREVIEW_URL "firefly-bootstrap" "PREVIEW_URL" 2>/dev/null || {
-    read -rp "  Paste the Vercel preview URL: " PREVIEW_URL
+    read -rp "  Paste the Vercel production URL: " PREVIEW_URL
   }
 fi
 
@@ -1146,7 +1142,7 @@ if [[ "$DRY_RUN" == "false" ]]; then
   echo "  ${bold}▶ OPEN THE APP — guest login (one-time link, valid ~10 min):${reset}"
   echo "      ${bold}${LOGIN_URL:-<not minted — re-run and execute Phase 9 to create one>}${reset}"
   echo
-  note "Frontend (preview): ${PREVIEW_URL:-<unknown>}"
+  note "Frontend (production): ${PREVIEW_URL:-<unknown>}"
   note "Agent app:          $AGENT_APP_NAME (RUNNING)"
   note "UC memory store:    $UC_CATALOG.$UC_SCHEMA.firefly_managed_memory"
   echo
