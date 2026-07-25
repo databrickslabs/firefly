@@ -1,0 +1,30 @@
+name: Bootstrap Corepack regression
+
+on:
+  pull_request:
+    paths:
+      - "scripts/bootstrap.sh"
+      - "scripts/test-bootstrap-corepack.sh"
+      - ".github/workflows/bootstrap-corepack-regression.yml"
+  push:
+    branches:
+      - genie-agent
+    paths:
+      - "scripts/bootstrap.sh"
+      - "scripts/test-bootstrap-corepack.sh"
+      - ".github/workflows/bootstrap-corepack-regression.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  fresh-home-phase-1:
+    runs-on: macos-15
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Run fresh-HOME bootstrap through Phase 1
+        run: scripts/test-bootstrap-corepack.sh
