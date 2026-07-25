@@ -16,6 +16,7 @@ set -euo pipefail
 # ─── flags ────────────────────────────────────────────────────────────────────
 DRY_RUN=false
 STOP_AFTER=""
+CHECK_PYPI_PROXY=false
 # Non-interactive trust of an auto-detected intercepting-proxy root CA (CI/automation).
 # Also honored via env FIREFLY_TRUST_PROXY_CA=1. Off by default → we prompt with the
 # root CA's fingerprint before trusting anything.
@@ -29,7 +30,8 @@ for arg in "$@"; do
     --dry-run)         DRY_RUN=true ;;
     --stop-after=*)    STOP_AFTER="${arg#*=}" ;;
     --trust-proxy-ca)  TRUST_PROXY_CA=true ;;
-    *) echo "Unknown flag: $arg  (use --dry-run, --stop-after=N, --trust-proxy-ca)"; exit 1 ;;
+    --check-pypi-proxy) CHECK_PYPI_PROXY=true ;;
+    *) echo "Unknown flag: $arg  (use --dry-run, --stop-after=N, --trust-proxy-ca, --check-pypi-proxy)"; exit 1 ;;
   esac
 done
 
@@ -48,6 +50,16 @@ note()   { echo "  ${dim}$*${reset}"; }
 ok()     { echo "  ${green}✓ $*${reset}"; }
 warn()   { echo "  ${yellow}⚠ $*${reset}"; }
 fail()   { echo "  ${red}✗ $*${reset}"; }
+
+BOOTSTRAP_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/pypi_proxy_guard.sh
+source "$BOOTSTRAP_SCRIPT_DIR/lib/pypi_proxy_guard.sh"
+
+if [[ "$CHECK_PYPI_PROXY" == "true" ]]; then
+  check_pypi_proxy_state "${REPO_DIR:-$PWD}"
+  ok "PyPI proxy config and checked uv.lock files are safe"
+  exit 0
+fi
 
 # ─── run helper ───────────────────────────────────────────────────────────────
 # In dry-run mode: prints the command. In live mode: executes it.
@@ -353,80 +365,6 @@ derive_proxy_ca_bundle() {
   chmod 600 "$capem" 2>/dev/null || true
   PROXY_CA_BUNDLE="$capem"; PROXY_CA_ADDED="$added"
   return 0
-}
-
-# uv does NOT read pip.conf or PIP_INDEX_URL (verified). On corporate networks that block
-# public PyPI and route pip through an internal mirror (Artifactory/Nexus/…), uv silently
-# hits pypi.org and fails — even though the user's `pip` works. Bridge the user's OWN
-# already-configured pip index into uv via UV_DEFAULT_INDEX. Never hardcode a mirror.
-#
-# Exception: pypi-proxy.dev.databricks.com is a known-dead host. If pip/uv/env point at it,
-# refuse — do not bridge or proceed (stamping .dev into uv.lock causes Apps install timeouts).
-DEAD_PYPI_PROXY_HOST="pypi-proxy.dev.databricks.com"
-CANONICAL_PYPI_PROXY_SIMPLE="https://pypi-proxy.cloud.databricks.com/simple"
-
-detect_pip_index() {
-  local v f
-  if command -v python3 >/dev/null 2>&1; then
-    v=$(python3 -m pip config get global.index-url 2>/dev/null | tr -d '[:space:]')
-    [[ -n "$v" && "$v" != "None" ]] && { echo "$v"; return; }
-  fi
-  for f in "${PIP_CONFIG_FILE:-}" "$HOME/.config/pip/pip.conf" "$HOME/.pip/pip.conf" /etc/pip.conf; do
-    [[ -f "$f" ]] || continue
-    v=$(awk -F= '/^[[:space:]]*index-url[[:space:]]*=/{gsub(/[[:space:]]/,"",$2);print $2; exit}' "$f")
-    [[ -n "$v" ]] && { echo "$v"; return; }
-  done
-}
-
-assert_index_not_dead_pypi_proxy() {
-  local label="$1" value="$2"
-  [[ -z "$value" ]] && return 0
-  case "$value" in
-    *"${DEAD_PYPI_PROXY_HOST}"*)
-      fail "$label uses dead host ${DEAD_PYPI_PROXY_HOST}"
-      note "Set index to ${CANONICAL_PYPI_PROXY_SIMPLE}, then regenerate any uv.lock that stamped .dev."
-      exit 1
-      ;;
-  esac
-}
-
-reject_dead_pypi_proxy_config() {
-  assert_index_not_dead_pypi_proxy "UV_DEFAULT_INDEX" "${UV_DEFAULT_INDEX:-}"
-  assert_index_not_dead_pypi_proxy "UV_INDEX_URL" "${UV_INDEX_URL:-}"
-  assert_index_not_dead_pypi_proxy "pip index-url" "$(detect_pip_index)"
-  local uv_toml="$HOME/.config/uv/uv.toml"
-  if [[ -f "$uv_toml" ]] && grep -q "$DEAD_PYPI_PROXY_HOST" "$uv_toml" 2>/dev/null; then
-    fail "$uv_toml contains ${DEAD_PYPI_PROXY_HOST}"
-    note "Replace with ${CANONICAL_PYPI_PROXY_SIMPLE}, then regenerate any uv.lock that stamped .dev."
-    exit 1
-  fi
-}
-
-assert_uv_locks_not_dead_pypi_proxy() {
-  local f bad=0
-  for f in "$@"; do
-    [[ -f "$f" ]] || continue
-    if grep -q "$DEAD_PYPI_PROXY_HOST" "$f"; then
-      fail "$f stamps ${DEAD_PYPI_PROXY_HOST} into package sources"
-      bad=1
-    fi
-  done
-  if [[ "$bad" -eq 1 ]]; then
-    note "Fix: point pip/uv at ${CANONICAL_PYPI_PROXY_SIMPLE}, then: rm -f <lock> && uv lock"
-    exit 1
-  fi
-}
-
-bridge_pip_index_to_uv() {
-  # Respect an explicit uv config the user already set (still validated by reject_dead_*).
-  [[ -n "${UV_DEFAULT_INDEX:-}${UV_INDEX_URL:-}" ]] && return 0
-  [[ -f "$HOME/.config/uv/uv.toml" ]] && return 0
-  local idx; idx=$(detect_pip_index)
-  [[ -z "$idx" ]] && return 0
-  case "$idx" in *pypi.org/simple*) return 0 ;; esac   # already public PyPI — nothing to bridge
-  assert_index_not_dead_pypi_proxy "pip index-url (bridge)" "$idx"
-  export UV_DEFAULT_INDEX="$idx"
-  PIP_BRIDGED_INDEX="$idx"
 }
 
 # corepack fetches the repo's pinned package manager (packageManager: pnpm@10.x) from
