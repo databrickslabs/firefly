@@ -43,3 +43,21 @@ jobs:
         run: |
           zsh -n scripts/lib/corp-network.sh
           zsh -c "source scripts/lib/corp-network.sh; ok ok; note note; warn warn; fail fail"
+
+  # Behavioural counterpart to the static checks above. Adapted from the fresh-HOME test on
+  # fix/corepack-mkdir-home-bin (#67) and reframed to assert the outcome rather than the
+  # install mechanism. Runs on macOS because that is what the runbook targets.
+  # NOTE: GitHub runners have unrestricted npm access, so this covers fresh-HOME and the
+  # version pin — NOT the blocked-registry case, which needs a corporate-network VM.
+  phase1a-fresh-home:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install ripgrep
+        run: brew install ripgrep
+      - name: Fresh-HOME Phase 1a regression
+        run: bash scripts/test-bootstrap-phase1a.sh
