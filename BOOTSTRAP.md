@@ -119,7 +119,18 @@ neonctl me                                           # smoke-test / show identit
 ### 1d. Vercel CLI OAuth (skip if already authed)
 
 ```bash
-command -v vercel || npm install -g vercel           # install BEFORE login
+# Pin to a Tart-tested floor — do not chase npm `latest` (CLI deploy semantics move).
+# Override with VERCEL_CLI_VERSION=x.y.z to bump deliberately.
+VERCEL_CLI_VERSION="${VERCEL_CLI_VERSION:-56.3.1}"
+if command -v vercel &>/dev/null; then
+  VERCEL_CURRENT=$(vercel --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+  # Keep if current >= pin; otherwise install the pin.
+  if ! printf '%s\n%s\n' "$VERCEL_CLI_VERSION" "$VERCEL_CURRENT" | sort -C -V; then
+    npm install -g "vercel@${VERCEL_CLI_VERSION}"
+  fi
+else
+  npm install -g "vercel@${VERCEL_CLI_VERSION}"     # install BEFORE login
+fi
 if ! vercel whoami &>/dev/null; then vercel login; fi
 vercel whoami
 ```

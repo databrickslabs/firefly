@@ -519,10 +519,22 @@ fi
 
 echo
 step "1b. Vercel CLI OAuth (opens browser)"
+# Pin to a Tart-tested floor — do not chase npm `latest` (CLI deploy semantics move).
+# Override with VERCEL_CLI_VERSION=x.y.z if you need to bump deliberately.
+VERCEL_CLI_VERSION="${VERCEL_CLI_VERSION:-56.3.1}"
+vercel_needs_install=true
 if command -v vercel &>/dev/null; then
-  ok "vercel already installed: $(vercel --version 2>/dev/null || echo '?')"
-else
-  run "npm install -g vercel"
+  VERCEL_CURRENT=$(vercel --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+  # sort -C -V: already-sorted means VERCEL_CLI_VERSION <= VERCEL_CURRENT.
+  if [[ -n "$VERCEL_CURRENT" ]] && printf '%s\n%s\n' "$VERCEL_CLI_VERSION" "$VERCEL_CURRENT" | sort -C -V; then
+    ok "vercel already installed: $VERCEL_CURRENT (>= $VERCEL_CLI_VERSION)"
+    vercel_needs_install=false
+  else
+    note "vercel ${VERCEL_CURRENT:-unknown} is below required $VERCEL_CLI_VERSION — installing pin"
+  fi
+fi
+if [[ "$vercel_needs_install" == "true" ]]; then
+  run "npm install -g vercel@${VERCEL_CLI_VERSION}"
 fi
 if [[ "$DRY_RUN" == "false" ]] && vercel whoami &>/dev/null; then
   ok "vercel already authenticated: $(vercel whoami 2>/dev/null | tail -1)"
