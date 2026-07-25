@@ -90,6 +90,8 @@ of blocked public registries. Off-proxy these are no-ops. Never hardcode a mirro
 # pnpm's npm "latest" dist-tag currently resolves to a 12.x ALPHA that breaks installs
 # (ignores onlyBuiltDependencies → ERR_PNPM_IGNORED_BUILDS). Use corepack and pre-activate
 # an exact stable version so it never resolves "latest" (a dist-tag corporate mirrors 404).
+# corepack enable --install-directory requires the target dir to already exist (ENOENT otherwise).
+mkdir -p "$HOME/bin"
 corepack enable --install-directory "$HOME/bin"
 corepack prepare pnpm@10.34.5 --activate      # downloads the exact tarball from the mirror
 # A repo `packageManager: pnpm@10.x` pin, if present, still takes precedence.

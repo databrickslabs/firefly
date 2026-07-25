@@ -504,6 +504,9 @@ step "1a. pnpm (corepack-managed; repo pins pnpm 10 via packageManager)"
 # the repo's `packageManager: pnpm@10.x` pin and fetches that exact version on demand
 # (via COREPACK_NPM_REGISTRY + NODE_EXTRA_CA_CERTS set in Phase 0).
 if command -v corepack &>/dev/null; then
+  # corepack enable --install-directory requires the target dir to already exist
+  # (ENOENT otherwise). PATH including $HOME/bin does not create it.
+  run "mkdir -p '$HOME/bin'"
   run "corepack enable --install-directory '$HOME/bin'"
   # Pre-activate a SPECIFIC stable pnpm. If the cloned repo has no packageManager pin,
   # corepack otherwise asks the registry for `pnpm/latest` (a dist-tag endpoint corporate
