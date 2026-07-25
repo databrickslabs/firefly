@@ -385,7 +385,8 @@ else
 fi
 
 # Bridge the user's existing pip index mirror into uv (uv ignores pip.conf).
-# Refuse the known-dead .dev PyPI proxy before any uv lock/sync work.
+# Flag the unsanctioned .dev PyPI proxy before any uv lock/sync work (warn by default,
+# fatal with FIREFLY_STRICT_PYPI_PROXY=1).
 if [[ "$DRY_RUN" == "true" ]]; then
   run "# if pip is configured with a custom index-url, export UV_DEFAULT_INDEX to match"
   run "# refuse pypi-proxy.dev.databricks.com in env / pip / uv.toml"
@@ -661,7 +662,7 @@ stop_if_done "3"
 
 # ─── Phase 4: Deploy agent app ────────────────────────────────────────────────
 header "Phase 4 — Deploy agent app"
-step "Preflight: uv.lock must not stamp dead PyPI proxy (.dev)"
+step "Preflight: uv.lock must not stamp the unsanctioned PyPI proxy (.dev)"
 if [[ "$DRY_RUN" == "true" ]]; then
   run "# assert no ${FIREFLY_UNSANCTIONED_PYPI_HOST} in agent-build/guest-manager uv.lock"
 else

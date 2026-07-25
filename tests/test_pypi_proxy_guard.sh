@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BOOTSTRAP="$ROOT/scripts/bootstrap.sh"
 GUARD="$ROOT/scripts/lib/corp-network.sh"
-DEAD="https://pypi-proxy.dev.databricks.com/simple"
+UNSANCTIONED="https://pypi-proxy.dev.databricks.com/simple"
 CLOUD="https://pypi-proxy.cloud.databricks.com/simple"
 
 TMP="$(mktemp -d)"
@@ -88,11 +88,11 @@ good="$(make_fixture good)"
 expect_pass "safe config and both cloud locks pass through real bootstrap" bootstrap_check "$good"
 
 bad_agent="$(make_fixture bad-agent)"
-printf 'source = { registry = "%s/" }\n' "$DEAD" >"$bad_agent/repo/agent-build/uv.lock"
+printf 'source = { registry = "%s/" }\n' "$UNSANCTIONED" >"$bad_agent/repo/agent-build/uv.lock"
 expect_fail_with "agent-build .dev lock fails before deploy" "agent-build/uv.lock stamps" bootstrap_check "$bad_agent"
 
 bad_guest="$(make_fixture bad-guest)"
-printf 'source = { registry = "%s/" }\n' "$DEAD" >"$bad_guest/repo/databricks-apps/guest-manager/uv.lock"
+printf 'source = { registry = "%s/" }\n' "$UNSANCTIONED" >"$bad_guest/repo/databricks-apps/guest-manager/uv.lock"
 expect_fail_with "guest-manager .dev lock fails before deploy" "guest-manager/uv.lock stamps" bootstrap_check "$bad_guest"
 
 # Live pip/uv CONFIG carrying .dev warns by default and only fails under
@@ -105,22 +105,22 @@ STRICT=FIREFLY_STRICT_PYPI_PROXY=1
 
 bad_default_env="$(make_fixture bad-default-env)"
 expect_fail_with "UV_DEFAULT_INDEX .dev fails (strict)" "UV_DEFAULT_INDEX uses the unsanctioned index" \
-  bootstrap_check "$bad_default_env" $STRICT UV_DEFAULT_INDEX="$DEAD"
+  bootstrap_check "$bad_default_env" $STRICT UV_DEFAULT_INDEX="$UNSANCTIONED"
 expect_pass_with "UV_DEFAULT_INDEX .dev warns (default)" "not the sanctioned index" \
-  bootstrap_check "$bad_default_env" UV_DEFAULT_INDEX="$DEAD"
+  bootstrap_check "$bad_default_env" UV_DEFAULT_INDEX="$UNSANCTIONED"
 
 bad_legacy_env="$(make_fixture bad-legacy-env)"
 expect_fail_with "UV_INDEX_URL .dev fails (strict)" "UV_INDEX_URL uses the unsanctioned index" \
-  bootstrap_check "$bad_legacy_env" $STRICT UV_INDEX_URL="$DEAD"
+  bootstrap_check "$bad_legacy_env" $STRICT UV_INDEX_URL="$UNSANCTIONED"
 
 bad_pip="$(make_fixture bad-pip)"
 expect_fail_with "pip index .dev fails (strict)" "pip index-url uses the unsanctioned index" \
-  bootstrap_check "$bad_pip" $STRICT FAKE_PIP_INDEX="$DEAD"
+  bootstrap_check "$bad_pip" $STRICT FAKE_PIP_INDEX="$UNSANCTIONED"
 expect_pass_with "pip index .dev warns (default)" "not the sanctioned index" \
-  bootstrap_check "$bad_pip" FAKE_PIP_INDEX="$DEAD"
+  bootstrap_check "$bad_pip" FAKE_PIP_INDEX="$UNSANCTIONED"
 
 bad_uv_toml="$(make_fixture bad-uv-toml)"
-printf '[[index]]\nurl = "%s/"\ndefault = true\n' "$DEAD" >"$bad_uv_toml/home/.config/uv/uv.toml"
+printf '[[index]]\nurl = "%s/"\ndefault = true\n' "$UNSANCTIONED" >"$bad_uv_toml/home/.config/uv/uv.toml"
 expect_fail_with "uv.toml .dev fails (strict)" "uv.toml uses the unsanctioned index" \
   bootstrap_check "$bad_uv_toml" $STRICT
 
