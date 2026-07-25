@@ -299,7 +299,9 @@ databricks apps get "$AGENT_APP_NAME" -o json --profile "$DB_PROFILE" \
     print(d['app_status']['state'], d.get('active_deployment',{}).get('status',{}).get('state',''))"
 # Expected: RUNNING SUCCEEDED
 # bootstrap.sh Phase 4 fails closed if agent-build or guest-manager uv.lock
-# stamps pypi-proxy.dev.databricks.com (dead host → Apps install timeouts).
+# stamps pypi-proxy.dev.databricks.com (unsanctioned index; implicated in the Apps
+# install timeouts). Live pip/uv config only WARNS — set FIREFLY_STRICT_PYPI_PROXY=1
+# to make that fatal too.
 # Bootstrap also refuses to bridge pip → uv when the index is that .dev host.
 # Manual check / fix:
 #   grep -R pypi-proxy.dev --include='uv.lock' .

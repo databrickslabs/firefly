@@ -427,7 +427,7 @@ cd agent-build
 
 # Vendor the build wheels (once, before deploy). Pre-fetches linux/cp311 wheels
 # into vendor-wheels/ so the Apps build installs offline via UV_FIND_LINKS and
-# never depends on the build container's PyPI egress (a dead .dev proxy, a lagging
+# never depends on the build container's PyPI egress (an unsanctioned .dev proxy, a lagging
 # .cloud mirror, and no offline fallback are what made online installs flaky and
 # blow past the 10-min startup limit). Requires local `uv` + `pip`.
 bash scripts/vendor_wheels.sh
@@ -506,7 +506,7 @@ CLI for memory stores (CLI v0.298.0); the script uses the REST API via the SDK.
   3.14 fails — pass `--python 3.12`). The **Apps runtime is 3.11 (cp311)**, not 3.12
   as older docs claimed, so `scripts/vendor_wheels.sh` pins `PY=3.11` and downloads
   cp311 wheels. If you regenerate `uv.lock`, make sure the configured PyPI proxy is
-  `pypi-proxy.cloud.databricks.com` (the `.dev` host is dead and stamping it into
+  `pypi-proxy.cloud.databricks.com` (the `.dev` host is unsanctioned and stamping it into
   the lock is what caused the original install timeouts). `bootstrap.sh` Phase 4
   fails if `agent-build/uv.lock` or `databricks-apps/guest-manager/uv.lock` still
   contain `.dev`. From the workspace root you can also run

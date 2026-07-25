@@ -155,6 +155,8 @@ assert_pypi_index_sanctioned() {
   return 0
 }
 
+# Returns non-zero rather than exiting, so tests and the --check-pypi-proxy flag can call it
+# without killing the shell. Under `set -e` a bare call still aborts bootstrap.
 reject_dead_pypi_proxy_config() {
   local rc=0
   assert_pypi_index_sanctioned "UV_DEFAULT_INDEX" "${UV_DEFAULT_INDEX:-}" || rc=1
@@ -164,11 +166,12 @@ reject_dead_pypi_proxy_config() {
   if [[ -f "$uv_toml" ]] && grep -q "$FIREFLY_UNSANCTIONED_PYPI_HOST" "$uv_toml" 2>/dev/null; then
     assert_pypi_index_sanctioned "$uv_toml" "$FIREFLY_UNSANCTIONED_PYPI_HOST" || rc=1
   fi
-  [[ "$rc" -eq 0 ]] || exit 1
+  return "$rc"
 }
 
-# Lockfiles are checked-in, deterministic artifacts — a stamped .dev there ships to every
-# consumer, so this one stays fatal by default regardless of FIREFLY_STRICT_PYPI_PROXY.
+# Lockfiles are checked-in, deterministic artifacts — a stamped .dev ships to every consumer
+# and cannot be corrected by the person running bootstrap. This stays fatal regardless of
+# FIREFLY_STRICT_PYPI_PROXY, which only governs the caller's own live pip/uv config.
 assert_uv_locks_not_dead_pypi_proxy() {
   local f bad=0
   for f in "$@"; do
@@ -179,10 +182,22 @@ assert_uv_locks_not_dead_pypi_proxy() {
     fi
   done
   if [[ "$bad" -eq 1 ]]; then
-    note "Fix: point pip/uv at ${FIREFLY_CANONICAL_PYPI_INDEX}, then: rm -f <lock> && uv lock"
-    note "Rewriting only the host (leaving versions alone) avoids re-resolving the graph."
-    exit 1
+    note "Fix: point pip/uv at ${FIREFLY_CANONICAL_PYPI_INDEX}, then rewrite ONLY the host:"
+    note "    sed -i '' 's#${FIREFLY_UNSANCTIONED_PYPI_HOST}#pypi-proxy.cloud.databricks.com#g' <lock>"
+    note "A full 'rm -f <lock> && uv lock' also re-resolves every version — see #63/#66."
+    return 1
   fi
+  return 0
+}
+
+# Whole-repo check used by `bootstrap.sh --check-pypi-proxy` and the hermetic tests.
+check_pypi_proxy_state() {
+  local repo_dir="$1" rc=0
+  reject_dead_pypi_proxy_config || rc=1
+  assert_uv_locks_not_dead_pypi_proxy \
+    "$repo_dir/agent-build/uv.lock" \
+    "$repo_dir/databricks-apps/guest-manager/uv.lock" || rc=1
+  return "$rc"
 }
 
 # ─── corepack ← npm registry bridge ──────────────────────────────────────────

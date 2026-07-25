@@ -16,6 +16,7 @@ set -euo pipefail
 # ─── flags ────────────────────────────────────────────────────────────────────
 DRY_RUN=false
 STOP_AFTER=""
+CHECK_PYPI_PROXY=false
 # Non-interactive trust of an auto-detected intercepting-proxy root CA (CI/automation).
 # Also honored via env FIREFLY_TRUST_PROXY_CA=1. Off by default → we prompt with the
 # root CA's fingerprint before trusting anything.
@@ -29,7 +30,8 @@ for arg in "$@"; do
     --dry-run)         DRY_RUN=true ;;
     --stop-after=*)    STOP_AFTER="${arg#*=}" ;;
     --trust-proxy-ca)  TRUST_PROXY_CA=true ;;
-    *) echo "Unknown flag: $arg  (use --dry-run, --stop-after=N, --trust-proxy-ca)"; exit 1 ;;
+    --check-pypi-proxy) CHECK_PYPI_PROXY=true ;;
+    *) echo "Unknown flag: $arg  (use --dry-run, --stop-after=N, --trust-proxy-ca, --check-pypi-proxy)"; exit 1 ;;
   esac
 done
 
@@ -48,6 +50,16 @@ note()   { echo "  ${dim}$*${reset}"; }
 ok()     { echo "  ${green}✓ $*${reset}"; }
 warn()   { echo "  ${yellow}⚠ $*${reset}"; }
 fail()   { echo "  ${red}✗ $*${reset}"; }
+
+BOOTSTRAP_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/corp-network.sh
+source "$BOOTSTRAP_SCRIPT_DIR/lib/corp-network.sh"
+
+if [[ "$CHECK_PYPI_PROXY" == "true" ]]; then
+  check_pypi_proxy_state "${REPO_DIR:-$PWD}"
+  ok "PyPI proxy config and checked uv.lock files are safe"
+  exit 0
+fi
 
 # ─── run helper ───────────────────────────────────────────────────────────────
 # In dry-run mode: prints the command. In live mode: executes it.
@@ -326,8 +338,8 @@ export PATH="$HOME/bin:$HOME/.local/bin:$PATH"
 #      root CA is presented, extract it, show CN + SHA-256, confirm (or --trust-proxy-ca),
 #      and build a LOCAL bundle (system roots + proxy CAs). System trust is never touched.
 #   3. No MITM detected            → nothing to do.
-# shellcheck source=lib/corp-network.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/corp-network.sh"
+# Corporate-network helpers (TLS/CA, uv + corepack bridges, PyPI proxy policy) are sourced
+# once near the top of this script, before flag handling.
 
 if [[ -n "${TLS_PEM_PATH:-}" && -f "${TLS_PEM_PATH}" ]]; then
   apply_tls_bundle "$TLS_PEM_PATH"
@@ -651,12 +663,12 @@ stop_if_done "3"
 header "Phase 4 — Deploy agent app"
 step "Preflight: uv.lock must not stamp dead PyPI proxy (.dev)"
 if [[ "$DRY_RUN" == "true" ]]; then
-  run "# assert no ${DEAD_PYPI_PROXY_HOST:-pypi-proxy.dev.databricks.com} in agent-build/guest-manager uv.lock"
+  run "# assert no ${FIREFLY_UNSANCTIONED_PYPI_HOST} in agent-build/guest-manager uv.lock"
 else
   assert_uv_locks_not_dead_pypi_proxy \
     "$REPO_DIR/agent-build/uv.lock" \
     "$REPO_DIR/databricks-apps/guest-manager/uv.lock"
-  ok "No ${DEAD_PYPI_PROXY_HOST} in checked uv.lock files"
+  ok "No ${FIREFLY_UNSANCTIONED_PYPI_HOST} in checked uv.lock files"
 fi
 if run_phase "4"; then
 
