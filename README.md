@@ -503,7 +503,11 @@ CLI for memory stores (CLI v0.298.0); the script uses the REST API via the SDK.
   as older docs claimed, so `scripts/vendor_wheels.sh` pins `PY=3.11` and downloads
   cp311 wheels. If you regenerate `uv.lock`, make sure the configured PyPI proxy is
   `pypi-proxy.cloud.databricks.com` (the `.dev` host is dead and stamping it into
-  the lock is what caused the original install timeouts).
+  the lock is what caused the original install timeouts). `bootstrap.sh` Phase 4
+  fails if `agent-build/uv.lock` or `databricks-apps/guest-manager/uv.lock` still
+  contain `.dev`. From the workspace root you can also run
+  `bash scripts/check-no-dev-pypi-proxy.sh`. Bootstrap also refuses to bridge
+  pip → uv when the index is `pypi-proxy.dev.databricks.com`.
 - **Verify the overlay applied** before deploying (quick sanity check):
   `agent-build/agent_server/agent.py` contains `GENIE_INSTRUCTIONS`,
   `e2e-chatbot-app-next/client/vite.config.ts` has `base: "./"`, and

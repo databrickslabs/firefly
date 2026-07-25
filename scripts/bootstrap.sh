@@ -359,6 +359,12 @@ derive_proxy_ca_bundle() {
 # public PyPI and route pip through an internal mirror (Artifactory/Nexus/…), uv silently
 # hits pypi.org and fails — even though the user's `pip` works. Bridge the user's OWN
 # already-configured pip index into uv via UV_DEFAULT_INDEX. Never hardcode a mirror.
+#
+# Exception: pypi-proxy.dev.databricks.com is a known-dead host. If pip/uv/env point at it,
+# refuse — do not bridge or proceed (stamping .dev into uv.lock causes Apps install timeouts).
+DEAD_PYPI_PROXY_HOST="pypi-proxy.dev.databricks.com"
+CANONICAL_PYPI_PROXY_SIMPLE="https://pypi-proxy.cloud.databricks.com/simple"
+
 detect_pip_index() {
   local v f
   if command -v python3 >/dev/null 2>&1; then
@@ -372,13 +378,53 @@ detect_pip_index() {
   done
 }
 
+assert_index_not_dead_pypi_proxy() {
+  local label="$1" value="$2"
+  [[ -z "$value" ]] && return 0
+  case "$value" in
+    *"${DEAD_PYPI_PROXY_HOST}"*)
+      fail "$label uses dead host ${DEAD_PYPI_PROXY_HOST}"
+      note "Set index to ${CANONICAL_PYPI_PROXY_SIMPLE}, then regenerate any uv.lock that stamped .dev."
+      exit 1
+      ;;
+  esac
+}
+
+reject_dead_pypi_proxy_config() {
+  assert_index_not_dead_pypi_proxy "UV_DEFAULT_INDEX" "${UV_DEFAULT_INDEX:-}"
+  assert_index_not_dead_pypi_proxy "UV_INDEX_URL" "${UV_INDEX_URL:-}"
+  assert_index_not_dead_pypi_proxy "pip index-url" "$(detect_pip_index)"
+  local uv_toml="$HOME/.config/uv/uv.toml"
+  if [[ -f "$uv_toml" ]] && grep -q "$DEAD_PYPI_PROXY_HOST" "$uv_toml" 2>/dev/null; then
+    fail "$uv_toml contains ${DEAD_PYPI_PROXY_HOST}"
+    note "Replace with ${CANONICAL_PYPI_PROXY_SIMPLE}, then regenerate any uv.lock that stamped .dev."
+    exit 1
+  fi
+}
+
+assert_uv_locks_not_dead_pypi_proxy() {
+  local f bad=0
+  for f in "$@"; do
+    [[ -f "$f" ]] || continue
+    if grep -q "$DEAD_PYPI_PROXY_HOST" "$f"; then
+      fail "$f stamps ${DEAD_PYPI_PROXY_HOST} into package sources"
+      bad=1
+    fi
+  done
+  if [[ "$bad" -eq 1 ]]; then
+    note "Fix: point pip/uv at ${CANONICAL_PYPI_PROXY_SIMPLE}, then: rm -f <lock> && uv lock"
+    exit 1
+  fi
+}
+
 bridge_pip_index_to_uv() {
-  # Respect an explicit uv config the user already set.
+  # Respect an explicit uv config the user already set (still validated by reject_dead_*).
   [[ -n "${UV_DEFAULT_INDEX:-}${UV_INDEX_URL:-}" ]] && return 0
   [[ -f "$HOME/.config/uv/uv.toml" ]] && return 0
   local idx; idx=$(detect_pip_index)
   [[ -z "$idx" ]] && return 0
   case "$idx" in *pypi.org/simple*) return 0 ;; esac   # already public PyPI — nothing to bridge
+  assert_index_not_dead_pypi_proxy "pip index-url (bridge)" "$idx"
   export UV_DEFAULT_INDEX="$idx"
   PIP_BRIDGED_INDEX="$idx"
 }
@@ -456,9 +502,12 @@ else
 fi
 
 # Bridge the user's existing pip index mirror into uv (uv ignores pip.conf).
+# Refuse the known-dead .dev PyPI proxy before any uv lock/sync work.
 if [[ "$DRY_RUN" == "true" ]]; then
   run "# if pip is configured with a custom index-url, export UV_DEFAULT_INDEX to match"
+  run "# refuse pypi-proxy.dev.databricks.com in env / pip / uv.toml"
 else
+  reject_dead_pypi_proxy_config
   bridge_pip_index_to_uv
   if [[ -n "${PIP_BRIDGED_INDEX:-}" ]]; then
     ok "uv index bridged from pip config → UV_DEFAULT_INDEX=$PIP_BRIDGED_INDEX"
@@ -712,6 +761,15 @@ stop_if_done "3"
 
 # ─── Phase 4: Deploy agent app ────────────────────────────────────────────────
 header "Phase 4 — Deploy agent app"
+step "Preflight: uv.lock must not stamp dead PyPI proxy (.dev)"
+if [[ "$DRY_RUN" == "true" ]]; then
+  run "# assert no ${DEAD_PYPI_PROXY_HOST:-pypi-proxy.dev.databricks.com} in agent-build/guest-manager uv.lock"
+else
+  assert_uv_locks_not_dead_pypi_proxy \
+    "$REPO_DIR/agent-build/uv.lock" \
+    "$REPO_DIR/databricks-apps/guest-manager/uv.lock"
+  ok "No ${DEAD_PYPI_PROXY_HOST} in checked uv.lock files"
+fi
 if run_phase "4"; then
 
 step "Bundle deploy + run (from agent-build/; do NOT re-run assemble_agent.sh)"
