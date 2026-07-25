@@ -52,3 +52,25 @@
 - The agent app source is the `vendor/app-templates` submodule + `agent/` overlay,
   merged by `scripts/assemble_agent.sh` into the gitignored `agent-build/`. Do not
   hand-edit `vendor/**` (pristine submodule); put deltas in `agent/`.
+
+## Bootstrap runbook (ENV-0, #69)
+
+Applies to `BOOTSTRAP.md`, `README.md`, `scripts/bootstrap.sh`, `scripts/lib/**`.
+**ALWAYS run `bash scripts/check-runbook-invariants.sh` after touching any of them.**
+
+- **NEVER use `corepack enable` / `corepack prepare` to install pnpm.** corepack ignores
+  the npm registry setting and fetches from `registry.npmjs.org`, so it dies wherever
+  public npm is blocked. **ALWAYS use `npm install -g pnpm@<pinned-version>`** (npm honors
+  the user's configured registry). The pin is required — pnpm's `latest` tag has shipped a
+  12.x alpha that fails with `ERR_PNPM_IGNORED_BUILDS`.
+- **NEVER put corporate-network setup in `BOOTSTRAP.md` as prose only.** Phase 0 must have
+  runnable commands. Both the runbook and `bootstrap.sh` source the single implementation
+  in `scripts/lib/corp-network.sh` — **NEVER duplicate that logic** into either one.
+- **ALWAYS keep `README.md` and `BOOTSTRAP.md` consistent** about the pnpm install method.
+- **NEVER use `npm ping` to test registry reachability** — corporate mirrors 404 `/-/ping`
+  while serving packages normally. Probe the actual operation (`npm view pnpm@<pin>`).
+- **NEVER bypass a blocked registry** via `--registry https://registry.npmjs.org`, disabling
+  TLS, or `/etc/hosts` edits. Bridge the user's own mirror; never hardcode one.
+
+This already regressed once: the guard was deleted (`e91322d`), then a docs-sync commit
+(`99f2cc2`) reintroduced corepack. Keep the rationale next to the rule.

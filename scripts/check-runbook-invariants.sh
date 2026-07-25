@@ -82,7 +82,22 @@ else
   echo "      that ignores onlyBuiltDependencies (ERR_PNPM_IGNORED_BUILDS)."
 fi
 
-# ── 5. README and the runbook must not contradict each other. ────────────────
+# ── 5. The agent-facing invariant must stay documented. ──────────────────────
+# Actions is disabled on this repo, so AGENTS.md / CLAUDE.md are the only controls that
+# reach an agent editing the runbook — and an agent (a docs-sync commit) is what caused the
+# original regression. Deleting the written rule is precisely how ENV-0 was lost the first
+# time, so treat its removal as a failure in its own right.
+for doc in AGENTS.md CLAUDE.md; do
+  if rg -q 'ENV-0' "$doc" && rg -qi 'corepack' "$doc"; then
+    pass "$doc documents the ENV-0 / corepack invariant."
+  else
+    bad "$doc no longer documents the ENV-0 corepack invariant — restore it."
+    echo "      Agents load these files automatically; the rule is the only live guard"
+    echo "      while GitHub Actions is disabled on this repository."
+  fi
+done
+
+# ── 6. README and the runbook must not contradict each other. ────────────────
 # The README kept its correct "don't use corepack" guidance while the runbook switched to
 # requiring corepack, so the repo shipped two opposite instructions for months.
 if rg -q 'npm install -g pnpm' README.md; then
