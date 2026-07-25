@@ -114,6 +114,53 @@ bridge_pip_index_to_uv() {
   PIP_BRIDGED_INDEX="$idx"
 }
 
+# ─── PyPI reachability preflight ─────────────────────────────────────────────
+# Mirror of firefly_preflight_npm_registry, for the same failure shape one layer down.
+# bridge_pip_index_to_uv can only forward an index the user already has. When pip is
+# unconfigured AND public PyPI is blocked (corp egress policy), the bridge correctly
+# no-ops and uv fails eight phases later with a bare
+#   "Failed to fetch: https://pypi.org/simple/<pkg>/ ... 503 Service Unavailable".
+# Observed on a clean corp VM on 2026-07-21 and again on 2026-07-25. Name the cause here.
+#
+# This deliberately does NOT choose an index. The runbook's contract is that every value
+# comes from the caller's own config; hardcoding a mirror would also stamp that host into
+# any regenerated uv.lock and ship it to every downstream consumer (see #63/#66).
+firefly_effective_pypi_index() {
+  if [[ -n "${UV_DEFAULT_INDEX:-}" ]]; then echo "${UV_DEFAULT_INDEX}"; return; fi
+  if [[ -n "${UV_INDEX_URL:-}" ]];     then echo "${UV_INDEX_URL}";     return; fi
+  local uv_toml="$HOME/.config/uv/uv.toml" v
+  if [[ -f "$uv_toml" ]]; then
+    v=$(awk -F'"' '/^[[:space:]]*url[[:space:]]*=/{print $2; exit}' "$uv_toml")
+    [[ -n "$v" ]] && { echo "$v"; return; }
+  fi
+  echo "https://pypi.org/simple/"
+}
+
+# Returns non-zero when uv's effective index is unreachable, so callers can gate on it.
+firefly_preflight_pypi_index() {
+  local idx; idx=$(firefly_effective_pypi_index)
+  if curl -fsS -o /dev/null --max-time 15 "$idx" 2>/dev/null; then
+    ok "package index reachable: $idx"
+    return 0
+  fi
+  fail "package index unreachable: $idx"
+  case "$idx" in
+    *pypi.org/simple*)
+      note "uv reads neither pip.conf nor PIP_INDEX_URL — it has its own config. Public PyPI"
+      note "looks blocked here and no uv index is set, so nothing could be bridged. Set ONE:"
+      note "    python3 -m pip config set global.index-url <your-approved-mirror>   # then re-run Phase 0a"
+      note "    export UV_DEFAULT_INDEX=<your-approved-mirror>"
+      note "Use your organization's approved mirror. This runbook will not pick one for you."
+      ;;
+    *)
+      note "An index is configured but did not answer. Check VPN/proxy reachability, or that"
+      note "the intercepting-proxy CA is trusted (re-run bootstrap.sh --trust-proxy-ca)."
+      ;;
+  esac
+  note "Do NOT work around this by disabling TLS verification."
+  return 1
+}
+
 # ─── unsanctioned PyPI proxy policy ──────────────────────────────────────────
 # `pypi-proxy.dev.databricks.com` is NOT the sanctioned index for this project, and it was
 # implicated in the original Apps install timeouts (GAP-8/GAP-11): a lock that stamps .dev
@@ -309,6 +356,11 @@ firefly_bridge_corp_network() {
     note "uv index already set via env — leaving as-is."
   else
     note "No pip mirror configured — uv will use public PyPI."
+    # Fine on open internet, fatal behind egress policy that blocks pypi.org. Distinguish
+    # the two now rather than at Phase 3a. Non-fatal here: this orchestrator is sourced
+    # from the reader's own shell and must not exit it. Phase 3a gates on the same check.
+    firefly_preflight_pypi_index \
+      || note "Phase 3 will fail until an index is configured — see the guidance above."
   fi
 
   bridge_npm_registry_to_corepack

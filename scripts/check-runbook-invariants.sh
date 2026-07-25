@@ -82,26 +82,141 @@ else
   echo "      that ignores onlyBuiltDependencies (ERR_PNPM_IGNORED_BUILDS)."
 fi
 
-# ── 5. The library must be sourceable from bash AND zsh. ─────────────────────
-# BOOTSTRAP.md Phase 0a tells the reader to `source scripts/lib/corp-network.sh` from their
-# own shell, and zsh is the macOS default. Bash-only idioms silently break there: `declare -F
-# name` is a function test in bash but declares a FLOAT in zsh (returns 0), so a
+# ── 5. Every library the runbook sources must work under bash AND zsh. ───────
+# BOOTSTRAP.md Phase 0a tells the reader to `source scripts/lib/*.sh` from their own shell,
+# and zsh is the macOS default. Bash-only idioms silently break there: `declare -F name` is
+# a function test in bash but declares a FLOAT in zsh (returns 0), so a
 # `declare -F x || x() {…}` guard skips the definition and every call dies with
 # "command not found". Caught on a live corp VM; assert both shells here.
-if [[ -f "$LIB" ]]; then
+#
+# Derived from the runbook rather than hardcoded to one path: this check used to name
+# corp-network.sh only, so a second library could be added with no portability coverage.
+# Built with a read loop, not `mapfile`: macOS ships bash 3.2, where mapfile does not exist.
+SOURCED_LIBS=()
+while IFS= read -r _lib; do
+  [[ -n "$_lib" ]] && SOURCED_LIBS+=("$_lib")
+done < <(rg -o -N '^\s*source\s+(scripts/lib/[A-Za-z0-9_-]+\.sh)' -r '$1' BOOTSTRAP.md | sort -u)
+if [[ "${#SOURCED_LIBS[@]}" -eq 0 ]]; then
+  bad "BOOTSTRAP.md sources no scripts/lib/*.sh — the shared-implementation path is gone."
+else
+  pass "BOOTSTRAP.md sources ${#SOURCED_LIBS[@]} shared librar$([[ ${#SOURCED_LIBS[@]} -eq 1 ]] && echo y || echo ies): ${SOURCED_LIBS[*]}"
+fi
+for lib in "${SOURCED_LIBS[@]}"; do
+  if [[ ! -f "$lib" ]]; then
+    bad "BOOTSTRAP.md sources $lib, which does not exist."
+    continue
+  fi
   for sh in bash zsh; do
     if ! command -v "$sh" >/dev/null 2>&1; then
-      pass "$sh not installed — skipping portability check."
+      pass "$sh not installed — skipping portability check for $lib."
       continue
     fi
-    if "$sh" -n "$LIB" 2>/dev/null && \
-       "$sh" -c "source '$LIB'; ok x >/dev/null && note x >/dev/null && warn x >/dev/null && fail x >/dev/null" >/dev/null 2>&1; then
-      pass "$LIB sources cleanly under $sh (helpers resolve)."
+    if "$sh" -n "$lib" 2>/dev/null && \
+       "$sh" -c "source '$lib'; ok x >/dev/null && note x >/dev/null && warn x >/dev/null && fail x >/dev/null" >/dev/null 2>&1; then
+      pass "$lib sources cleanly under $sh (helpers resolve)."
     else
-      bad "$LIB is not usable under $sh — Phase 0a tells users to source it from their shell."
-      echo "      Avoid bash-only idioms (e.g. 'declare -F' is not a function test in zsh)."
+      bad "$lib is not usable under $sh — Phase 0a tells users to source it from their shell."
+      echo "      Avoid bash-only idioms ('declare -F' is not a function test in zsh;"
+      echo "      \${!var} indirect expansion does not exist there either)."
     fi
   done
+done
+
+# ── 5a. Every function the runbook calls must actually be defined. ───────────
+# BOOTSTRAP.md called store_secret / read_secret for four days while both existed only in
+# bootstrap.sh — and bootstrap.sh's read_secret took (VARNAME, _, KEY) while every runbook
+# call site used $(read_secret KEY), so even copying it across did not work. Resolve every
+# firefly-namespaced call against the libraries the runbook itself sources.
+if [[ "${#SOURCED_LIBS[@]}" -gt 0 ]] && command -v bash >/dev/null 2>&1; then
+  # Command position only, inside ```bash fences only. `firefly_wheels` (a UC volume) and
+  # `firefly_managed_memory` (a table) are arguments, not calls; prose like
+  # `firefly_install_*` is not code at all.
+  CALLED=$(python3 - <<'PY'
+import re
+text = open("BOOTSTRAP.md").read()
+NAME = r'(?:firefly_[a-z0-9_]+|store_secret|read_secret|require_secret|' \
+       r'assert_bundle_quickstart_ran|check_sync_exclude_rules)'
+found = set()
+for m in re.finditer(r'^```bash\n(.*?)^```', text, re.S | re.M):
+    for raw in m.group(1).splitlines():
+        line = re.sub(r'(^|\s)#.*$', '', raw).strip()
+        if not line:
+            continue
+        # start of line, after a separator, or inside $( ... )
+        for cm in re.finditer(r'(?:^|[;&|]\s*|\$\(\s*|\bif\s+|\bthen\s+|\belse\s+|!\s*)(' + NAME + r')\b', line):
+            found.add(cm.group(1))
+print("\n".join(sorted(found)))
+PY
+)
+  MISSING=""
+  for fn in $CALLED; do
+    bash -c "$(printf 'source %q; ' "${SOURCED_LIBS[@]}") declare -F $fn >/dev/null" 2>/dev/null \
+      || MISSING="$MISSING $fn"
+  done
+  if [[ -z "$MISSING" ]]; then
+    pass "every helper BOOTSTRAP.md calls is defined by a library it sources."
+  else
+    bad "BOOTSTRAP.md calls helpers that no sourced library defines:$MISSING"
+    echo "      A reader following the runbook hits 'command not found'. Define them in"
+    echo "      scripts/lib/ and source that file from Phase 0a."
+  fi
+fi
+
+# ── 5b. Runnable blocks must parse under bash AND zsh. ───────────────────────
+# The reader pastes these into their own shell. A bash-only construct is a runbook bug,
+# not a style issue: ${!key} produced '(eval):1: bad substitution' on a real run.
+if command -v zsh >/dev/null 2>&1; then
+  BLOCK_ERRS=$(python3 - <<'PY'
+import re, subprocess, sys, tempfile, os
+text = open("BOOTSTRAP.md").read()
+errs = []
+for i, m in enumerate(re.finditer(r'^```bash\n(.*?)^```', text, re.S | re.M), 1):
+    body = m.group(1)
+    line = text[:m.start()].count("\n") + 1
+    with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as fh:
+        fh.write(body); path = fh.name
+    for sh in ("bash", "zsh"):
+        r = subprocess.run([sh, "-n", path], capture_output=True, text=True)
+        if r.returncode != 0:
+            errs.append(f"BOOTSTRAP.md:{line} block {i} does not parse under {sh}: "
+                        + r.stderr.strip().splitlines()[-1 if r.stderr.strip() else 0])
+    os.unlink(path)
+print("\n".join(errs))
+PY
+)
+  if [[ -z "$BLOCK_ERRS" ]]; then
+    pass "every \`\`\`bash block in BOOTSTRAP.md parses under bash and zsh."
+  else
+    bad "BOOTSTRAP.md has shell blocks that do not parse:"
+    echo "$BLOCK_ERRS" | sed 's/^/      /'
+  fi
+fi
+
+# ── 5c. No runnable block may be a stub. ─────────────────────────────────────
+# Phase 1b's Databricks CLI install and Phase 1e's gh install were both shipped as
+# `command -v X || { <comment only> }` / `{ : ; }`. They read as installers and do
+# nothing, which is invisible on any machine that already has the tool.
+STUBS=$(python3 - <<'PY'
+import re
+text = open("BOOTSTRAP.md").read()
+out = []
+for m in re.finditer(r'^```bash\n(.*?)^```', text, re.S | re.M):
+    base = text[:m.start()].count("\n") + 1
+    for bm in re.finditer(r'\{(.*?)\}', m.group(1), re.S):
+        body = bm.group(1)
+        stmts = [s.strip() for s in body.splitlines() if s.strip()]
+        live = [s for s in stmts if not s.startswith("#") and s not in (":", ": ;", ":;")]
+        if stmts and not live:
+            out.append(f"BOOTSTRAP.md:{base + body[:1].count(chr(10))} "
+                       f"brace block does nothing: {' '.join(stmts)[:70]}")
+print("\n".join(out))
+PY
+)
+if [[ -z "$STUBS" ]]; then
+  pass "no comment-only / no-op brace blocks in BOOTSTRAP.md."
+else
+  bad "BOOTSTRAP.md contains brace blocks that only look like they do something:"
+  echo "$STUBS" | sed 's/^/      /'
 fi
 
 # ── 6. The agent-facing invariant must stay documented. ──────────────────────

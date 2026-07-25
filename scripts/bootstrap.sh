@@ -54,6 +54,8 @@ fail()   { echo "  ${red}✗ $*${reset}"; }
 BOOTSTRAP_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/corp-network.sh
 source "$BOOTSTRAP_SCRIPT_DIR/lib/corp-network.sh"
+# shellcheck source=scripts/lib/runbook.sh
+source "$BOOTSTRAP_SCRIPT_DIR/lib/runbook.sh"
 
 if [[ "$CHECK_PYPI_PROXY" == "true" ]]; then
   check_pypi_proxy_state "${REPO_DIR:-$PWD}"
@@ -109,33 +111,11 @@ ask() {
   ok "$varname = $val"
 }
 
-# Secret storage: a gitignored, chmod-600 state.env under $REPO_DIR (no keyring
-# dependency — the target machine may not have Python `keyring`/Keychain wired up).
-STATE_DIR=""
-STATE_FILE=""
-init_state_dir() {
-  local base="${1:-${REPO_DIR:-$PWD}}"
-  STATE_DIR="${base}/.firefly-bootstrap"
-  STATE_FILE="${STATE_DIR}/state.env"
-  mkdir -p "$STATE_DIR"; chmod 700 "$STATE_DIR"
-}
-
-store_secret() {                      # store_secret KEY VALUE
-  local key="$1" val="$2"
-  init_state_dir
-  local tmp="${STATE_FILE}.tmp"
-  touch "$STATE_FILE"
-  grep -v "^export ${key}=" "$STATE_FILE" > "$tmp" 2>/dev/null || true
-  printf 'export %s=%q\n' "$key" "$val" >> "$tmp"
-  mv "$tmp" "$STATE_FILE"
-  chmod 600 "$STATE_FILE"
-  ok "$key → state.env"
-}
-
-load_secrets() {
-  init_state_dir
-  [[ -f "$STATE_FILE" ]] && source "$STATE_FILE" || true
-}
+# Secret storage lives in scripts/lib/runbook.sh (store_secret / read_secret /
+# require_secret / load_secrets / init_state_dir), sourced above. BOOTSTRAP.md
+# sources the same file, so the runbook and this runner cannot drift apart —
+# which is exactly how the markdown ended up calling helpers that existed only
+# here, with a signature its own call sites could not use.
 
 ask_secret() {                        # ask_secret VARNAME <ignored> PROMPT
   local varname="$1" prompt="$3"
@@ -145,17 +125,6 @@ ask_secret() {                        # ask_secret VARNAME <ignored> PROMPT
     [[ -z "$val" ]] && warn "Required — cannot be empty."
   done
   store_secret "$varname" "$val"
-}
-
-read_secret() {                       # read_secret VARNAME <ignored> KEY
-  local varname="$1" key="$3"
-  load_secrets
-  local val="${!key:-}"
-  if [[ -z "$val" ]]; then
-    fail "state.env: $key is empty (run the earlier phase that stores it first)"
-    exit 1
-  fi
-  eval "$varname=\$val"
 }
 
 # ─── Input persistence + resume (#18) ─────────────────────────────────────────
@@ -430,10 +399,13 @@ stop_if_done "0"
 
 # ─── Phase 1: Auth ────────────────────────────────────────────────────────────
 header "Phase 1 — Auth"
+# Steps here are deliberately unlettered. This runner installs in a different order than
+# BOOTSTRAP.md documents, so numbering both 1a..1f made "1b" mean the Vercel CLI in one
+# file and the Databricks CLI in the other. The runbook owns the letters.
 if run_phase "1"; then
 
 echo
-step "1a. pnpm (pinned install via npm — deliberately NOT corepack; see ENV-0)"
+step "pnpm (pinned install via npm — deliberately NOT corepack; see ENV-0)"
 # Two constraints, both load-bearing:
 #   1. pnpm's npm "latest" dist-tag has shipped a 12.x ALPHA that ignores
 #      onlyBuiltDependencies (→ ERR_PNPM_IGNORED_BUILDS), so the version must be pinned.
@@ -456,7 +428,7 @@ else
 fi
 
 echo
-step "1b. Vercel CLI OAuth (opens browser)"
+step "Vercel CLI OAuth (opens browser)"
 # Pin to a Tart-tested floor — do not chase npm `latest` (CLI deploy semantics move).
 # Override with VERCEL_CLI_VERSION=x.y.z if you need to bump deliberately.
 VERCEL_CLI_VERSION="${VERCEL_CLI_VERSION:-56.3.1}"
@@ -482,23 +454,13 @@ fi
 run "vercel whoami"
 
 echo
-step "1c. GitHub CLI"
+step "GitHub CLI"
 if command -v gh &>/dev/null; then
   ok "gh already installed: $(gh --version 2>/dev/null | head -1)"
 elif [[ "$DRY_RUN" == "true" ]]; then
   run "# download + install GitHub CLI (official release) to \$HOME/bin"
 else
-  note "Installing GitHub CLI (official release; no Homebrew required)..."
-  GH_ARCH="$(uname -m)"; [[ "$GH_ARCH" == "arm64" ]] && GH_ARCH="macOS_arm64" || GH_ARCH="macOS_amd64"
-  GH_TAG=$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest \
-    | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'].lstrip('v'))")
-  GH_TMP=$(mktemp -d)
-  curl -fsSL "https://github.com/cli/cli/releases/latest/download/gh_${GH_TAG}_${GH_ARCH}.zip" -o "$GH_TMP/gh.zip"
-  unzip -q "$GH_TMP/gh.zip" -d "$GH_TMP"
-  mkdir -p "$HOME/bin" && cp "$GH_TMP"/gh_*/bin/gh "$HOME/bin/gh"
-  export PATH="$HOME/bin:$PATH"
-  rm -rf "$GH_TMP"
-  ok "gh installed to \$HOME/bin"
+  firefly_install_gh || exit 1
 fi
 if gh auth status &>/dev/null; then
   ok "gh already authenticated: $(gh auth status 2>&1 | head -1)"
@@ -507,7 +469,7 @@ else
 fi
 
 echo
-step "1d. Neon CLI OAuth (opens browser)"
+step "Neon CLI OAuth (opens browser)"
 if command -v neonctl &>/dev/null; then
   ok "neonctl already installed: $(neonctl --version 2>/dev/null || echo '?')"
 else
@@ -521,29 +483,19 @@ fi
 run "neonctl me"
 
 echo
-step "1e. Databricks CLI OAuth (opens browser)"
+step "Databricks CLI OAuth (opens browser)"
 if command -v databricks &>/dev/null; then
   ok "databricks already installed: $(databricks --version 2>/dev/null | head -1)"
 elif [[ "$DRY_RUN" == "true" ]]; then
   run "# download + install Databricks CLI (official release) to \$HOME/bin"
 else
-  note "Installing Databricks CLI (official release; no Homebrew required)..."
-  DB_ARCH="$(uname -m)"; [[ "$DB_ARCH" == "arm64" ]] && DB_ARCH="arm64" || DB_ARCH="amd64"
-  DB_VER=$(curl -fsSL https://api.github.com/repos/databricks/cli/releases/latest \
-    | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'].lstrip('v'))")
-  DB_TMP=$(mktemp -d)
-  curl -fsSL "https://github.com/databricks/cli/releases/download/v${DB_VER}/databricks_cli_${DB_VER}_darwin_${DB_ARCH}.zip" -o "$DB_TMP/db.zip"
-  unzip -q "$DB_TMP/db.zip" -d "$DB_TMP"
-  mkdir -p "$HOME/bin" && cp "$DB_TMP/databricks" "$HOME/bin/databricks"
-  export PATH="$HOME/bin:$PATH"
-  rm -rf "$DB_TMP"
-  ok "databricks installed to \$HOME/bin ($(databricks --version 2>/dev/null | head -1))"
+  firefly_install_databricks_cli || exit 1
 fi
 run "databricks auth login --host '$DATABRICKS_HOST' --profile '$DB_PROFILE'"
 run "databricks workspace list / --profile '$DB_PROFILE' 2>&1 | head -3"
 
 echo
-step "1f. Python uv (used by the agent build in Phases 4–5)"
+step "Python uv (used by the agent build in Phases 4–5)"
 if command -v uv &>/dev/null; then
   ok "uv already installed: $(uv --version 2>/dev/null || echo '?')"
 elif [[ "$DRY_RUN" == "true" ]]; then
@@ -599,6 +551,11 @@ if run_phase "3"; then
 
 echo
 step "3a. quickstart — MLflow experiment + Lakebase (--python 3.12 required)"
+# Gate on index reachability first. Everything below this line is uv-driven, and an
+# unreachable index otherwise surfaces as a raw uv stack trace with no cause named.
+if [[ "$DRY_RUN" == "false" ]]; then
+  firefly_preflight_pypi_index || exit 1
+fi
 # Lakebase create-vs-reuse: --lakebase-create-new is non-idempotent (fails with
 # "project slug already exists" on re-run) AND it disables quickstart's own .env
 # reuse path. quickstart names resources deterministically, so if the project's
@@ -611,8 +568,15 @@ if [[ "$DRY_RUN" == "false" ]] \
 else
   LB_ARG="--lakebase-create-new '${LAKEBASE_NAME}'"
 fi
+note "Lakebase provisioning takes several minutes; let this finish before Phase 4."
 run "cd '$REPO_DIR/agent-build' && uv run --python 3.12 python scripts/quickstart.py \
   --profile '$DB_PROFILE' ${LB_ARG} --app-name '$AGENT_APP_NAME'"
+# Completion test, not a formality: quickstart rewrites experiment_id in the bundle, so
+# this is the one observable that distinguishes "finished" from "still running" or
+# "exited early". A wrapper that backgrounds long commands returns 0 either way.
+if [[ "$DRY_RUN" == "false" ]]; then
+  assert_bundle_quickstart_ran "$REPO_DIR/agent-build/databricks.yml" || exit 1
+fi
 
 echo
 step "3b. Catalog/schema → bundle vars (applied at deploy; no yml edit)"
@@ -636,25 +600,13 @@ run "cd '$REPO_DIR/agent-build' && bash scripts/vendor_wheels.sh"
 
 echo
 step "3e. Verify sync.exclude rules"
+# Was three bare greps over the whole file, which matched the explanatory comment
+# ("NOTE: pyproject.toml and vendor-wheels/ MUST sync") and reported two failures
+# on a correct config. check_sync_exclude_rules parses the exclude list itself.
 if [[ "$DRY_RUN" == "false" ]]; then
-  YML="$REPO_DIR/agent/databricks.yml"
-  if grep -q 'pyproject.toml' "$YML"; then
-    fail "pyproject.toml is in sync.exclude — remove it"
-  else
-    ok "pyproject.toml not in sync.exclude"
-  fi
-  if ! grep -q 'uv.lock' "$YML"; then
-    warn "uv.lock is NOT in sync.exclude — add it so build runs plain uv sync"
-  else
-    ok "uv.lock is in sync.exclude"
-  fi
-  if grep -q 'vendor-wheels' "$YML"; then
-    fail "vendor-wheels/** is in sync.exclude — remove it so wheels upload"
-  else
-    ok "vendor-wheels/** not in sync.exclude"
-  fi
+  check_sync_exclude_rules "$REPO_DIR/agent/databricks.yml" || exit 1
 else
-  run "grep -n 'exclude' '$REPO_DIR/agent/databricks.yml' || true"
+  run "# check_sync_exclude_rules '$REPO_DIR/agent/databricks.yml'"
 fi
 
 fi
@@ -670,6 +622,9 @@ else
     "$REPO_DIR/agent-build/uv.lock" \
     "$REPO_DIR/databricks-apps/guest-manager/uv.lock"
   ok "No ${FIREFLY_UNSANCTIONED_PYPI_HOST} in checked uv.lock files"
+  # Deploying a bundle whose resource bindings quickstart never rewrote fails with
+  # a 404 that names only the stale id. Say which phase to go back to instead.
+  assert_bundle_quickstart_ran "$REPO_DIR/agent-build/databricks.yml" || exit 1
 fi
 if run_phase "4"; then
 
@@ -847,18 +802,24 @@ if [[ "$DRY_RUN" == "false" ]]; then
   # Neon project names are NOT unique (id-based): `projects create` on a re-run
   # makes a SECOND project, orphans the first, and can trip the project quota.
   # Reuse an existing project with the same name if present.
-  PROJECT_ID=$(NEON_PROJECT_NAME="$NEON_PROJECT_NAME" neonctl projects list "${ORG_FLAG[@]}" --output json 2>/dev/null \
-    | python3 -c "import os,sys,json
-d=json.load(sys.stdin)
-ps=d.get('projects',d) if isinstance(d,dict) else d
-name=os.environ['NEON_PROJECT_NAME']
-print(next((p['id'] for p in ps if p.get('name')==name),''))" 2>/dev/null || echo "")
+  PROJECT_ID=$(firefly_neon_project_id "${ORG_FLAG[@]}")
   if [[ -n "$PROJECT_ID" ]]; then
     ok "Neon project '$NEON_PROJECT_NAME' exists — reusing ($PROJECT_ID)."
   else
-    PROJECT_ID=$(neonctl projects create --name "$NEON_PROJECT_NAME" "${ORG_FLAG[@]}" --output json \
-      | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('project',{}).get('id') or d.get('id',''))")
+    # Resolve the id by re-listing rather than by parsing the create response.
+    # `create` succeeds server-side before any parse of its output can fail, so
+    # a parse bug there silently orphans a real project — which is how two
+    # `firefly-genie` projects appeared on 2026-07-25. One lookup path, and a
+    # create whose response we mis-read is still discoverable.
+    neonctl projects create --name "$NEON_PROJECT_NAME" "${ORG_FLAG[@]}" --output json >/dev/null
+    PROJECT_ID=$(firefly_neon_project_id "${ORG_FLAG[@]}")
     ok "Project created: $PROJECT_ID"
+  fi
+  if [[ -z "$PROJECT_ID" ]]; then
+    fail "could not resolve a Neon project id for '$NEON_PROJECT_NAME'."
+    note "An empty id makes the next call ambiguous ('Multiple projects found')."
+    note "Check: neonctl projects list ${ORG_FLAG[*]}"
+    exit 1
   fi
 
   DB_URL=$(neonctl connection-string --project-id "$PROJECT_ID" --pooled)
@@ -872,7 +833,7 @@ echo
 step "Drizzle migrations"
 if [[ "$DRY_RUN" == "false" ]]; then
   run "cd '$REPO_DIR' && pnpm install"
-  read_secret DB_URL "firefly-bootstrap" "DATABASE_URL"
+  require_secret DB_URL "DATABASE_URL" || exit 1
   run "cd '$REPO_DIR' && DATABASE_URL='$DB_URL' node_modules/.bin/drizzle-kit push"
 else
   run "cd '$REPO_DIR' && pnpm install"
@@ -991,7 +952,7 @@ if [[ "$DRY_RUN" == "false" ]]; then
   GUEST_API_SECRET=$(openssl rand -hex 64)
   AGENT_APP_URL=$(databricks apps get "$AGENT_APP_NAME" -o json --profile "$DB_PROFILE" \
     | python3 -c "import sys,json; print(json.load(sys.stdin).get('url',''))")
-  read_secret DB_URL "firefly-bootstrap" "DATABASE_URL"
+  require_secret DB_URL "DATABASE_URL" || exit 1
 else
   BETTER_AUTH_SECRET="<random-base64>"
   ENCRYPTION_KEY="<random-hex>"
@@ -1103,7 +1064,7 @@ header "Phase 9 — Verify"
 if run_phase "9"; then
 
 if [[ "$DRY_RUN" == "false" ]]; then
-  read_secret PREVIEW_URL "firefly-bootstrap" "PREVIEW_URL" 2>/dev/null || {
+  require_secret PREVIEW_URL "PREVIEW_URL" 2>/dev/null || {
     read -rp "  Paste the Vercel production URL: " PREVIEW_URL
   }
 fi
@@ -1118,10 +1079,10 @@ run "databricks apps get '$AGENT_APP_NAME' -o json --profile '$DB_PROFILE' \
 echo
 step "Guest login smoke test"
 if [[ "$DRY_RUN" == "false" ]]; then
-  read_secret GUEST_API_SECRET_ "firefly-bootstrap" "GUEST_API_SECRET" 2>/dev/null || \
+  require_secret GUEST_API_SECRET_ "GUEST_API_SECRET" 2>/dev/null || \
     GUEST_API_SECRET_="$GUEST_API_SECRET"
-  read_secret GUEST_SP_CLIENT_ID "firefly-bootstrap" "GUEST_SP_CLIENT_ID"
-  read_secret GUEST_SP_SECRET_VAL "firefly-bootstrap" "GUEST_SP_SECRET"
+  require_secret GUEST_SP_CLIENT_ID "GUEST_SP_CLIENT_ID" || exit 1
+  require_secret GUEST_SP_SECRET_VAL "GUEST_SP_SECRET" || exit 1
   WS=$(curl -sf -X POST "$PREVIEW_URL/api/guest/workspaces" \
     -H "X-API-Key: $GUEST_API_SECRET_" \
     -H "Content-Type: application/json" \
