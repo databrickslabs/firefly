@@ -298,8 +298,14 @@ databricks apps get "$AGENT_APP_NAME" -o json --profile "$DB_PROFILE" \
   | python3 -c "import sys,json; d=json.load(sys.stdin); \
     print(d['app_status']['state'], d.get('active_deployment',{}).get('status',{}).get('state',''))"
 # Expected: RUNNING SUCCEEDED
-# If the app times out at 10 min, verify uv.lock sources point to
-# pypi-proxy.cloud.databricks.com (not .dev.) and re-run vendor_wheels.sh.
+# bootstrap.sh Phase 4 fails closed if agent-build or guest-manager uv.lock
+# stamps pypi-proxy.dev.databricks.com (dead host → Apps install timeouts).
+# Bootstrap also refuses to bridge pip → uv when the index is that .dev host.
+# Manual check / fix:
+#   grep -R pypi-proxy.dev --include='uv.lock' .
+#   # point pip/uv at pypi-proxy.cloud.databricks.com, then:
+#   rm -f uv.lock && uv lock
+#   # then re-run vendor_wheels.sh if needed
 ```
 
 ---

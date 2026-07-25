@@ -109,8 +109,80 @@ bridge_pip_index_to_uv() {
   local idx; idx=$(detect_pip_index)
   [[ -z "$idx" ]] && return 0
   case "$idx" in *pypi.org/simple*) return 0 ;; esac   # already public PyPI — nothing to bridge
+  assert_pypi_index_sanctioned "pip index-url (bridge)" "$idx" || return 1
   export UV_DEFAULT_INDEX="$idx"
   PIP_BRIDGED_INDEX="$idx"
+}
+
+# ─── unsanctioned PyPI proxy policy ──────────────────────────────────────────
+# `pypi-proxy.dev.databricks.com` is NOT the sanctioned index for this project, and it was
+# implicated in the original Apps install timeouts (GAP-8/GAP-11): a lock that stamps .dev
+# into every package source is a deployment hazard.
+#
+# Be precise about what is and is not established:
+#   PROVEN     — .dev URLs are stamped in databricks-apps/guest-manager/uv.lock, and have
+#                been since that file's first commit (5a78d80, 2026-04-13). Not a regression.
+#   PROVEN     — .dev is NOT a dead host. From a corp laptop it resolves and serves full
+#                package indexes (HTTP 200, byte-comparable to .cloud). Do not describe it
+#                as dead; that claim is falsifiable and false.
+#   NOT PROVEN — whether .dev is reachable from the Databricks Apps runtime egress, which is
+#                where the timeouts actually happened. That is the check that would justify
+#                hard-failing rather than warning, and it has not been run.
+#
+# Because the strongest claim is "unsanctioned + implicated", this defaults to a WARNING and
+# only fails hard when FIREFLY_STRICT_PYPI_PROXY=1. Flip the default once someone confirms
+# .dev is unreachable from an Apps container.
+: "${FIREFLY_UNSANCTIONED_PYPI_HOST:=pypi-proxy.dev.databricks.com}"
+: "${FIREFLY_CANONICAL_PYPI_INDEX:=https://pypi-proxy.cloud.databricks.com/simple}"
+: "${FIREFLY_STRICT_PYPI_PROXY:=0}"
+
+# Returns non-zero only in strict mode, so callers can `|| return 1` without forcing exits.
+assert_pypi_index_sanctioned() {
+  local label="$1" value="$2"
+  [[ -z "$value" ]] && return 0
+  case "$value" in
+    *"${FIREFLY_UNSANCTIONED_PYPI_HOST}"*)
+      if [[ "$FIREFLY_STRICT_PYPI_PROXY" == "1" ]]; then
+        fail "$label uses the unsanctioned index ${FIREFLY_UNSANCTIONED_PYPI_HOST}"
+        note "Set it to ${FIREFLY_CANONICAL_PYPI_INDEX}, then regenerate any uv.lock that stamped .dev."
+        return 1
+      fi
+      warn "$label uses ${FIREFLY_UNSANCTIONED_PYPI_HOST} (not the sanctioned index)."
+      note "Prefer ${FIREFLY_CANONICAL_PYPI_INDEX}. Set FIREFLY_STRICT_PYPI_PROXY=1 to make this fatal."
+      return 0
+      ;;
+  esac
+  return 0
+}
+
+reject_dead_pypi_proxy_config() {
+  local rc=0
+  assert_pypi_index_sanctioned "UV_DEFAULT_INDEX" "${UV_DEFAULT_INDEX:-}" || rc=1
+  assert_pypi_index_sanctioned "UV_INDEX_URL"     "${UV_INDEX_URL:-}"     || rc=1
+  assert_pypi_index_sanctioned "pip index-url"    "$(detect_pip_index)"   || rc=1
+  local uv_toml="$HOME/.config/uv/uv.toml"
+  if [[ -f "$uv_toml" ]] && grep -q "$FIREFLY_UNSANCTIONED_PYPI_HOST" "$uv_toml" 2>/dev/null; then
+    assert_pypi_index_sanctioned "$uv_toml" "$FIREFLY_UNSANCTIONED_PYPI_HOST" || rc=1
+  fi
+  [[ "$rc" -eq 0 ]] || exit 1
+}
+
+# Lockfiles are checked-in, deterministic artifacts — a stamped .dev there ships to every
+# consumer, so this one stays fatal by default regardless of FIREFLY_STRICT_PYPI_PROXY.
+assert_uv_locks_not_dead_pypi_proxy() {
+  local f bad=0
+  for f in "$@"; do
+    [[ -f "$f" ]] || continue
+    if grep -q "$FIREFLY_UNSANCTIONED_PYPI_HOST" "$f"; then
+      fail "$f stamps ${FIREFLY_UNSANCTIONED_PYPI_HOST} into package sources"
+      bad=1
+    fi
+  done
+  if [[ "$bad" -eq 1 ]]; then
+    note "Fix: point pip/uv at ${FIREFLY_CANONICAL_PYPI_INDEX}, then: rm -f <lock> && uv lock"
+    note "Rewriting only the host (leaving versions alone) avoids re-resolving the graph."
+    exit 1
+  fi
 }
 
 # ─── corepack ← npm registry bridge ──────────────────────────────────────────

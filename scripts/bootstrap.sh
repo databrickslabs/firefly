@@ -373,9 +373,12 @@ else
 fi
 
 # Bridge the user's existing pip index mirror into uv (uv ignores pip.conf).
+# Refuse the known-dead .dev PyPI proxy before any uv lock/sync work.
 if [[ "$DRY_RUN" == "true" ]]; then
   run "# if pip is configured with a custom index-url, export UV_DEFAULT_INDEX to match"
+  run "# refuse pypi-proxy.dev.databricks.com in env / pip / uv.toml"
 else
+  reject_dead_pypi_proxy_config
   bridge_pip_index_to_uv
   if [[ -n "${PIP_BRIDGED_INDEX:-}" ]]; then
     ok "uv index bridged from pip config → UV_DEFAULT_INDEX=$PIP_BRIDGED_INDEX"
@@ -646,6 +649,15 @@ stop_if_done "3"
 
 # ─── Phase 4: Deploy agent app ────────────────────────────────────────────────
 header "Phase 4 — Deploy agent app"
+step "Preflight: uv.lock must not stamp dead PyPI proxy (.dev)"
+if [[ "$DRY_RUN" == "true" ]]; then
+  run "# assert no ${DEAD_PYPI_PROXY_HOST:-pypi-proxy.dev.databricks.com} in agent-build/guest-manager uv.lock"
+else
+  assert_uv_locks_not_dead_pypi_proxy \
+    "$REPO_DIR/agent-build/uv.lock" \
+    "$REPO_DIR/databricks-apps/guest-manager/uv.lock"
+  ok "No ${DEAD_PYPI_PROXY_HOST} in checked uv.lock files"
+fi
 if run_phase "4"; then
 
 step "Bundle deploy + run (from agent-build/; do NOT re-run assemble_agent.sh)"
