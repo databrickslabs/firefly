@@ -1,6 +1,6 @@
 # FireFly Analytics - Databricks Custom Frontend
 
-[![Open in Cursor](https://img.shields.io/badge/Open%20in-Cursor-black?logo=cursor)](https://cursor.com/link/prompt?text=Clone%20https%3A%2F%2Fgithub.com%2Fdatabrickslabs%2Ffirefly%20on%20branch%20genie-agent%2C%20open%20the%20repository%20in%20this%20workspace%2C%20and%20work%20through%20BOOTSTRAP.md%20top%20to%20bottom.)
+[![Open in Cursor](https://img.shields.io/badge/Open%20in-Cursor-black?logo=cursor)](https://cursor.com/link/prompt?text=Clone%20https%3A%2F%2Fgithub.com%2Fdatabrickslabs%2Ffirefly%20on%20branch%20genie-agent%2C%20open%20the%20repository%20in%20this%20workspace%2C%20and%20work%20through%20BOOTSTRAP.md%20top%20to%20bottom.%20Run%20the%20Phase%200a%20corporate-network%20setup%20commands%20before%20any%20Phase%201%20command.)
 
 A Next.js application that provides a customized frontend for Databricks with multiple authentication strategies and embedded Databricks apps.
 
@@ -47,20 +47,24 @@ instructions follow below.
 - Go 1.21+ (for the proxy server)
 - Vercel account (for deployment)
 
-> **Installing pnpm.** Node ships pnpm via `corepack`, but `corepack enable` /
-> `corepack prepare` fetch the pnpm release from `registry.npmjs.org` on first use —
-> which is blocked on some corporate networks (you'll see `ECONNREFUSED` /
-> `ETIMEDOUT` to `registry.npmjs.org`, and the `pnpm` shim never actually works).
-> If corepack is blocked, install pnpm directly from your approved npm registry
-> instead:
+> **Installing pnpm — use npm, not corepack (ENV-0).** Node ships pnpm via `corepack`, but
+> `corepack enable` / `corepack prepare` fetch the pnpm release from `registry.npmjs.org`
+> and ignore your configured npm registry, so they fail on corporate networks that block or
+> blackhole public npm (`ECONNREFUSED` / `ETIMEDOUT` / `503`, and the `pnpm` shim never
+> works). Install from your approved registry instead, pinning the version:
 >
 > ```bash
-> npm install -g pnpm     # uses your configured (approved) npm registry, not corepack
-> pnpm --version          # confirm it runs
+> corepack disable >/dev/null 2>&1 || true   # an enabled shim shadows the install below
+> npm install -g pnpm@10.34.5                # uses your configured (approved) npm registry
+> pnpm --version                             # must print 10.34.5
 > ```
 >
-> On macOS, `brew install pnpm` is another approved-CDN option. Do **not** work
-> around the block with `--registry https://registry.npmjs.org` or by disabling TLS.
+> The pin matters: pnpm's `latest` dist-tag has shipped a 12.x alpha that ignores
+> `onlyBuiltDependencies` and fails with `ERR_PNPM_IGNORED_BUILDS`. This is the same step as
+> [`BOOTSTRAP.md`](./BOOTSTRAP.md) Phase 1a, and it is enforced by
+> `scripts/check-runbook-invariants.sh`. On macOS, `brew install pnpm` is another
+> approved-CDN option. Do **not** work around a block with
+> `--registry https://registry.npmjs.org` or by disabling TLS.
 
 ## Environment Setup
 

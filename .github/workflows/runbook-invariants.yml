@@ -1,0 +1,35 @@
+name: runbook invariants
+
+# Guards the ENV-0 regression: the runbook must not require corepack (blocked wherever
+# public npm is blocked), and the corporate-network bridges must stay reachable from
+# BOOTSTRAP.md rather than living only in bootstrap.sh.
+
+on:
+  pull_request:
+    paths:
+      - BOOTSTRAP.md
+      - README.md
+      - package.json
+      - scripts/**
+      - .github/workflows/runbook-invariants.yml
+  push:
+    branches: [genie-agent]
+  workflow_dispatch:
+
+jobs:
+  invariants:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
+      - name: Check runbook invariants
+        run: bash scripts/check-runbook-invariants.sh
+
+      - name: Shell syntax check
+        run: |
+          bash -n scripts/bootstrap.sh
+          bash -n scripts/lib/corp-network.sh
+          bash -n scripts/check-runbook-invariants.sh

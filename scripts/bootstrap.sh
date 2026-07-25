@@ -309,108 +309,25 @@ export UV_SYSTEM_CERTS="${UV_SYSTEM_CERTS:-1}"
 # Export them EVERY run at top level (not inside the Phase 1 body): with skip-forward resume
 # (#18), a run that skips Phase 1 must still find `databricks`/`uv`/`gh` in later phases —
 # otherwise Phase 8's `databricks apps get` fails with "command not found".
+# Create them up front: they are on PATH from here on, and the Phase 1 installers assume
+# the target directory already exists.
+mkdir -p "$HOME/bin" "$HOME/.local/bin" 2>/dev/null || true
 export PATH="$HOME/bin:$HOME/.local/bin:$PATH"
 
-# TLS trust for intercepting corporate proxies (Zscaler / Databricks Forward Trust /
-# etc.). Python (quickstart, Databricks SDK), Node, and uv otherwise reject the proxy's
-# cert (UnknownIssuer / not-trusted) and fail or hang. Precedence:
+# Corporate-network handling (TLS proxy CA, uv←pip index bridge, corepack←npm registry
+# bridge, npm reachability preflight) lives in a shared library that BOTH this runner and
+# the Phase 0 block in BOOTSTRAP.md source. Keeping one implementation is what prevents the
+# runbook and the runner from drifting — see ENV-0, where the bridges existed only here and
+# the runbook merely described them, so following the doc skipped them entirely.
+#
+# TLS precedence (unchanged):
 #   1. TLS_PEM_PATH given          → use it verbatim.
 #   2. Auto-detect a MITM by probing PyPI against the system trust store; if a PRIVATE
 #      root CA is presented, extract it, show CN + SHA-256, confirm (or --trust-proxy-ca),
 #      and build a LOCAL bundle (system roots + proxy CAs). System trust is never touched.
 #   3. No MITM detected            → nothing to do.
-apply_tls_bundle() {   # $1 = pem path — export the trust vars every toolchain reads
-  # CURL_CA_BUNDLE is required for the Phase 9 smoke-test curls: curl uses the system
-  # store (/etc/ssl/cert.pem) by default and rejects the proxy's cert (000) otherwise.
-  export TLS_PEM_PATH="$1" REQUESTS_CA_BUNDLE="$1" SSL_CERT_FILE="$1" NODE_EXTRA_CA_CERTS="$1" CURL_CA_BUNDLE="$1"
-}
-
-# On success sets PROXY_CA_BUNDLE / PROXY_CA_ADDED / PROXY_CA_ROOT_CN / PROXY_CA_ROOT_FP.
-# Returns non-zero if TLS to PyPI already validates (no MITM) or no CA could be derived.
-derive_proxy_ca_bundle() {
-  local probe="pypi.org"
-  # If the system store already validates PyPI, there's no untrusted MITM to handle.
-  curl -sSf -o /dev/null --max-time 12 "https://${probe}/simple/" 2>/dev/null && return 1
-  local chain tmpd sysbundle capem f added=0 lastca=""
-  chain=$(printf '' | openssl s_client -connect "${probe}:443" -showcerts 2>/dev/null) || return 1
-  tmpd=$(mktemp -d) || return 1
-  awk -v d="$tmpd" '/-----BEGIN CERTIFICATE-----/{n++} n>0{print > (d"/c-" n ".pem")}' <<<"$chain"
-  sysbundle=$(python3 -c 'import certifi;print(certifi.where())' 2>/dev/null || echo /etc/ssl/cert.pem)
-  [[ -f "$sysbundle" ]] || sysbundle=/etc/ssl/cert.pem
-  init_inputs_dir
-  capem="$INPUTS_DIR/proxy-ca-bundle.pem"
-  cat "$sysbundle" > "$capem"
-  # c-1 is the server leaf; every cert after it is a CA in the presented chain.
-  for f in "$tmpd"/c-*.pem; do
-    [[ "$f" == "$tmpd/c-1.pem" ]] && continue
-    openssl x509 -in "$f" -noout >/dev/null 2>&1 || continue
-    cat "$f" >> "$capem"; added=$((added+1)); lastca="$f"
-  done
-  if [[ "$added" -eq 0 || -z "$lastca" ]]; then rm -f "$capem"; rm -rf "$tmpd"; return 1; fi
-  PROXY_CA_ROOT_CN=$(openssl x509 -in "$lastca" -noout -subject 2>/dev/null | sed -E 's/.*CN ?= ?//; s#.*/CN=##')
-  PROXY_CA_ROOT_FP=$(openssl x509 -in "$lastca" -noout -fingerprint -sha256 2>/dev/null | sed 's/.*=//')
-  rm -rf "$tmpd"
-  chmod 600 "$capem" 2>/dev/null || true
-  PROXY_CA_BUNDLE="$capem"; PROXY_CA_ADDED="$added"
-  return 0
-}
-
-# uv does NOT read pip.conf or PIP_INDEX_URL (verified). On corporate networks that block
-# public PyPI and route pip through an internal mirror (Artifactory/Nexus/…), uv silently
-# hits pypi.org and fails — even though the user's `pip` works. Bridge the user's OWN
-# already-configured pip index into uv via UV_DEFAULT_INDEX. Never hardcode a mirror.
-detect_pip_index() {
-  local v f
-  if command -v python3 >/dev/null 2>&1; then
-    v=$(python3 -m pip config get global.index-url 2>/dev/null | tr -d '[:space:]')
-    [[ -n "$v" && "$v" != "None" ]] && { echo "$v"; return; }
-  fi
-  for f in "${PIP_CONFIG_FILE:-}" "$HOME/.config/pip/pip.conf" "$HOME/.pip/pip.conf" /etc/pip.conf; do
-    [[ -f "$f" ]] || continue
-    v=$(awk -F= '/^[[:space:]]*index-url[[:space:]]*=/{gsub(/[[:space:]]/,"",$2);print $2; exit}' "$f")
-    [[ -n "$v" ]] && { echo "$v"; return; }
-  done
-}
-
-bridge_pip_index_to_uv() {
-  # Respect an explicit uv config the user already set.
-  [[ -n "${UV_DEFAULT_INDEX:-}${UV_INDEX_URL:-}" ]] && return 0
-  [[ -f "$HOME/.config/uv/uv.toml" ]] && return 0
-  local idx; idx=$(detect_pip_index)
-  [[ -z "$idx" ]] && return 0
-  case "$idx" in *pypi.org/simple*) return 0 ;; esac   # already public PyPI — nothing to bridge
-  export UV_DEFAULT_INDEX="$idx"
-  PIP_BRIDGED_INDEX="$idx"
-}
-
-# corepack fetches the repo's pinned package manager (packageManager: pnpm@10.x) from
-# registry.npmjs.org by default. On corporate networks that block public npm this 503s —
-# the same failure mode as uv hitting public PyPI. Bridge the user's OWN npm registry into
-# corepack via COREPACK_NPM_REGISTRY, and disable the interactive download prompt. Needed
-# because pnpm's npm "latest" dist-tag currently resolves to a 12.x ALPHA that ignores
-# onlyBuiltDependencies (→ ERR_PNPM_IGNORED_BUILDS); the pin routes us to stable pnpm 10.
-detect_npm_registry() {
-  local v f
-  if command -v npm >/dev/null 2>&1; then
-    v=$(npm config get registry 2>/dev/null | tr -d '[:space:]')
-    [[ -n "$v" && "$v" != "undefined" ]] && { echo "$v"; return; }
-  fi
-  for f in "$HOME/.npmrc" "${PREFIX:-/usr/local}/etc/npmrc" /etc/npmrc; do
-    [[ -f "$f" ]] || continue
-    v=$(awk -F= '/^[[:space:]]*registry[[:space:]]*=/{gsub(/[[:space:]]/,"",$2);print $2; exit}' "$f")
-    [[ -n "$v" ]] && { echo "$v"; return; }
-  done
-}
-
-bridge_npm_registry_to_corepack() {
-  export COREPACK_ENABLE_DOWNLOAD_PROMPT="${COREPACK_ENABLE_DOWNLOAD_PROMPT:-0}"
-  [[ -n "${COREPACK_NPM_REGISTRY:-}" ]] && return 0
-  local reg; reg=$(detect_npm_registry)
-  [[ -z "$reg" ]] && return 0
-  case "$reg" in *registry.npmjs.org*) return 0 ;; esac   # already public npm — nothing to bridge
-  export COREPACK_NPM_REGISTRY="${reg%/}"   # strip trailing slash → avoid '//pnpm' 404s
-  NPM_BRIDGED_REGISTRY="$reg"
-}
+# shellcheck source=lib/corp-network.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/corp-network.sh"
 
 if [[ -n "${TLS_PEM_PATH:-}" && -f "${TLS_PEM_PATH}" ]]; then
   apply_tls_bundle "$TLS_PEM_PATH"
@@ -467,7 +384,9 @@ else
   fi
 fi
 
-# Bridge the user's existing npm registry mirror into corepack (for the repo's pinned pnpm).
+# Bridge the user's existing npm registry mirror into corepack. Phase 1a installs pnpm via
+# npm (which already honors that registry), so this is not required for the supported path
+# — it is kept for parity with the uv bridge and for anyone who opts into corepack manually.
 if [[ "$DRY_RUN" == "true" ]]; then
   run "# if npm has a custom registry, export COREPACK_NPM_REGISTRY to match (+ disable download prompt)"
 else
@@ -498,23 +417,26 @@ header "Phase 1 — Auth"
 if run_phase "1"; then
 
 echo
-step "1a. pnpm (corepack-managed; repo pins pnpm 10 via packageManager)"
-# pnpm's npm "latest" dist-tag currently resolves to a 12.x ALPHA that breaks installs
-# (ignores onlyBuiltDependencies → ERR_PNPM_IGNORED_BUILDS). Prefer corepack, which honors
-# the repo's `packageManager: pnpm@10.x` pin and fetches that exact version on demand
-# (via COREPACK_NPM_REGISTRY + NODE_EXTRA_CA_CERTS set in Phase 0).
-if command -v corepack &>/dev/null; then
-  run "corepack enable --install-directory '$HOME/bin'"
-  # Pre-activate a SPECIFIC stable pnpm. If the cloned repo has no packageManager pin,
-  # corepack otherwise asks the registry for `pnpm/latest` (a dist-tag endpoint corporate
-  # mirrors don't serve → HTTP 404). Activating an exact version downloads only the
-  # versioned tarball (which the mirror does serve) and skips 'latest' resolution entirely.
-  run "corepack prepare pnpm@${PNPM_VERSION:-10.34.5} --activate"
-  note "corepack enabled + pnpm@${PNPM_VERSION:-10.34.5} activated (repo packageManager, if present, still wins)."
-elif command -v pnpm &>/dev/null; then
-  ok "pnpm already installed: $(pnpm --version 2>/dev/null || echo '?')"
+step "1a. pnpm (pinned install via npm — deliberately NOT corepack; see ENV-0)"
+# Two constraints, both load-bearing:
+#   1. pnpm's npm "latest" dist-tag has shipped a 12.x ALPHA that ignores
+#      onlyBuiltDependencies (→ ERR_PNPM_IGNORED_BUILDS), so the version must be pinned.
+#   2. corepack fetches its package manager from registry.npmjs.org and ignores the npm
+#      registry setting, so it hard-fails wherever public npm is blocked (ENV-0).
+# `npm install -g pnpm@<pin>` satisfies both: npm honors the user's OWN configured
+# registry, so the supported path needs no COREPACK_NPM_REGISTRY bridge at all.
+if [[ "$DRY_RUN" != "true" ]] && ! firefly_preflight_npm_registry; then
+  fail "Cannot install pnpm until the npm registry above is reachable."
+  exit 1
+fi
+if command -v pnpm &>/dev/null && [[ "$(pnpm --version 2>/dev/null)" == "$PNPM_VERSION" ]]; then
+  ok "pnpm already installed at the pinned version: $PNPM_VERSION"
 else
-  run "npm install -g pnpm@10"   # avoid the 12.x alpha on the 'latest' tag
+  # An enabled corepack puts its own pnpm shim ahead of the npm-global binary on PATH,
+  # which would shadow the version we just pinned. Drop the shim before installing.
+  run "corepack disable >/dev/null 2>&1 || true"
+  run "npm install -g pnpm@$PNPM_VERSION"
+  note "pnpm pinned to $PNPM_VERSION (matches the repo's packageManager field)."
 fi
 
 echo

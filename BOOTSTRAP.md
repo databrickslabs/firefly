@@ -34,13 +34,33 @@ re-prompting. The runner tracks completed phases (`COMPLETED_PHASES`) and suppor
 `Re-execute Phase N? [y/N]` and pressing Enter **skips** it and advances; a
 not-yet-run phase prompts `Execute Phase N? [Y/n]` (Enter proceeds, `n` stops).
 
-**Corporate networks (intercepting proxy / blocked public PyPI-npm):** Phase 0
-auto-detects a TLS-intercepting proxy and, on confirmation (or `--trust-proxy-ca`),
-builds a local CA bundle and exports `SSL_CERT_FILE` / `REQUESTS_CA_BUNDLE` /
-`NODE_EXTRA_CA_CERTS` / `CURL_CA_BUNDLE` (+ `UV_SYSTEM_CERTS=1`). It also bridges the
-user's existing `pip` index into `uv` (`UV_DEFAULT_INDEX`) and the `npm` registry into
-corepack (`COREPACK_NPM_REGISTRY`), so `uv`/corepack use the sanctioned mirrors instead
-of blocked public registries. Off-proxy these are no-ops. Never hardcode a mirror.
+### 0a. Corporate-network setup — **run this before any Phase 1 command**
+
+This is a real step, not a description. It detects a TLS-intercepting proxy, and bridges
+your existing `pip` index into `uv` (`UV_DEFAULT_INDEX`) and your `npm` registry into
+corepack (`COREPACK_NPM_REGISTRY`), so those tools use your sanctioned mirrors instead of
+blocked public registries. Off-proxy every bridge is a no-op, so it is always safe to run.
+
+```bash
+# Run from the repo root. Safe to re-run; no-ops when public registries are reachable.
+source scripts/lib/corp-network.sh
+firefly_bridge_corp_network
+
+# Confirm what got set (empty output just means nothing needed bridging):
+env | grep -E 'UV_DEFAULT_INDEX|COREPACK_NPM_REGISTRY|NODE_EXTRA_CA_CERTS|SSL_CERT_FILE'
+```
+
+If it reports an intercepting proxy and you have verified the SHA-256 against your
+organization's known root CA, trust it for this session:
+
+```bash
+FIREFLY_TRUST_PROXY_CA=1 firefly_bridge_corp_network   # or: TLS_PEM_PATH=<path> firefly_bridge_corp_network
+```
+
+> Every value is read from **your own** config — no mirror is hardcoded. `scripts/bootstrap.sh`
+> sources this same file, so the runbook and the automated runner cannot drift apart.
+> Do **not** work around a blocked registry with `--registry https://registry.npmjs.org`
+> or by disabling TLS verification.
 
 ### Required inputs — confirm each before proceeding to Phase 1
 
@@ -84,16 +104,25 @@ of blocked public registries. Off-proxy these are no-ops. Never hardcode a mirro
 > (the target may not have it). Those dirs are added to `PATH` in Phase 0 so every phase
 > (including skip-forward resumes) finds the CLIs. Auth steps **skip if already logged in**.
 
-### 1a. pnpm via corepack (needed for Drizzle migrations + frontend build)
+### 1a. pnpm — pinned install via npm (needed for Drizzle migrations + frontend build)
 
 ```bash
-# pnpm's npm "latest" dist-tag currently resolves to a 12.x ALPHA that breaks installs
-# (ignores onlyBuiltDependencies → ERR_PNPM_IGNORED_BUILDS). Use corepack and pre-activate
-# an exact stable version so it never resolves "latest" (a dist-tag corporate mirrors 404).
-corepack enable --install-directory "$HOME/bin"
-corepack prepare pnpm@10.34.5 --activate      # downloads the exact tarball from the mirror
-# A repo `packageManager: pnpm@10.x` pin, if present, still takes precedence.
+# Confirm your npm registry answers before installing. On a blocked network this prints
+# the exact remedy instead of an opaque ECONNREFUSED/ETIMEDOUT/503 later on.
+firefly_preflight_npm_registry     # from Phase 0a
+
+# Pin the version: pnpm's "latest" dist-tag has shipped a 12.x alpha that ignores
+# onlyBuiltDependencies (→ ERR_PNPM_IGNORED_BUILDS).
+corepack disable >/dev/null 2>&1 || true   # an enabled corepack shim shadows this install
+npm install -g pnpm@10.34.5
+pnpm --version                              # must print 10.34.5
 ```
+
+> **Do not use `corepack enable` / `corepack prepare` here (ENV-0).** corepack fetches its
+> package manager from `registry.npmjs.org` and ignores your npm registry setting, so it
+> fails wherever public npm is blocked or blackholed. `npm install -g` uses the registry
+> you already have configured, which is why it needs no bridge. This constraint is enforced
+> by `scripts/check-runbook-invariants.sh`.
 
 ### 1b. Databricks CLI OAuth
 
@@ -430,7 +459,7 @@ store_secret DATABASE_URL "$DB_URL"
 
 ```bash
 cd "$REPO_DIR"
-pnpm install   # via corepack (pnpm 10.34.5 activated in Phase 1a); installs node_modules
+pnpm install   # pnpm 10.34.5 pinned in Phase 1a; installs node_modules
 DB_URL=$(read_secret DATABASE_URL)   # from .firefly-bootstrap/state.env
 DATABASE_URL="$DB_URL" node_modules/.bin/drizzle-kit push
 ```
