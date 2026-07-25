@@ -510,6 +510,42 @@ curl -s -X PATCH "https://api.vercel.com/v9/projects/$V_PROJ?teamId=$V_ORG" \
   -d '{"framework":"nextjs"}' -o /dev/null
 ```
 
+### 8a-2. Resolve the origin Vercel serves this project on
+
+```bash
+# NEVER build this host from $VERCEL_PROJECT. `<name>.vercel.app` is globally unique
+# across all Vercel accounts, and when the name is taken Vercel assigns a RANDOM suffix
+# (`demo` -> `demo-zeta-seven-61.vercel.app`) — the host cannot be guessed (#19).
+#
+# Read it here, BEFORE the first deploy: the domain is allocated at project-creation
+# time, so it is already available. That is also what makes a RE-RUN correct — parsing
+# `vercel deploy` output only yields the production domain on a project's FIRST deploy;
+# on any later run a bare deploy is a preview with a per-deployment host.
+curl -sf -H "Authorization: Bearer $V_TOKEN" \
+  "https://api.vercel.com/v9/projects/$V_PROJ/domains?teamId=$V_ORG" > /tmp/domains.json
+curl -sf -H "Authorization: Bearer $V_TOKEN" \
+  "https://api.vercel.com/v9/projects/$V_PROJ?teamId=$V_ORG"          > /tmp/project.json
+
+# targets.production.alias[0] once a production deploy exists (it can disagree with
+# /domains, so it wins); otherwise the single verified .vercel.app from /domains.
+# If neither yields exactly one host, STOP — do not fall back to a guess.
+APP_ORIGIN=$(python3 - /tmp/domains.json /tmp/project.json <<'PY'
+import json, sys
+domains = json.load(open(sys.argv[1])); project = json.load(open(sys.argv[2]))
+alias = [a for a in (((project.get("targets") or {}).get("production") or {}).get("alias") or []) if a]
+if alias:
+    print("https://" + alias[0]); raise SystemExit
+hosts = [d["name"] for d in (domains.get("domains") or [])
+         if d.get("verified") and not d.get("gitBranch") and not d.get("redirect")
+         and str(d.get("name", "")).endswith(".vercel.app")]
+if len(hosts) == 1:
+    print("https://" + hosts[0])
+PY
+)
+[[ -n "$APP_ORIGIN" ]] || { echo "No verified .vercel.app domain — refusing to guess (#19)"; exit 1; }
+store_secret APP_ORIGIN "$APP_ORIGIN"
+```
+
 ### 8b. Set environment variables
 
 #### Tier 1 — required for guest login path (Phase 9 verification)
@@ -546,10 +582,10 @@ for SCOPE in preview production; do
   # (app default "firefly"). Set it to the catalog chosen in Phase 0 so guests can BROWSE
   # the data provisioned there (the app's memory store lives in $UC_CATALOG too).
   add GUEST_ALLOWED_CATALOG_PREFIXES    "$UC_CATALOG"
-  # Do NOT set BETTER_AUTH_URL here. A new project's first `vercel deploy` is always
-  # production, and Vercel may assign a suffixed domain if the name was taken. Guessing
-  # https://$VERCEL_PROJECT.vercel.app breaks guest OTT verification (#19). Set it in 8e
-  # from the real deployment URL.
+  # Production is the serving target and its origin is already known from 8a-2, so set
+  # it now — one deploy, no second pass. Preview is deliberately left unset: preview URLs
+  # are per-deployment, so pointing preview auth at the production origin is wrong.
+  [[ "$SCOPE" == "production" ]] && add BETTER_AUTH_URL "$APP_ORIGIN"
 done
 ```
 
@@ -598,32 +634,30 @@ done
 vercel project protection disable "$VERCEL_PROJECT" --sso --scope "$VERCEL_TEAM"
 ```
 
-### 8d. Deploy — phase 1 of 2: discover the real production URL
+### 8d. Deploy — single pass
 
 ```bash
-# A new project's first `vercel deploy` is always production (even without --prod).
-# Parse ONLY the .vercel.app URL — Vercel may assign a suffixed domain if the name was
-# taken; never guess https://$VERCEL_PROJECT.vercel.app and never alias-pin that name (#19).
-DEPLOY_URL=$(vercel deploy --scope "$VERCEL_TEAM" 2>&1 | grep -oE 'https://[^ ]*\.vercel\.app' | tail -1)
-PREVIEW_URL="$DEPLOY_URL"   # Phase 9 guest-entry URL (historical var name)
-```
+# Always --prod. A bare `vercel deploy` is production only on a project's FIRST deploy;
+# on a re-run it produces a preview with a per-deployment host, which is how a
+# discover-from-stdout flow silently sets BETTER_AUTH_URL to a dead origin (#19).
+# Never `vercel alias set` to $VERCEL_PROJECT.vercel.app — that name may belong to
+# another Vercel account, and the alias call hard-fails with "already in use".
+vercel deploy --prod --scope "$VERCEL_TEAM"
 
-### 8e. Deploy — phase 2 of 2: set `BETTER_AUTH_URL`, redeploy `--prod` (#19)
-
-```bash
-# BETTER_AUTH_URL is read at runtime and must equal the origin the guest actually opens.
-# Bootstrap serves production, so set production only. Preview URLs are
-# per-deployment; pointing preview auth at the production origin would recreate
-# the origin mismatch. Do not use `vercel alias set` to
-# $VERCEL_PROJECT.vercel.app — that name may belong to another project.
-vercel env add BETTER_AUTH_URL production --value "$PREVIEW_URL" \
-  --force --non-interactive --scope "$VERCEL_TEAM"
-PREVIEW_URL=$(vercel deploy --prod --scope "$VERCEL_TEAM" 2>&1 \
-  | grep -oE 'https://[^ ]*\.vercel\.app' | tail -1)
-
-# Store for Phase 9 (survives shell restart)
+PREVIEW_URL="$APP_ORIGIN"   # Phase 9 guest-entry URL (historical var name)
 store_secret PREVIEW_URL "$PREVIEW_URL"
 store_secret GUEST_API_SECRET "$GUEST_API_SECRET"
+```
+
+### 8e. Verify production serves the origin `BETTER_AUTH_URL` points at
+
+```bash
+# #19 reports success at every earlier step and only surfaces later as "Invalid token"
+# on the guest login link, so assert the match rather than assuming it.
+SERVING=$(curl -sf -H "Authorization: Bearer $V_TOKEN" \
+  "https://api.vercel.com/v9/projects/$V_PROJ?teamId=$V_ORG" \
+  | python3 -c 'import json,sys; t=(json.load(sys.stdin).get("targets") or {}).get("production") or {}; print("\n".join(t.get("alias") or []))')
+grep -qxF "${APP_ORIGIN#https://}" <<<"$SERVING" || { echo "Production does not serve $APP_ORIGIN"; exit 1; }
 ```
 
 ---
