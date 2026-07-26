@@ -25,7 +25,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BOOTSTRAP="$SCRIPT_DIR/bootstrap.sh"
-PIN="$(rg -o 'PNPM_VERSION:=([0-9]+\.[0-9]+\.[0-9]+)' -r '$1' "$SCRIPT_DIR/lib/corp-network.sh" | head -1)"
+PIN="$(sed -nE 's/.*PNPM_VERSION:=([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' "$SCRIPT_DIR/lib/corp-network.sh" | head -1)"
 
 [[ -x "$BOOTSTRAP" ]] || { echo "bootstrap.sh not executable: $BOOTSTRAP" >&2; exit 1; }
 [[ -n "$PIN" ]] || { echo "could not read PNPM_VERSION from lib/corp-network.sh" >&2; exit 1; }

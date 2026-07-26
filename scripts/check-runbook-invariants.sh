@@ -24,15 +24,15 @@ echo "== ENV-0 / runbook-parity invariants =="
 # ── 1. The runbook must not require corepack for pnpm (ENV-0). ────────────────
 # corepack fetches its package manager from registry.npmjs.org and ignores the npm
 # registry setting, so it hard-fails wherever public npm is blocked.
-if rg -q '^[[:space:]]*corepack[[:space:]]+(enable|prepare)' BOOTSTRAP.md; then
+if grep -qE '^[[:space:]]*corepack[[:space:]]+(enable|prepare)' BOOTSTRAP.md; then
   bad "BOOTSTRAP.md requires 'corepack enable/prepare' — blocked on corporate networks (ENV-0)."
   echo "      Use: npm install -g pnpm@<pinned-version>  (npm honors the user's registry)"
-  rg -n '^[[:space:]]*corepack[[:space:]]+(enable|prepare)' BOOTSTRAP.md | sed 's/^/      /'
+  grep -nE '^[[:space:]]*corepack[[:space:]]+(enable|prepare)' BOOTSTRAP.md | sed 's/^/      /'
 else
   pass "BOOTSTRAP.md does not require corepack for pnpm."
 fi
 
-if rg -q '^[[:space:]]*run "corepack[[:space:]]+(enable|prepare)' scripts/bootstrap.sh; then
+if grep -qE '^[[:space:]]*run "corepack[[:space:]]+(enable|prepare)' scripts/bootstrap.sh; then
   bad "bootstrap.sh runs 'corepack enable/prepare' — blocked on corporate networks (ENV-0)."
 else
   pass "bootstrap.sh does not run corepack for pnpm."
@@ -48,13 +48,13 @@ if [[ ! -f "$LIB" ]]; then
 else
   pass "$LIB exists."
   for consumer in BOOTSTRAP.md scripts/bootstrap.sh; do
-    if rg -q 'lib/corp-network\.sh' "$consumer"; then
+    if grep -qE 'lib/corp-network\.sh' "$consumer"; then
       pass "$consumer references $LIB (no drift)."
     else
       bad "$consumer does not reference $LIB — runbook and runner can drift again."
     fi
   done
-  if rg -q 'firefly_bridge_corp_network' BOOTSTRAP.md; then
+  if grep -qE 'firefly_bridge_corp_network' BOOTSTRAP.md; then
     pass "BOOTSTRAP.md Phase 0 invokes firefly_bridge_corp_network."
   else
     bad "BOOTSTRAP.md never invokes firefly_bridge_corp_network — Phase 0 would be prose-only again."
@@ -71,9 +71,9 @@ else
 fi
 
 # ── 4. The pnpm pin must agree everywhere. ───────────────────────────────────
-LIB_PIN=$(rg -o 'PNPM_VERSION:=([0-9]+\.[0-9]+\.[0-9]+)' -r '$1' "$LIB" 2>/dev/null | head -1)
+LIB_PIN=$(sed -nE 's/.*PNPM_VERSION:=([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' "$LIB" 2>/dev/null | head -1)
 PKG_PIN=$(python3 -c 'import json;print(json.load(open("package.json")).get("packageManager","").split("@")[-1])' 2>/dev/null)
-DOC_PIN=$(rg -o 'npm install -g pnpm@([0-9]+\.[0-9]+\.[0-9]+)' -r '$1' BOOTSTRAP.md 2>/dev/null | head -1)
+DOC_PIN=$(sed -nE 's/.*npm install -g pnpm@([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' BOOTSTRAP.md 2>/dev/null | head -1)
 if [[ -n "$LIB_PIN" && "$LIB_PIN" == "$PKG_PIN" && "$LIB_PIN" == "$DOC_PIN" ]]; then
   pass "pnpm pin consistent across lib / package.json / BOOTSTRAP.md ($LIB_PIN)."
 else
@@ -95,7 +95,7 @@ fi
 SOURCED_LIBS=()
 while IFS= read -r _lib; do
   [[ -n "$_lib" ]] && SOURCED_LIBS+=("$_lib")
-done < <(rg -o -N '^\s*source\s+(scripts/lib/[A-Za-z0-9_-]+\.sh)' -r '$1' BOOTSTRAP.md | sort -u)
+done < <(sed -nE 's|^[[:space:]]*source[[:space:]]+(scripts/lib/[A-Za-z0-9_-]+\.sh).*|\1|p' BOOTSTRAP.md | sort -u)
 if [[ "${#SOURCED_LIBS[@]}" -eq 0 ]]; then
   bad "BOOTSTRAP.md sources no scripts/lib/*.sh — the shared-implementation path is gone."
 else
@@ -202,7 +202,10 @@ text = open("BOOTSTRAP.md").read()
 out = []
 for m in re.finditer(r'^```bash\n(.*?)^```', text, re.S | re.M):
     base = text[:m.start()].count("\n") + 1
-    for bm in re.finditer(r'\{(.*?)\}', m.group(1), re.S):
+    # Only command groups. `${#VAR}` / `${VAR}` are parameter expansions, and the
+    # bare-brace regex read `${#GUEST_API_SECRET}` as a group whose sole content
+    # was the comment `#GUEST_API_SECRET` - flagging correct shell as a stub.
+    for bm in re.finditer(r'(?<!\$)\{(.*?)\}', m.group(1), re.S):
         body = bm.group(1)
         stmts = [s.strip() for s in body.splitlines() if s.strip()]
         live = [s for s in stmts if not s.startswith("#") and s not in (":", ": ;", ":;")]
@@ -225,7 +228,7 @@ fi
 # original regression. Deleting the written rule is precisely how ENV-0 was lost the first
 # time, so treat its removal as a failure in its own right.
 for doc in AGENTS.md CLAUDE.md; do
-  if rg -q 'ENV-0' "$doc" && rg -qi 'corepack' "$doc"; then
+  if grep -qE 'ENV-0' "$doc" && grep -qiE 'corepack' "$doc"; then
     pass "$doc documents the ENV-0 / corepack invariant."
   else
     bad "$doc no longer documents the ENV-0 corepack invariant — restore it."
@@ -237,10 +240,42 @@ done
 # ── 7. README and the runbook must not contradict each other. ────────────────
 # The README kept its correct "don't use corepack" guidance while the runbook switched to
 # requiring corepack, so the repo shipped two opposite instructions for months.
-if rg -q 'npm install -g pnpm' README.md; then
+if grep -qE 'npm install -g pnpm' README.md; then
   pass "README.md documents the npm install path for pnpm (agrees with the runbook)."
 else
   bad "README.md no longer documents 'npm install -g pnpm' — it may contradict the runbook."
+fi
+
+# ── 8. Credential lookups must not be hardcoded to one path in the runbook. ──
+# bootstrap.sh has read the Vercel token from $VERCEL_TOKEN first since the comment
+# "a single hardcoded path made it a silent 404 or a hard stop for anyone storing auth
+# elsewhere" was written — but BOOTSTRAP.md kept the hardcoded auth.json lookup, so the
+# fix never reached the readers who follow the doc. ~/Library/.../auth.json only exists
+# after an interactive `vercel login`, which makes the doc path fail outright for CI, for
+# token-based setups, and for the fresh-install harness.
+if grep -qE 'auth\.json' BOOTSTRAP.md; then
+  if grep -qE 'V_TOKEN="\$\{VERCEL_TOKEN:-\}"' BOOTSTRAP.md; then
+    pass "BOOTSTRAP.md prefers \$VERCEL_TOKEN before the CLI's auth.json."
+  else
+    bad "BOOTSTRAP.md reads auth.json without trying \$VERCEL_TOKEN first — drifted from scripts/bootstrap.sh."
+    grep -nE 'auth\.json' BOOTSTRAP.md | sed 's/^/      /'
+  fi
+fi
+
+# ── 9. A write-only secret must not be trusted straight from `vercel env pull`. ──
+# Encrypted Vercel vars come back redacted (~11 chars). The runbook stored that
+# placeholder as if it were the value, and every guest-login call then failed 401 with
+# no indication why. Recovery requires reminting, so the length check is what turns a
+# silent 401 into an actionable branch.
+if grep -qE 'GUEST_API_SECRET' BOOTSTRAP.md; then
+  # Match the comparison, not merely the expansion: the diagnostic `echo` also
+  # contains ${#GUEST_API_SECRET}, so a looser pattern passes even when the
+  # validation itself has been deleted.
+  if grep -qE '\$\{#GUEST_API_SECRET\}[[:space:]]*-ne[[:space:]]*128' BOOTSTRAP.md; then
+    pass "BOOTSTRAP.md validates GUEST_API_SECRET's length before using it."
+  else
+    bad "BOOTSTRAP.md uses GUEST_API_SECRET without checking it is not a redacted placeholder."
+  fi
 fi
 
 echo
