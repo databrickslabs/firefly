@@ -839,6 +839,7 @@ straight from the summary (substitute the real value into *both* the label and t
 | Resource | Value |
 |---|---|
 | **▶ Guest login URL** (one-time, ~10 min) | **[`<loginUrl>`](<loginUrl>)** |
+| Expired or already used? | `bash scripts/new-guest-link.sh --open` |
 | Frontend (preview) | [`<PREVIEW_URL>`](<PREVIEW_URL>) |
 | Agent app | `<AGENT_APP_NAME>` — RUNNING · [`<app URL>`](<app URL>) |
 | Lakebase | `<LAKEBASE_NAME>` |
@@ -846,9 +847,16 @@ straight from the summary (substitute the real value into *both* the label and t
 | UC memory store | `<UC_CATALOG>.<UC_SCHEMA>.firefly_managed_memory` |
 | Agent SP / Guest SP | `<ids>` |
 
-If the link is expired/used, mint a fresh one by re-running the three "Guest login" POSTs
-above (Phase 9) with the stored `PREVIEW_URL` / `GUEST_API_SECRET` / guest-SP creds
-(`$REPO_DIR/.firefly-bootstrap/state.env`).
+If the link is expired or already used, mint a fresh one with:
+
+```bash
+bash scripts/new-guest-link.sh --open
+```
+
+It replays only the three "Guest login" POSTs above, reading `PREVIEW_URL` /
+`GUEST_API_SECRET` / guest-SP creds from `$REPO_DIR/.firefly-bootstrap/state.env`, and
+prints a new URL in about two seconds. Prefer `--open` — copy-pasting into a tab that
+already has the app loaded can consume the link before you read it.
 
 ---
 
