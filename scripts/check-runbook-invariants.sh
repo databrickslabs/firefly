@@ -278,6 +278,26 @@ if grep -qE 'GUEST_API_SECRET' BOOTSTRAP.md; then
   fi
 fi
 
+# ── 10. Databricks failures must not be misattributed to this app (#78). ─────
+# A workspace IP access list refuses the deployment's egress with a bare 403.
+# Building the error from `statusText` alone renders "Databricks API error:
+# Forbidden", which reads as an application bug; the explanation is in the
+# X-Databricks-Reason-Phrase header both wrappers used to discard.
+# Match the actual header READ, not the words. A case-insensitive search for the
+# header name also matches the explanatory comment, so the check passed with the
+# code reverted — the same false-pass the GUEST_API_SECRET check had.
+ATTRIB_MISSING=""
+for w in src/lib/databricks-api-wrapper.ts src/lib/databricks-spn-api-wrapper.ts; do
+  [[ -f "$w" ]] || continue
+  grep -qE 'headers\.get\(["'"'"']x-databricks-reason-phrase["'"'"']\)' "$w" \
+    || ATTRIB_MISSING+=" $w"
+done
+if [[ -z "$ATTRIB_MISSING" ]]; then
+  pass "Databricks API wrappers surface X-Databricks-Reason-Phrase (network blocks stay attributable)."
+else
+  bad "these wrappers drop X-Databricks-Reason-Phrase, so an IP-ACL block reads as an app bug (#78):$ATTRIB_MISSING"
+fi
+
 echo
 if [[ "$FAILED" -eq 0 ]]; then
   echo "All runbook invariants hold."

@@ -256,10 +256,31 @@ export async function callDatabricksApi<T = unknown>(
       };
     }
 
+    // See databricks-spn-api-wrapper.ts: a workspace IP access list rejects the
+    // deployment's egress with a bare 403, which surfaces as "Databricks API
+    // error: Forbidden" and reads like an application bug. The explanation is in
+    // X-Databricks-Reason-Phrase; name the network policy so nobody debugs our
+    // code for an enterprise control.
+    const reason = response.headers.get("x-databricks-reason-phrase") || "";
+    const blockedIp = /Source IP address: ([0-9a-fA-F:.]+) is blocked/.exec(reason)?.[1];
+    if (blockedIp) {
+      return {
+        success: false,
+        error:
+          `Blocked by your Databricks workspace network policy, not by this app. ` +
+          `The workspace's IP access list does not include this deployment's ` +
+          `outbound address (${blockedIp}). Ask a workspace admin to allow it, ` +
+          `or host the app inside an already-permitted network.`,
+        details: reason || errorText,
+        status,
+        requireReauth: false,
+      };
+    }
+
     // Return other API errors as-is
     return {
       success: false,
-      error: `Databricks API error: ${response.statusText}`,
+      error: `Databricks API error: ${response.statusText}${reason ? ` — ${reason}` : ""}`,
       details: errorText,
       status,
       requireReauth: false,
