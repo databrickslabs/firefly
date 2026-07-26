@@ -190,10 +190,32 @@ export async function callDatabricksSpnApi<T = unknown>(
       // Not JSON, already logged as text
     }
 
-    // Return API errors as-is
+    // `statusText` alone is actively misleading: a workspace IP access list
+    // rejects this deployment's egress with a bare 403, so the UI reads
+    // "Databricks API error: Forbidden" and looks like an application bug. The
+    // real explanation is in X-Databricks-Reason-Phrase, e.g.
+    //   "Source IP address: 34.229.126.39 is blocked by Databricks IP ACL
+    //    for workspace: 7474652207956472"
+    // Attribute it to the workspace's network policy so nobody debugs our code
+    // for an enterprise control.
+    const reason = response.headers.get("x-databricks-reason-phrase") || "";
+    const blockedIp = /Source IP address: ([0-9a-fA-F:.]+) is blocked/.exec(reason)?.[1];
+    if (blockedIp) {
+      return {
+        success: false,
+        error:
+          `Blocked by your Databricks workspace network policy, not by this app. ` +
+          `The workspace's IP access list does not include this deployment's ` +
+          `outbound address (${blockedIp}). Ask a workspace admin to allow it, ` +
+          `or host the app inside an already-permitted network.`,
+        details: reason || errorText,
+        status,
+      };
+    }
+
     return {
       success: false,
-      error: `Databricks API error: ${response.statusText}`,
+      error: `Databricks API error: ${response.statusText}${reason ? ` — ${reason}` : ""}`,
       details: errorText,
       status,
     };

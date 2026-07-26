@@ -730,6 +730,44 @@ databricks apps get "$AGENT_APP_NAME" -o json --profile "$DB_PROFILE" \
 # Expected: app_status: RUNNING
 ```
 
+### Enterprise network controls (check this BEFORE blaming the app)
+
+If your workspace restricts access by IP, the deployed frontend is a third party to
+it: Vercel calls Databricks from its own egress addresses, which are not your
+office or VPN ranges. Every data call then returns a bare `403`, and the UI shows
+`Failed to load SQL warehouses — Databricks API error: Forbidden`. Nothing is
+wrong with the deployment; the workspace is refusing the caller.
+
+```bash
+# Does this workspace enforce an IP allowlist?
+ACL=$(databricks api get /api/2.0/ip-access-lists --profile "$DB_PROFILE" 2>/dev/null)
+ENABLED=$(printf '%s' "$ACL" | python3 -c "
+import sys, json
+try: d = json.load(sys.stdin)
+except Exception: raise SystemExit
+on = [l for l in (d.get('ip_access_lists') or [])
+      if l.get('enabled') and l.get('list_type') == 'ALLOW']
+print(' / '.join(l.get('label','?') for l in on))
+" 2>/dev/null)
+
+if [[ -n "$ENABLED" ]]; then
+  cat <<WARN
+  !! This workspace enforces an IP allowlist: $ENABLED
+     The app is served from Vercel, so its OUTBOUND addresses must be on that
+     list or every Databricks call from the app will fail with 403 Forbidden.
+     Phases 1-8 still succeed and the app will load - only data calls break.
+     To use the data plane either:
+       - ask a workspace admin to allow the deployment's egress addresses
+         (Vercel egress is dynamic unless you are on static egress), or
+       - run against a workspace with no IP allowlist, or
+       - host the frontend inside an already-permitted network.
+     This is your organisation's network policy, NOT a defect in this project.
+WARN
+else
+  echo "  ok: no enabled IP allowlist on this workspace - the app can reach it"
+fi
+```
+
 ### Guest login
 
 ```bash
