@@ -298,6 +298,21 @@ else
   bad "these wrappers drop X-Databricks-Reason-Phrase, so an IP-ACL block reads as an app bug (#78):$ATTRIB_MISSING"
 fi
 
+# ── 11. An expired guest link must have a runnable recovery (#79). ───────────
+# Links are single-use with a ~10 minute TTL, and Phase 9 mints one ~20 minutes
+# into a run, so it is usually dead before a human clicks it. Prose telling the
+# reader to "re-run the three POSTs above" is not a recovery path:
+# /api/guest/users needs an spnId, which needs a workspace record first.
+if [[ -x scripts/new-guest-link.sh ]]; then
+  if grep -qE 'new-guest-link\.sh' BOOTSTRAP.md; then
+    pass "an expired guest link has a runnable remint, referenced from the runbook."
+  else
+    bad "scripts/new-guest-link.sh exists but BOOTSTRAP.md never points the reader at it (#79)."
+  fi
+else
+  bad "scripts/new-guest-link.sh is missing or not executable — an expired guest link has no recovery (#79)."
+fi
+
 echo
 if [[ "$FAILED" -eq 0 ]]; then
   echo "All runbook invariants hold."
