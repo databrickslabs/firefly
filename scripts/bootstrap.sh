@@ -271,6 +271,27 @@ validate_url "$DATABRICKS_HOST"
 ask DB_PROFILE       "Databricks CLI profile name"      "firefly-deploy"
 ask UC_CATALOG       "Unity Catalog catalog"            "workspace"
 ask UC_SCHEMA        "Unity Catalog schema"             "default"
+
+# Phase 6c inputs. Asked here, with everything else, because Phase 0 is the only
+# place the runbook is allowed to block on a question (#83). Seeding only ever
+# acts on an EMPTY schema and never overwrites a table, which is what makes `yes`
+# a safe default.
+ask SEED_SAMPLE_DATA "Seed samples.wanderbricks if $UC_CATALOG.$UC_SCHEMA is empty? (yes/no)" "yes"
+ask GENIE_SPACE_IDS  "Existing Genie space id(s) to use, comma-separated (None = create one)" "None"
+case "$(printf '%s' "${GENIE_SPACE_IDS:-None}" | tr 'A-Z' 'a-z')" in
+  none|null|"")
+    GENIE_SPACE_IDS=""
+    ask CREATE_GENIE_SPACE "Create a Genie space over $UC_CATALOG.$UC_SCHEMA? (yes/no)" "yes"
+    GRANT_GUEST_SPACE_ACCESS="no"   # nothing of the user's to grant against
+    ;;
+  *)
+    # Only meaningful when the user named spaces: these are the one set of spaces
+    # bootstrap is permitted to touch, so granting on them is an explicit choice.
+    CREATE_GENIE_SPACE="no"
+    ask GRANT_GUEST_SPACE_ACCESS "Grant the guest SP CAN_RUN on those spaces + SELECT on their tables? (yes/no)" "yes"
+    ;;
+esac
+
 ask AGENT_APP_NAME        "Databricks App name"                        "firefly-openai-managed-mem-v2"
 ask LAKEBASE_NAME         "Lakebase instance name"                     "firefly-lb"
 ask DATABRICKS_ACCOUNT_ID "Databricks account ID (from accounts.cloud.databricks.com URL)"
@@ -778,6 +799,49 @@ note "  GRANT USE SCHEMA, SELECT ON SCHEMA $UC_CATALOG.$UC_SCHEMA TO \`$GUEST_SP
 
 fi
 stop_if_done "6b"
+
+# ─── Phase 6c: data + Genie space ─────────────────────────────────────────────
+# The runner had no 6c at all, so a fresh workspace finished "successfully" with
+# an empty schema and a Genie that could not answer anything (#83). One shared
+# script does the work, called exactly as BOOTSTRAP.md calls it.
+header "Phase 6c — Give Genie data, and a space, to work with"
+if run_phase "6c"; then
+
+step "Seed sample data and resolve a Genie space"
+if [[ "$DRY_RUN" == "true" ]]; then
+  note "[DRY-RUN] scripts/genie-data-setup.sh --catalog $UC_CATALOG --schema $UC_SCHEMA ..."
+  GENIE_MCP_MODE="one"; GENIE_SPACE_ID=""
+else
+  # Progress goes to stderr, KEY=value to stdout, so eval only sees the contract.
+  GENIE_SETUP_OUT="$(bash "$BOOTSTRAP_SCRIPT_DIR/genie-data-setup.sh" \
+    --catalog "$UC_CATALOG" --schema "$UC_SCHEMA" --profile "$DB_PROFILE" \
+    --warehouse-id "${WAREHOUSE_ID:-}" \
+    --seed "${SEED_SAMPLE_DATA:-yes}" \
+    --space-ids "${GENIE_SPACE_IDS:-}" \
+    --create-space "${CREATE_GENIE_SPACE:-yes}" \
+    --grant-guest "${GRANT_GUEST_SPACE_ACCESS:-no}" \
+    --guest-sp "${GUEST_SP_CLIENT_ID:-}" \
+    --agent-sp "${SP_CLIENT_ID:-}")" || warn "Phase 6c setup reported a problem (continuing)"
+  eval "$GENIE_SETUP_OUT"
+  note "seed=${SEED_STATUS:-?} tables=${SEED_TABLE_COUNT:-?} mode=${GENIE_MCP_MODE:-one} space=${GENIE_SPACE_ID:-none}"
+  [[ -n "${GENIE_SPACE_ID:-}" ]] && store_secret GENIE_SPACE_ID "$GENIE_SPACE_ID"
+fi
+
+# Phase 4 deployed the app before a space existed, so space mode needs a redeploy.
+# Both --vars move together or neither does: agent.py raises ValueError on
+# mode=space with an empty id, and the app then fails to boot.
+if [[ "${GENIE_MCP_MODE:-one}" == "space" && -n "${GENIE_SPACE_ID:-}" ]]; then
+  step "Redeploy the agent app in Genie space mode"
+  GENIE_VARS="--var catalog=$UC_CATALOG --var schema=$UC_SCHEMA \
+--var genie_mcp_mode=space --var genie_space_id=$GENIE_SPACE_ID"
+  run "cd '$REPO_DIR/agent-build' && databricks bundle deploy --profile '$DB_PROFILE' -t dev $GENIE_VARS"
+  run "cd '$REPO_DIR/agent-build' && databricks bundle run agent_openai_agents_sdk --profile '$DB_PROFILE' -t dev $GENIE_VARS"
+else
+  note "Staying on Genie One (workspace-wide) — no Genie space was resolved."
+fi
+
+fi
+stop_if_done "6c"
 
 # ─── Phase 7: Neon database ───────────────────────────────────────────────────
 header "Phase 7 — Neon database"

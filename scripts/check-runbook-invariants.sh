@@ -313,6 +313,76 @@ else
   bad "scripts/new-guest-link.sh is missing or not executable — an expired guest link has no recovery (#79)."
 fi
 
+# ── 12. Genie mode and space id must never move independently (#83). ─────────
+# agent.py raises ValueError("GENIE_MCP_MODE=space requires GENIE_SPACE_ID"), so
+# a bundle that can set the mode without the id fails the app boot rather than
+# degrading to Genie One. Both must exist as variables, and every command that
+# passes one must pass the other.
+GENIE_COUPLING_BAD=""
+for v in genie_mcp_mode genie_space_id; do
+  grep -qE "^[[:space:]]*${v}:" agent/databricks.yml || GENIE_COUPLING_BAD="$GENIE_COUPLING_BAD ${v}(undeclared)"
+done
+grep -qE 'GENIE_SPACE_ID' agent/databricks.yml || GENIE_COUPLING_BAD="$GENIE_COUPLING_BAD GENIE_SPACE_ID(not-in-app-env)"
+
+# Any line setting one --var without the other is the failure mode we care about.
+for f in BOOTSTRAP.md scripts/bootstrap.sh README.md; do
+  [[ -f "$f" ]] || continue
+  while IFS= read -r line; do
+    case "$line" in
+      *genie_mcp_mode=space*)
+        case "$line" in *genie_space_id*) ;; *) GENIE_COUPLING_BAD="$GENIE_COUPLING_BAD $f(mode-without-id)" ;; esac ;;
+    esac
+  done < <(grep -nE 'genie_mcp_mode=space' "$f" 2>/dev/null)
+done
+
+if [[ -z "$GENIE_COUPLING_BAD" ]]; then
+  pass "Genie mode and space id are declared together and always passed together."
+else
+  bad "GENIE_MCP_MODE=space can be set without GENIE_SPACE_ID — the app fails to boot (#83):$GENIE_COUPLING_BAD"
+fi
+
+# ── 13. Seeding must be the user's choice, and offered (#83). ────────────────
+# The runbook used to forbid seeding while never asking, so "unless the user
+# explicitly asks" was unreachable: no Phase 0 input mentioned it. An empty schema
+# means Genie answers nothing, so the fix is an ask — not a silent default either way.
+SEED_ASK_BAD=""
+grep -qE '\*\*\[ASK — REQUIRED, BLOCKING\]\*\* `SEED_SAMPLE_DATA`' BOOTSTRAP.md \
+  || SEED_ASK_BAD="$SEED_ASK_BAD BOOTSTRAP.md(no-blocking-ask)"
+grep -qE '\*\*\[ASK — REQUIRED, BLOCKING\]\*\* `GENIE_SPACE_IDS`' BOOTSTRAP.md \
+  || SEED_ASK_BAD="$SEED_ASK_BAD BOOTSTRAP.md(no-space-ids-ask)"
+grep -qE '^ask SEED_SAMPLE_DATA' scripts/bootstrap.sh \
+  || SEED_ASK_BAD="$SEED_ASK_BAD bootstrap.sh(no-ask)"
+grep -qE '^ask GENIE_SPACE_IDS' scripts/bootstrap.sh \
+  || SEED_ASK_BAD="$SEED_ASK_BAD bootstrap.sh(no-space-ids-ask)"
+# The old prohibition must be gone: it contradicts the ask it predates.
+grep -qE 'Do not auto-create seed tables during bootstrap unless the user explicitly asks' BOOTSTRAP.md \
+  && SEED_ASK_BAD="$SEED_ASK_BAD BOOTSTRAP.md(stale-prohibition)"
+
+if [[ -z "$SEED_ASK_BAD" ]]; then
+  pass "seeding and Genie space setup are offered as Phase 0 blocking asks, in both surfaces."
+else
+  bad "seeding is not a real user choice — the runbook and runner disagree (#83):$SEED_ASK_BAD"
+fi
+
+# ── 14. Phase 6c must exist in BOTH the runbook and the runner (#83). ────────
+# bootstrap.sh had no 6c at all, so the automated path finished "successfully"
+# with an empty schema. This is the same drift class as 8 and 9: one surface
+# implements a phase and the other only describes it.
+SIXC_BAD=""
+grep -qE '^## Phase 6c' BOOTSTRAP.md || SIXC_BAD="$SIXC_BAD BOOTSTRAP.md(no-phase)"
+grep -qE 'run_phase "6c"' scripts/bootstrap.sh || SIXC_BAD="$SIXC_BAD bootstrap.sh(no-phase)"
+[[ -x scripts/genie-data-setup.sh ]] || SIXC_BAD="$SIXC_BAD genie-data-setup.sh(missing-or-not-executable)"
+# Both surfaces must call the SAME implementation, or they drift again.
+for f in BOOTSTRAP.md scripts/bootstrap.sh; do
+  grep -qE 'genie-data-setup\.sh' "$f" || SIXC_BAD="$SIXC_BAD $f(does-not-call-shared-script)"
+done
+
+if [[ -z "$SIXC_BAD" ]]; then
+  pass "Phase 6c exists in both surfaces and both call scripts/genie-data-setup.sh."
+else
+  bad "Phase 6c is not implemented consistently — a fresh workspace can finish with no data (#83):$SIXC_BAD"
+fi
+
 echo
 if [[ "$FAILED" -eq 0 ]]; then
   echo "All runbook invariants hold."

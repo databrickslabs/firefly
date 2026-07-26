@@ -73,6 +73,10 @@ FIREFLY_TRUST_PROXY_CA=1 firefly_bridge_corp_network   # or: TLS_PEM_PATH=<path>
 - [ ] **[ASK — REQUIRED, BLOCKING]** `DB_PROFILE` — name for the local Databricks CLI profile
 - [ ] **[ASK — REQUIRED, BLOCKING]** `UC_CATALOG` — Unity Catalog catalog to use (must allow MANAGE)
 - [ ] **[ASK — REQUIRED, BLOCKING]** `UC_SCHEMA` — schema within that catalog
+- [ ] **[ASK — REQUIRED, BLOCKING]** `SEED_SAMPLE_DATA` — if `$UC_CATALOG.$UC_SCHEMA` has **no tables**, copy `samples.wanderbricks` into it so Genie has something to answer from (16 tables, ~815k rows). `no` leaves the schema untouched
+- [ ] **[ASK — REQUIRED, BLOCKING]** `GENIE_SPACE_IDS` — existing Genie space id(s) to point the agent at, comma-separated. `None` (the default) means bootstrap may create one for you
+- [ ] **[ASK — REQUIRED, BLOCKING]** `CREATE_GENIE_SPACE` — when `GENIE_SPACE_IDS=None`, create a Genie space over the data in `$UC_CATALOG.$UC_SCHEMA`. Ignored when you supplied space ids
+- [ ] **[ASK — REQUIRED, BLOCKING]** `GRANT_GUEST_SPACE_ACCESS` — **ask this only when `GENIE_SPACE_IDS` is set.** Grant the guest SP `CAN_RUN` on those spaces and `SELECT` on the tables they reference, so guest users can ask data questions too
 - [ ] **[ASK — REQUIRED, BLOCKING]** `AGENT_APP_NAME` — Databricks App name (dev target; bundle hardcodes this)
 - [ ] **[ASK — REQUIRED, BLOCKING]** `DATABRICKS_ACCOUNT_ID` — account ID (a **UUID**, e.g. `32aad83d-ef89-4e74-9969-77784815fd46`) from `accounts.cloud.databricks.com` (Account Console → top-right menu). NB: the account ID is a UUID; the *workspace* ID is the numeric one.
 - [ ] **[ASK — REQUIRED, BLOCKING]** `LAKEBASE_NAME` — name for the new Lakebase instance
@@ -92,6 +96,10 @@ FIREFLY_TRUST_PROXY_CA=1 firefly_bridge_corp_network   # or: TLS_PEM_PATH=<path>
 | `DB_PROFILE` | `firefly-deploy` | Any name for the profile in `~/.databrickscfg` |
 | `UC_CATALOG` | `workspace` | Writable catalog with MANAGE permission |
 | `UC_SCHEMA` | `default` | Schema within that catalog |
+| `SEED_SAMPLE_DATA` | `yes` | Only acts when the schema is empty; never overwrites an existing table |
+| `GENIE_SPACE_IDS` | `None` | From a space's URL: `…/genie/rooms/<space-id>`, or `databricks genie list-spaces` |
+| `CREATE_GENIE_SPACE` | `yes` | Titled `Firefly Genie Agent — <catalog>.<schema>`; reused, not duplicated, on a re-run |
+| `GRANT_GUEST_SPACE_ACCESS` | `yes` | Asked **only** when `GENIE_SPACE_IDS` is set |
 | `AGENT_APP_NAME` | `firefly-openai-managed-mem-v2` | Dev target; bundle hardcodes this |
 | `DATABRICKS_ACCOUNT_ID` | — | Account **UUID** from `accounts.cloud.databricks.com` (not the numeric workspace ID) |
 | `LAKEBASE_NAME` | `firefly-lb` | Name for the new Lakebase instance |
@@ -458,20 +466,23 @@ databricks api patch \
 
 ---
 
-## Phase 6c — Confirm Genie has data to query
+## Phase 6c — Give Genie data, and a space, to work with
 
 Phases 6 and 6b grant catalog, schema, and warehouse access. On a **fresh
 workspace**, Genie One can still return empty or useless answers when the
 granted schema has **no tables** — the agent and MCP plumbing work, but there
-is nothing to query. Check now and record the result; do **not** create tables
-on the user's behalf.
+is nothing to query.
+
+This phase acts on the four Phase 0 answers: `SEED_SAMPLE_DATA`,
+`GENIE_SPACE_IDS`, `CREATE_GENIE_SPACE`, and `GRANT_GUEST_SPACE_ACCESS`. It runs
+here, after Phase 6, because a Genie space needs the `WAREHOUSE_ID` that Phase 6
+resolves.
 
 ### Check
 
 ```bash
 # Tables in the schema you granted in Phase 6?
 databricks tables list "$UC_CATALOG" "$UC_SCHEMA" --profile "$DB_PROFILE"
-# Empty output → note it and continue bootstrap. Tables present → proceed.
 ```
 
 Or, in a SQL warehouse session:
@@ -480,8 +491,71 @@ Or, in a SQL warehouse session:
 SHOW TABLES IN $UC_CATALOG.$UC_SCHEMA;
 ```
 
-If the check is empty, continue through Phases 7–9 (infra and guest login can
-still verify). At the end of this runbook, follow **Next steps — no UC data**.
+### Seed data and resolve a Genie space
+
+One script does all of it, and `scripts/bootstrap.sh` calls it identically, so the
+runbook and the automated runner cannot drift. It is safe to re-run: it never
+overwrites an existing table and never creates a second space.
+
+```bash
+cd "$REPO_DIR"
+
+# $SP_CLIENT_ID is the agent App's service principal, captured in Phase 5. Re-read
+# it if this is a fresh shell — the app needs CAN_RUN on whatever space we use.
+: "${SP_CLIENT_ID:=$(databricks apps get "$AGENT_APP_NAME" -o json --profile "$DB_PROFILE" \
+  | python3 -c 'import sys,json; print(json.load(sys.stdin).get("service_principal_client_id") or "")')}"
+
+# Captures SEED_STATUS / GENIE_SPACE_ID / GENIE_MCP_MODE into this shell.
+# Progress goes to stderr, so `eval` only ever consumes KEY=value lines.
+eval "$(bash scripts/genie-data-setup.sh \
+  --catalog "$UC_CATALOG" --schema "$UC_SCHEMA" --profile "$DB_PROFILE" \
+  --warehouse-id "${WAREHOUSE_ID:-}" \
+  --seed "${SEED_SAMPLE_DATA:-yes}" \
+  --space-ids "${GENIE_SPACE_IDS:-None}" \
+  --create-space "${CREATE_GENIE_SPACE:-yes}" \
+  --grant-guest "${GRANT_GUEST_SPACE_ACCESS:-no}" \
+  --guest-sp "${GUEST_SP_CLIENT_ID:-}" \
+  --agent-sp "$SP_CLIENT_ID")"
+
+echo "seed=$SEED_STATUS tables=$SEED_TABLE_COUNT mode=$GENIE_MCP_MODE space=$GENIE_SPACE_ID"
+store_secret GENIE_SPACE_ID "$GENIE_SPACE_ID"
+```
+
+`SEED_STATUS` tells you what happened, and each value is a deliberate outcome:
+
+| `SEED_STATUS` | Meaning |
+|---|---|
+| `seeded` | The schema was empty; sample tables were copied in |
+| `already-seeded` | Every sample table was already there — nothing was written |
+| `already-populated` | The schema holds **your** tables; bootstrap left them alone |
+| `declined` | You answered `no` at Phase 0 |
+| `source-unavailable` | `samples.wanderbricks` is not readable from this workspace |
+
+### Point the app at the space
+
+Only when `GENIE_MCP_MODE=space`. Phase 4 deployed the app before this phase, so
+the app does not yet know the space exists — the env var arrives with a redeploy.
+
+```bash
+if [ "$GENIE_MCP_MODE" = "space" ]; then
+  cd "$REPO_DIR/agent-build"
+  databricks bundle deploy --profile "$DB_PROFILE" -t dev \
+    --var "catalog=$UC_CATALOG" --var "schema=$UC_SCHEMA" \
+    --var "genie_mcp_mode=space" --var "genie_space_id=$GENIE_SPACE_ID"
+  databricks bundle run agent_openai_agents_sdk --profile "$DB_PROFILE" -t dev \
+    --var "catalog=$UC_CATALOG" --var "schema=$UC_SCHEMA" \
+    --var "genie_mcp_mode=space" --var "genie_space_id=$GENIE_SPACE_ID"
+fi
+```
+
+> **Pass both `--var`s or neither.** `agent.py` raises
+> `ValueError: GENIE_MCP_MODE=space requires GENIE_SPACE_ID` when the mode is
+> `space` and the id is empty, and the app fails to boot instead of falling back.
+> The bundle defaults (`one` / empty) are the safe pair, which is why a run that
+> resolved no space simply skips this block.
+
+If the schema is still empty after this phase, continue through Phases 7–9 (infra
+and guest login can still verify) and then follow **Next steps — no UC data**.
 
 ---
 
@@ -862,10 +936,20 @@ already has the app loaded can consume the link before you read it.
 
 ## Next steps — no UC data
 
-Apply this section **only if Phase 6c found no tables** in `$UC_CATALOG.$UC_SCHEMA`.
+Apply this section **only if `$UC_CATALOG.$UC_SCHEMA` is still empty after Phase 6c** —
+i.e. `SEED_STATUS` was `declined` (you answered `no` to `SEED_SAMPLE_DATA`) or
+`source-unavailable` (`samples.wanderbricks` is not readable from this workspace).
 Bootstrap can complete successfully — app, guest login, and memory may all work —
 but Genie will not answer data questions until queryable tables exist in a schema
 the agent SP can read.
+
+To seed after the fact, re-run just Phase 6c's script; it is idempotent:
+
+```bash
+cd "$REPO_DIR" && bash scripts/genie-data-setup.sh \
+  --catalog "$UC_CATALOG" --schema "$UC_SCHEMA" --profile "$DB_PROFILE" \
+  --seed yes --create-space yes --agent-sp "$SP_CLIENT_ID"
+```
 
 **Recommended next steps for the user:**
 
@@ -881,7 +965,10 @@ the agent SP can read.
    "does the panel load?"). Empty or evasive answers after data is loaded usually
    mean missing grants on the new schema/tables, not a broken deploy.
 
-Do not auto-create seed tables during bootstrap unless the user explicitly asks.
+Seeding is offered as a Phase 0 blocking ask (`SEED_SAMPLE_DATA`), so it is always
+the user's decision. Never seed a schema that already holds tables you did not
+create, and never overwrite an existing table — Phase 6c reports
+`already-populated` and leaves such a schema alone.
 
 ---
 

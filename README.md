@@ -256,23 +256,41 @@ built from the [`databricks/app-templates`](https://github.com/databricks/app-te
 `agent-openai-agents-sdk` template, vendored here as a git submodule under
 `vendor/app-templates`.
 
-### How the agent uses Genie One
+### How the agent uses Genie
 
-The agent answers data questions with **Genie One** — the workspace-wide unified
-Genie — served over the **Genie MCP** endpoint (`/api/2.0/mcp/genie`). The
-`ask_genie_one` tool (`agent/agent_server/genie_tools.py`) calls `genie_ask` and
-polls `genie_poll_response` until completion, authenticating with the agent App's
-service principal. It is **not** scoped to a single Genie space
-(`GENIE_MCP_MODE=one`; there is no `GENIE_SPACE_ID`).
+The agent answers data questions over the **Genie MCP** endpoint
+(`/api/2.0/mcp/genie`). The `ask_genie_one` tool
+(`agent/agent_server/genie_tools.py`) calls `genie_ask` and polls
+`genie_poll_response` until completion, authenticating with the agent App's
+service principal.
+
+Two backends are supported, chosen by `GENIE_MCP_MODE`:
+
+- **`one` (default)** — **Genie One**, the workspace-wide unified Genie. Not
+  scoped to any space; it discovers whatever the agent SP can read. Works on any
+  workspace with no extra setup.
+- **`space`** — a single Genie space named by `GENIE_SPACE_ID`. Answers are scoped
+  to that space's curated tables, joins, and instructions. BOOTSTRAP.md Phase 6c
+  sets this up when the user opts in, either creating a space over the agent's
+  schema or using space ids the user supplied at Phase 0.
 
 Genie is configured at the **agent App layer** in `agent/databricks.yml` (not the
 frontend `.env.local`):
 
 | Env var | Purpose |
 | --- | --- |
-| `GENIE_MCP_MODE=one` | Use Genie One (workspace-wide) rather than a specific space |
-| `DATABRICKS_HOST`, `DATABRICKS_WORKSPACE_ID` | **Auto-injected** by the Databricks Apps runtime — never set in the bundle. The frontend `/api/config` composes the "Powered by Genie · Genie One" attribution link from them as `${DATABRICKS_HOST}/one?o=${DATABRICKS_WORKSPACE_ID}` |
-| `GENIE_ONE_URL` | *Optional* override for the attribution link. Leave **unset**: it is derived from the two auto-injected vars above, so there is nothing to hand-edit per workspace (see "Derive — don't store" in `agent/databricks.yml`) |
+| `GENIE_MCP_MODE` | `one` for Genie One (workspace-wide), `space` for a single space. Bundle variable `genie_mcp_mode`, default `one` |
+| `GENIE_SPACE_ID` | Required when `GENIE_MCP_MODE=space`, empty otherwise. Bundle variable `genie_space_id`, default empty. **Move it with the mode**: `agent.py` raises `ValueError` on `space` + empty id and the app fails to boot |
+| `DATABRICKS_HOST`, `DATABRICKS_WORKSPACE_ID` | **Auto-injected** by the Databricks Apps runtime — never set in the bundle. The frontend `/api/config` composes the "Powered by Genie" attribution link from them: `${DATABRICKS_HOST}/one?o=${WORKSPACE_ID}` in `one` mode, `${DATABRICKS_HOST}/genie/rooms/${GENIE_SPACE_ID}?o=${WORKSPACE_ID}` in `space` mode (the UI labels it from the path, so it reads "Genie space" there) |
+| `GENIE_ONE_URL` | *Optional* override for the attribution link, honoured in `one` mode only. Leave **unset**: it is derived from the two auto-injected vars above, so there is nothing to hand-edit per workspace (see "Derive — don't store" in `agent/databricks.yml`) |
+
+Switching an existing deployment to a space means passing **both** variables:
+
+```bash
+databricks bundle deploy -t dev --profile "$DB_PROFILE" \
+  --var catalog="$UC_CATALOG" --var schema="$UC_SCHEMA" \
+  --var genie_mcp_mode=space --var genie_space_id=<space-id>
+```
 
 The `GENIE_INSTRUCTIONS` prompt (composed onto the agent's memory instructions in
 `agent/agent_server/agent.py`) forces Genie-first behavior for any question about

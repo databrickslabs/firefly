@@ -101,6 +101,9 @@ ANSWERS=(
   ""                                       # DB_PROFILE
   ""                                       # UC_CATALOG
   ""                                       # UC_SCHEMA
+  ""                                       # SEED_SAMPLE_DATA         (default yes)
+  ""                                       # GENIE_SPACE_IDS          (default None)
+  ""                                       # CREATE_GENIE_SPACE       (only asked when GENIE_SPACE_IDS is None)
   ""                                       # AGENT_APP_NAME
   ""                                       # LAKEBASE_NAME
   "00000000-0000-0000-0000-000000000000"   # DATABRICKS_ACCOUNT_ID (required)
