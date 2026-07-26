@@ -548,7 +548,18 @@ vercel link --project "$VERCEL_PROJECT" --scope "$VERCEL_TEAM" --yes --non-inter
 # Force the Next.js framework preset. A project created with framework:null builds
 # `next build` but Vercel serves the output as STATIC → every route 404s despite a
 # "Ready" deployment. PATCH the preset via the API (flips all routes 200).
-V_TOKEN=$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/Library/Application Support/com.vercel.cli/auth.json")))["token"])')
+# Token sources in order: explicit env (CI / non-interactive / a token-based setup),
+# then the CLI's store on macOS, then its XDG location. A single hardcoded path is a
+# silent 404 or a hard stop for anyone whose Vercel auth does not live there — and
+# ~/Library/.../auth.json only exists after an interactive `vercel login`.
+V_TOKEN="${VERCEL_TOKEN:-}"
+for _v_auth in "$HOME/Library/Application Support/com.vercel.cli/auth.json" \
+               "$HOME/.local/share/com.vercel.cli/auth.json"; do
+  [[ -n "$V_TOKEN" ]] && break
+  [[ -f "$_v_auth" ]] || continue
+  V_TOKEN=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("token",""))' "$_v_auth" 2>/dev/null || echo "")
+done
+[[ -n "$V_TOKEN" ]] || echo "WARNING: no Vercel token found; framework preset will not be set (routes may 404)"
 V_ORG=$(python3 -c "import json;print(json.load(open('$REPO_DIR/.vercel/project.json'))['orgId'])")
 V_PROJ=$(python3 -c "import json;print(json.load(open('$REPO_DIR/.vercel/project.json'))['projectId'])")
 curl -s -X PATCH "https://api.vercel.com/v9/projects/$V_PROJ?teamId=$V_ORG" \
@@ -727,6 +738,22 @@ databricks apps get "$AGENT_APP_NAME" -o json --profile "$DB_PROFILE" \
 # trust the proxy CA; without it curl returns 000 on the *.vercel.app origin.)
 PREVIEW_URL=$(read_secret PREVIEW_URL)
 GUEST_API_SECRET=$(read_secret GUEST_API_SECRET)
+
+# If you are in a NEW shell and state.env never got the value, do NOT try to recover it
+# with `vercel env pull`: encrypted vars come back as a redacted placeholder (~11 chars)
+# that looks like a value and fails every request with 401. The secret is write-only once
+# set, so the only recovery is to mint a new one, push it, and redeploy so the running
+# deployment picks it up. openssl rand -hex 64 gives 128 characters, so a short value is
+# always the placeholder.
+if [[ ${#GUEST_API_SECRET} -ne 128 ]]; then
+  echo "GUEST_API_SECRET is ${#GUEST_API_SECRET} chars, expected 128 — reminting"
+  GUEST_API_SECRET=$(openssl rand -hex 64)
+  vercel env rm  GUEST_API_SECRET production --yes --scope "$VERCEL_TEAM" 2>/dev/null || true
+  vercel env add GUEST_API_SECRET production --value "$GUEST_API_SECRET" \
+    --force --non-interactive --scope "$VERCEL_TEAM"
+  store_secret GUEST_API_SECRET "$GUEST_API_SECRET"
+  vercel deploy --prod --yes --scope "$VERCEL_TEAM" >/dev/null
+fi
 # Guest SP credentials (created in Phase 6b)
 GUEST_SP_CLIENT_ID=$(read_secret GUEST_SP_CLIENT_ID)
 GUEST_SP_SECRET=$(read_secret GUEST_SP_SECRET)
