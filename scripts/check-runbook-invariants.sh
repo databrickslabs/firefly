@@ -756,6 +756,31 @@ else
   bad "the bridge sets vars Phase 0a's confirmation cannot show:$CONFIRM_MISSING"
 fi
 
+# ── 29. What Phase 0 CLAIMS the sourced helpers do, they must actually do ──────
+# BOOTSTRAP.md said $HOME/bin and $HOME/.local/bin "are added to PATH in Phase 0",
+# and Phase 0a promised that re-sourcing the helpers restores a fresh shell. Both
+# were false: firefly_bridge_corp_network only mkdir'd the dirs and the export lived
+# in scripts/bootstrap.sh, which a reader following the runbook by hand never runs.
+# After Phase 1, databricks and uv were not findable and the reader had to invent an
+# export. A claim that only holds for the RUNNER is a defect for every human reader,
+# so prove it against the sourced helper -- in a fresh shell, the way a reader gets it.
+PATH_CLAIM_BAD=""
+if grep -qE 'added to .?PATH.? in Phase 0' BOOTSTRAP.md; then
+  for d in bin .local/bin; do
+    env -i HOME="$HOME" PATH="/usr/bin:/bin" bash -c "
+      cd '$PWD'
+      source scripts/lib/corp-network.sh >/dev/null 2>&1 || exit 1
+      FIREFLY_TRUST_PROXY_CA=1 firefly_bridge_corp_network >/dev/null 2>&1
+      case \":\$PATH:\" in *\":\$HOME/$d:\"*) exit 0 ;; *) exit 1 ;; esac
+    " || PATH_CLAIM_BAD="$PATH_CLAIM_BAD \$HOME/$d"
+  done
+fi
+if [[ -z "$PATH_CLAIM_BAD" ]]; then
+  pass "the dirs Phase 0 claims to put on PATH are on PATH after sourcing the helpers."
+else
+  bad "BOOTSTRAP.md claims Phase 0 adds these to PATH, but sourcing the helpers does not:$PATH_CLAIM_BAD"
+fi
+
 echo
 if [[ "$FAILED" -eq 0 ]]; then
   echo "All runbook invariants hold."

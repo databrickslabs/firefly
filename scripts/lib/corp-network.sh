@@ -336,9 +336,30 @@ firefly_preflight_npm_registry() {
 #   FIREFLY_TRUST_PROXY_CA=1   auto-trust a detected proxy CA without prompting
 #   TLS_PEM_PATH=<path>        use a CA bundle you already have
 firefly_bridge_corp_network() {
-  # $HOME/bin holds the gh / databricks / uv binaries installed in Phase 1, and $HOME/bin
-  # is on PATH from Phase 0 onward — so it has to exist before anything writes to it.
+  # $HOME/bin holds the gh / databricks binaries installed in Phase 1 and
+  # $HOME/.local/bin holds uv's, so both have to exist before anything writes to them.
   mkdir -p "$HOME/bin" "$HOME/.local/bin" 2>/dev/null || true
+
+  # ...and both have to be ON PATH, here, in the sourced helper.
+  #
+  # This function used to only mkdir them while the comment claimed they were "on PATH
+  # from Phase 0 onward" and the runbook told readers the same thing. The export in fact
+  # lived in scripts/bootstrap.sh, which a reader following BOOTSTRAP.md by hand never
+  # runs. So Phase 0a's promise — that re-sourcing this file restores a fresh shell —
+  # was false for the one thing every later phase depends on: after Phase 1, databricks
+  # and uv were simply not findable, and the reader had to invent
+  # `export PATH="$HOME/bin:$HOME/.local/bin:$PATH"` at the top of every new shell.
+  #
+  # Prepended idempotently: this file gets re-sourced once per shell across ten phases,
+  # and a naive prepend would grow PATH without bound.
+  for _ffdir in "$HOME/bin" "$HOME/.local/bin"; do
+    case ":$PATH:" in
+      *":$_ffdir:"*) ;;
+      *) PATH="$_ffdir:$PATH" ;;
+    esac
+  done
+  unset _ffdir
+  export PATH
 
   # uv ships its OWN bundled cert store (rustls/webpki) and ignores the OS keychain by
   # default, so it rejects an intercepting proxy's cert (UnknownIssuer) even when Node
