@@ -616,6 +616,28 @@ else
   bad "output that reads like a failure but is not is left unexplained:$NOISE_DOC_BAD"
 fi
 
+# ── 26. No command may run before the tool it needs is installed. ───────────
+# I added an IP-allowlist check to Phase 0 so it would be seen early, and it called
+# `databricks` — which Phase 1b installs. It could not run as written; the E2E agent
+# had to defer it. Early placement is worthless if the step cannot execute there.
+ORDER_BAD=""
+python3 - <<'PYCHK' || ORDER_BAD="$ORDER_BAD BOOTSTRAP.md(databricks-used-before-install)"
+import re, sys
+t = open('BOOTSTRAP.md').read()
+install = t.find('firefly_install_databricks_cli')
+if install == -1:
+    sys.exit(0)                        # nothing to order against
+# Any `databricks ...` invocation inside a bash block before the install is a bug.
+for m in re.finditer(r'^\s*databricks\s+\S', t[:install], re.M):
+    sys.exit(1)
+sys.exit(0)
+PYCHK
+if [[ -z "$ORDER_BAD" ]]; then
+  pass "no runbook step invokes the databricks CLI before Phase 1b installs it."
+else
+  bad "a step runs before the tool that runs it exists:$ORDER_BAD"
+fi
+
 # ── 15. The runner itself must parse, under bash AND zsh. ────────────────────
 # Invariant 5 checks every ```bash block in BOOTSTRAP.md and sources the shared
 # libs, but nothing ever ran `bash -n` on scripts/bootstrap.sh. A stray edit left

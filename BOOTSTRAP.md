@@ -67,24 +67,6 @@ FIREFLY_TRUST_PROXY_CA=1 firefly_bridge_corp_network   # or: TLS_PEM_PATH=<path>
 > Do **not** work around a blocked registry with `--registry https://registry.npmjs.org`
 > or by disabling TLS verification.
 
-### 0b. Does this workspace enforce an IP allowlist? — **check now, not at Phase 9**
-
-Phases 1–8 all succeed against a workspace with an enabled IP allowlist. The app
-deploys, the frontend deploys, guest login works — and then every Databricks data
-call from Vercel 403s. Phase 9 reports it, which is far enough in that people have
-read the failure as an application bug. One command up front costs nothing:
-
-```bash
-databricks api get /api/2.0/ip-access-lists --profile "$DB_PROFILE" 2>/dev/null \
-  | python3 -c "import sys,json; d=json.load(sys.stdin) or {}; \
-    e=[l['label'] for l in (d.get('ip_access_lists') or []) if l.get('enabled')]; \
-    print('ENABLED allowlist(s):', e) if e else print('no enabled IP allowlist')"
-```
-
-If any are enabled, Vercel's egress must be allowed or the data plane will refuse
-it. That is a network decision, not something this runbook can fix — see
-"Enterprise network controls" below. Everything else still works.
-
 ### Required inputs — confirm each before proceeding to Phase 1
 
 - [ ] **[ASK — REQUIRED, BLOCKING]** `DATABRICKS_HOST` — workspace URL (e.g. `https://dbc-xxxx.cloud.databricks.com`)
@@ -167,6 +149,19 @@ firefly_install_databricks_cli   # no-op if present; installs the official relea
 databricks auth login --host "$DATABRICKS_HOST" --profile "$DB_PROFILE"
 # Opens browser → U2M OAuth → ~/.databrickscfg. (databricks has no "already authed" guard;
 # re-running just refreshes.) Smoke-test: databricks workspace list / --profile "$DB_PROFILE"
+
+# Does this workspace enforce an IP allowlist? Asked HERE — the first point where
+# the CLI exists and is authenticated — and not at Phase 9, because Phases 1-8 all
+# succeed with one enabled: the app deploys, the frontend deploys, guest login
+# works, and then every Databricks data call from Vercel 403s. Meeting that after
+# everything looks fine is how it gets misread as an application bug.
+databricks api get /api/2.0/ip-access-lists --profile "$DB_PROFILE" 2>/dev/null \
+  | python3 -c "import sys,json; d=json.load(sys.stdin) or {}; \
+    e=[l['label'] for l in (d.get('ip_access_lists') or []) if l.get('enabled')]; \
+    print('ENABLED IP allowlist(s):', e) if e else print('no enabled IP allowlist')"
+# If any are enabled, Vercel's egress must be allowed or the data plane refuses it.
+# That is a network decision this runbook cannot make — see "Enterprise network
+# controls". Everything else still works.
 ```
 
 ### 1c. Neon CLI OAuth (skip if already authed)
