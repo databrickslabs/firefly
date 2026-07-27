@@ -52,6 +52,13 @@ _ff_is_func init_inputs_dir || \
 # `packageManager` field in package.json.
 : "${PNPM_VERSION:=10.34.5}"
 
+# Silence pnpm's/npm's update notifier. It advertises "Update available! 10.34.5 ->
+# 12.0.0-alpha.16" — the EXACT alpha this pin exists to avoid, because it ignores
+# onlyBuiltDependencies and fails with ERR_PNPM_IGNORED_BUILDS. A tool telling the
+# reader to upgrade to the one version that breaks the build is worse than noise:
+# following its advice is the failure. Both pnpm and npm honour this.
+export NPM_CONFIG_UPDATE_NOTIFIER=false
+
 # ─── TLS trust for intercepting proxies ──────────────────────────────────────
 # Python (quickstart, Databricks SDK), Node, curl and uv each consult a different trust
 # store, so an intercepting proxy has to be bridged into all of them.

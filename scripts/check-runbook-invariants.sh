@@ -573,6 +573,23 @@ else
   bad "the summary could name a Lakebase project that was never created:$LB_TRUTH_BAD"
 fi
 
+# ── 24. A tool must not advertise the version the pin forbids. ──────────────
+# pnpm prints "Update available! 10.34.5 -> 12.0.0-alpha.16" — the exact alpha the
+# pin exists to avoid, because it ignores onlyBuiltDependencies and fails with
+# ERR_PNPM_IGNORED_BUILDS. A reader who follows the tool's own advice breaks the
+# build, so the banner is suppressed and the runbook says to ignore it if it slips
+# through.
+PIN_ADVERT_BAD=""
+grep -q 'NPM_CONFIG_UPDATE_NOTIFIER' scripts/lib/corp-network.sh \
+  || PIN_ADVERT_BAD="$PIN_ADVERT_BAD corp-network.sh(notifier-not-suppressed)"
+grep -qE 'Update available|IGNORE IT' BOOTSTRAP.md \
+  || PIN_ADVERT_BAD="$PIN_ADVERT_BAD BOOTSTRAP.md(banner-not-documented)"
+if [[ -z "$PIN_ADVERT_BAD" ]]; then
+  pass "pnpm's update banner cannot lead a reader onto the version the pin forbids."
+else
+  bad "a tool advertises the one version that breaks the build:$PIN_ADVERT_BAD"
+fi
+
 # ── 15. The runner itself must parse, under bash AND zsh. ────────────────────
 # Invariant 5 checks every ```bash block in BOOTSTRAP.md and sources the shared
 # libs, but nothing ever ran `bash -n` on scripts/bootstrap.sh. A stray edit left

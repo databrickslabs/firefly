@@ -129,6 +129,11 @@ firefly_preflight_npm_registry     # from Phase 0a
 corepack disable >/dev/null 2>&1 || true   # an enabled corepack shim shadows this install
 npm install -g pnpm@10.34.5
 pnpm --version                              # must print 10.34.5
+
+# If pnpm still prints "Update available! 10.34.5 -> 12.0.0-alpha.16", IGNORE IT.
+# That alpha is precisely what the pin avoids. Phase 0a exports
+# NPM_CONFIG_UPDATE_NOTIFIER=false to suppress the banner; it can reappear in a
+# shell that skipped Phase 0a.
 ```
 
 > **Do not use `corepack enable` / `corepack prepare` here (ENV-0).** corepack fetches its
@@ -152,6 +157,9 @@ databricks auth login --host "$DATABRICKS_HOST" --profile "$DB_PROFILE"
 command -v neonctl || npm install -g neonctl
 if ! neonctl me &>/dev/null; then neonctl auth; fi   # only opens browser if needed
 neonctl me                                           # smoke-test / show identity
+# `Projects Limit: 0` in that output is NOT "you cannot create projects" — it is
+# an unset quota field. Project create and reuse both work with it at 0; Phase 7
+# proves it. Do not go looking for a plan upgrade.
 ```
 
 ### 1d. Vercel CLI OAuth (skip if already authed)
