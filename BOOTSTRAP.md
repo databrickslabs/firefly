@@ -254,6 +254,12 @@ uv run --python 3.12 python scripts/quickstart.py \
 # quickstart writes agent-build/.env with PGHOST/PGUSER/PGDATABASE/LAKEBASE_*
 # and patches agent-build/databricks.yml with the new experiment ID and Lakebase refs.
 
+# An existing --app-name wins over --lakebase-create-new: quickstart reuses the
+# app's own Lakebase binding and never creates the requested project, while every
+# later summary would still print $LAKEBASE_NAME. Reconcile so the name you are
+# told is the name that exists.
+firefly_reconcile_lakebase .
+
 # Confirm it actually finished before leaving this phase (see the warning below).
 assert_bundle_quickstart_ran databricks.yml || return 2>/dev/null || exit 1
 ```

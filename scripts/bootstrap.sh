@@ -595,6 +595,10 @@ fi
 note "Lakebase provisioning takes several minutes; let this finish before Phase 4."
 run "cd '$REPO_DIR/agent-build' && uv run --python 3.12 python scripts/quickstart.py \
   --profile '$DB_PROFILE' ${LB_ARG} --app-name '$AGENT_APP_NAME'"
+
+# An existing --app-name wins over --lakebase-create-new, so the requested project
+# may never be created while the summary still names it. Let reality win.
+[[ "$DRY_RUN" == "false" ]] && firefly_reconcile_lakebase "$REPO_DIR/agent-build"
 # Completion test, not a formality: quickstart rewrites experiment_id in the bundle, so
 # this is the one observable that distinguishes "finished" from "still running" or
 # "exited early". A wrapper that backgrounds long commands returns 0 either way.

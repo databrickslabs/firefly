@@ -547,6 +547,32 @@ else
   bad "uv would install an unverified binary on macOS 14 and earlier:$SHA_SHIM_BAD"
 fi
 
+# ── 23. The reported Lakebase must be the one that exists. ──────────────────
+# Passing --app-name for an app that already exists makes quickstart bind Lakebase
+# from that app and ignore --lakebase-create-new. The requested project is never
+# created, Phase 3a still reports PASS, and the summary names a resource that was
+# never created. Observed across two passes of one run: created
+# firefly-lb-0727083127, reported firefly-lb-0727090103.
+LB_TRUTH_BAD=""
+grep -q 'firefly_reconcile_lakebase()' scripts/lib/runbook.sh \
+  || LB_TRUTH_BAD="$LB_TRUTH_BAD runbook.sh(no-reconcile-helper)"
+for f in BOOTSTRAP.md scripts/bootstrap.sh; do
+  grep -q 'firefly_reconcile_lakebase' "$f" || LB_TRUTH_BAD="$LB_TRUTH_BAD $f(does-not-reconcile)"
+  # The reconcile must run AFTER quickstart, or there is nothing to read.
+  python3 - "$f" <<'PYCHK' || LB_TRUTH_BAD="$LB_TRUTH_BAD $f(reconcile-before-quickstart)"
+import sys
+t = open(sys.argv[1]).read()
+qs = t.find('quickstart.py')
+rc = t.find('firefly_reconcile_lakebase')
+sys.exit(0 if (qs != -1 and rc != -1 and qs < rc) else 1)
+PYCHK
+done
+if [[ -z "$LB_TRUTH_BAD" ]]; then
+  pass "the reported Lakebase name is reconciled against the one quickstart bound."
+else
+  bad "the summary could name a Lakebase project that was never created:$LB_TRUTH_BAD"
+fi
+
 # ── 15. The runner itself must parse, under bash AND zsh. ────────────────────
 # Invariant 5 checks every ```bash block in BOOTSTRAP.md and sources the shared
 # libs, but nothing ever ran `bash -n` on scripts/bootstrap.sh. A stray edit left

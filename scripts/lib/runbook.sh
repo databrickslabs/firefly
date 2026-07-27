@@ -335,6 +335,47 @@ for row in ((d.get("result") or {}).get("data_array") or []):
 '
 }
 
+# ─── Lakebase: report what got BOUND, not what was asked for ─────────────────
+# Passing --app-name for an app that already exists makes quickstart bind Lakebase
+# from that app's existing configuration and ignore --lakebase-create-new. The
+# requested project is never created, Phase 3a still reports PASS, and every later
+# summary prints LAKEBASE_NAME — a resource that does not exist. Observed across
+# two passes: pass 1 created firefly-lb-0727083127, pass 2 asked for
+# firefly-lb-0727090103, quickstart bound the first, and the summary named the
+# second.
+#
+# The bound project is discoverable: quickstart writes agent-build/.env and
+# patches databricks.yml, and both carry the endpoint path
+# `projects/<name>/branches/<name>-branch/...`. Read the name out of that rather
+# than trusting the request.
+firefly_bound_lakebase() {               # firefly_bound_lakebase [agent_build_dir]
+  local dir="${1:-${REPO_DIR:-$PWD}/agent-build}" f
+  for f in "$dir/.env" "$dir/databricks.yml"; do
+    [ -f "$f" ] || continue
+    sed -nE 's|.*projects/([A-Za-z0-9_-]+)/branches/.*|\1|p' "$f" | head -1 | grep . && return 0
+  done
+  return 1
+}
+
+# Reconcile the request against reality and let reality win, loudly.
+firefly_reconcile_lakebase() {            # firefly_reconcile_lakebase [agent_build_dir]
+  local bound
+  bound="$(firefly_bound_lakebase "$@" 2>/dev/null)" || {
+    warn "could not determine which Lakebase project quickstart bound"
+    return 0
+  }
+  if [ -n "$bound" ] && [ "$bound" != "${LAKEBASE_NAME:-}" ]; then
+    warn "quickstart bound Lakebase '$bound', NOT the requested '${LAKEBASE_NAME:-}'."
+    note "An existing --app-name wins over --lakebase-create-new: the app's own"
+    note "Lakebase binding is reused and the requested project is never created."
+    note "Reporting the bound name from here on, so the summary matches reality."
+    LAKEBASE_NAME="$bound"
+    export LAKEBASE_NAME
+  else
+    ok "Lakebase '$bound' matches the requested name"
+  fi
+}
+
 # ─── sha256sum shim (Phase 1: before the uv installer) ───────────────────────
 # The astral.sh uv installer verifies its own download with `sha256sum`, which
 # does not exist on stock macOS — the tool there is `shasum`. So it prints
