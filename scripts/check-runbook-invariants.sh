@@ -439,13 +439,22 @@ fi
 
 # ── 18. Phase 5 must say the preview is missing, not fail opaquely. ─────────
 # The most-reported gap across E2E runs (9 of 12).
+# The first attempt at this was a PROBE of /api/2.0/memory-stores. That path
+# returns "Error: Not Found", which matched none of its patterns, so it reported
+# the preview as ENABLED on a workspace where setup then failed. Both surfaces
+# must run the operation and classify the failure, and must not reintroduce the
+# probe.
 MEM_BAD=""
-grep -q 'Managed Memory' BOOTSTRAP.md || MEM_BAD="$MEM_BAD BOOTSTRAP.md(no-preflight)"
-grep -q 'MEMORY_PREVIEW' scripts/bootstrap.sh || MEM_BAD="$MEM_BAD bootstrap.sh(no-preflight)"
+for f in BOOTSTRAP.md scripts/bootstrap.sh; do
+  grep -qE 'not enabled\|NotImplemented\|preview' "$f" \
+    || MEM_BAD="$MEM_BAD $f(does-not-classify-the-failure)"
+  grep -qE 'api get /api/2\.0/memory-stores' "$f" \
+    && MEM_BAD="$MEM_BAD $f(broken-probe-is-back)"
+done
 if [[ -z "$MEM_BAD" ]]; then
-  pass "Phase 5 preflights the Managed Memory preview and degrades with a message."
+  pass "Phase 5 attempts the setup and classifies the failure (no unreliable probe)."
 else
-  bad "Phase 5 still fails opaquely when the preview is off:$MEM_BAD"
+  bad "Phase 5 cannot tell a missing preview from a real error:$MEM_BAD"
 fi
 
 # ── 19. The SQL grants must be executable, not prose. ───────────────────────

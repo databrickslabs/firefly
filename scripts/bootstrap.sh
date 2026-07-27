@@ -714,23 +714,30 @@ note "App service principal: $SP_CLIENT_ID"
 # in E2E runs (9 of 12) purely because the runbook charged ahead and failed
 # opaquely. Say so up front, and let the rest of the bootstrap finish — only
 # cross-session memory is lost.
-MEMORY_PREVIEW=on
-if [[ "$DRY_RUN" == "false" ]]; then
-  if databricks api get /api/2.0/memory-stores --profile "$DB_PROFILE" 2>&1 \
-       | grep -qiE 'not enabled|NotImplemented|501'; then
-    MEMORY_PREVIEW=off
-  fi
-fi
-
-if [[ "$MEMORY_PREVIEW" == "off" ]]; then
-  warn "Managed Memory for Agents preview is NOT enabled on this workspace."
-  note "Skipping Phase 5. Enable the preview, then re-run this phase."
-  note "The agent still runs; it just has no cross-session memory."
+# Attempt, then classify. An earlier version probed /api/2.0/memory-stores and
+# read a clean response as "preview on" — that path returns `Error: Not Found`,
+# which matched none of its patterns, so it declared the preview ENABLED on a
+# workspace where setup then failed with NotImplemented. A preflight that cannot
+# detect the state it exists to detect is worse than none. The operation itself
+# is the only reliable signal.
+if [[ "$DRY_RUN" == "true" ]]; then
+  note "[DRY-RUN] setup_memory_store.py $SP_CLIENT_ID"
 else
-  run "cd '$REPO_DIR/agent-build' && \
-    uv run --python 3.12 python scripts/setup_memory_store.py '$SP_CLIENT_ID' \
-      --memory-store '$UC_CATALOG.$UC_SCHEMA.firefly_managed_memory' \
-      --profile '$DB_PROFILE'"
+  MEM_LOG="$(mktemp)"
+  if (cd "$REPO_DIR/agent-build" && \
+        uv run --python 3.12 python scripts/setup_memory_store.py "$SP_CLIENT_ID" \
+          --memory-store "$UC_CATALOG.$UC_SCHEMA.firefly_managed_memory" \
+          --profile "$DB_PROFILE") >"$MEM_LOG" 2>&1; then
+    ok "UC managed memory store configured"
+  elif grep -qiE 'not enabled|NotImplemented|preview' "$MEM_LOG"; then
+    warn "Managed Memory for Agents preview is NOT enabled on this workspace."
+    note "Skipping Phase 5 — the preview is enabled per-workspace by Databricks."
+    note "The agent still runs; it just has no cross-session memory."
+  else
+    fail "Phase 5 failed for a reason other than the preview:"
+    sed 's/^/    /' "$MEM_LOG" >&2
+  fi
+  rm -f "$MEM_LOG"
 fi
 
 fi

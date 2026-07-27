@@ -398,21 +398,29 @@ SP_CLIENT_ID=$(databricks apps get "$AGENT_APP_NAME" -o json \
     d=json.load(sys.stdin); \
     print(d['service_principal_client_id'])")
 
-# Preflight: is the preview on? A 501/NotImplemented here means it is not.
-MEMORY_PREVIEW=$(databricks api get /api/2.0/memory-stores --profile "$DB_PROFILE" 2>&1 \
-  | grep -qiE 'not enabled|NotImplemented|501' && echo off || echo on)
-echo "Managed Memory preview: $MEMORY_PREVIEW"
-
-if [ "$MEMORY_PREVIEW" = "off" ]; then
-  echo "SKIPPING Phase 5 — enable the 'Managed Memory for Agents' preview on this"
-  echo "workspace, then re-run this phase. Bootstrap continues; the agent will run"
-  echo "without cross-session memory until then."
+# Attempt the real thing, then classify the failure. An earlier version probed
+# /api/2.0/memory-stores and treated a clean response as "preview on" — but that
+# path returns `Error: Not Found`, which matched none of its patterns, so it
+# reported the preview as ENABLED on a workspace where setup then failed with
+# NotImplemented. A preflight that cannot detect the state it exists to detect is
+# worse than none: it adds a confident wrong answer. The operation itself is the
+# only reliable signal, so run it and read what comes back.
+cd "$REPO_DIR/agent-build"
+MEM_LOG=$(mktemp)
+if uv run --python 3.12 python scripts/setup_memory_store.py "$SP_CLIENT_ID" \
+     --memory-store "$UC_CATALOG.$UC_SCHEMA.firefly_managed_memory" \
+     --profile "$DB_PROFILE" >"$MEM_LOG" 2>&1; then
+  echo "✓ UC managed memory store configured"
+elif grep -qiE 'not enabled|NotImplemented|preview' "$MEM_LOG"; then
+  echo "⚠ SKIPPING Phase 5 — the 'Managed Memory for Agents' preview is not enabled"
+  echo "  on this workspace. It is enabled per-workspace by Databricks; there is"
+  echo "  nothing to do from here. Bootstrap continues and the agent still runs —"
+  echo "  it just has no cross-session memory. Re-run this phase once it is on."
 else
-  cd "$REPO_DIR/agent-build"
-  uv run --python 3.12 python scripts/setup_memory_store.py "$SP_CLIENT_ID" \
-    --memory-store "$UC_CATALOG.$UC_SCHEMA.firefly_managed_memory" \
-    --profile "$DB_PROFILE"
+  echo "✗ Phase 5 failed for a reason other than the preview:" >&2
+  cat "$MEM_LOG" >&2
 fi
+rm -f "$MEM_LOG"
 # The UC memory store is a distinct securable — not Lakebase, not auto-created.
 # setup_memory_store.py calls the REST API directly (no CLI equivalent).
 ```
