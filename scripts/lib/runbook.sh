@@ -456,6 +456,18 @@ firefly_warn_existing_app_wins() {        # firefly_warn_existing_app_wins <app>
     warn "app '$app' already exists, so ITS Lakebase binding will win here."
     note "--lakebase-create-new will not provision '${LAKEBASE_NAME:-}'; the name is"
     note "reconciled after quickstart and the summary will show what was bound."
+  else
+    # The opposite case needs pre-empting too. quickstart.py answers --app-name for
+    # an app that does not exist with
+    #     Could not fetch app details: App with name '<app>' does not exist or is deleted
+    # and then suggests `databricks bundle deployment bind` / `bundle deploy`. On a
+    # first run that reads like a recovery path for an app someone deleted, when the
+    # truth is that nothing is wrong and Phase 4 has not created it yet. Say so
+    # before the message appears rather than leaving the reader to interpret it.
+    note "app '$app' does not exist yet - expected on a first run."
+    note "quickstart will print \"does not exist or is deleted\" and suggest"
+    note "\`bundle deployment bind\`. Ignore both: Phase 4 creates the app. No bind"
+    note "step is needed, and a fresh Lakebase WILL be provisioned as requested."
   fi
 }
 

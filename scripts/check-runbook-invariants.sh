@@ -781,6 +781,27 @@ else
   bad "BOOTSTRAP.md claims Phase 0 adds these to PATH, but sourcing the helpers does not:$PATH_CLAIM_BAD"
 fi
 
+# ── 30. quickstart's first-run "does not exist or is deleted" must be pre-empted ─
+# With --app-name, quickstart.py answers a not-yet-created app with
+#   Could not fetch app details: App with name '...' does not exist or is deleted
+# and suggests `databricks bundle deployment bind` / `bundle deploy`. That is the
+# normal first-run state -- Phase 4 creates the app -- but it reads as a recovery
+# path for an app someone deleted, and a run reported chasing it. Technically
+# accurate output that points at the wrong problem costs the same as an error.
+FIRSTRUN_BAD=""
+grep -q 'does not exist or is deleted' scripts/lib/runbook.sh \
+  || FIRSTRUN_BAD="$FIRSTRUN_BAD runbook.sh(no-preempt)"
+grep -q 'does not exist or is deleted' BOOTSTRAP.md \
+  || FIRSTRUN_BAD="$FIRSTRUN_BAD BOOTSTRAP.md(undocumented)"
+# The pre-empt is worthless if it only fires when the app EXISTS.
+sed -n '/^firefly_warn_existing_app_wins()/,/^}/p' scripts/lib/runbook.sh | grep -q 'else' \
+  || FIRSTRUN_BAD="$FIRSTRUN_BAD warn_existing_app_wins(no-absent-branch)"
+if [[ -z "$FIRSTRUN_BAD" ]]; then
+  pass "quickstart's first-run 'does not exist or is deleted' noise is pre-empted."
+else
+  bad "a first run will chase quickstart's bind suggestion:$FIRSTRUN_BAD"
+fi
+
 echo
 if [[ "$FAILED" -eq 0 ]]; then
   echo "All runbook invariants hold."

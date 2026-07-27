@@ -296,9 +296,15 @@ else
   LB_ARG=(--lakebase-create-new "$LAKEBASE_NAME")           # create new
 fi
 
-# If the app already exists its Lakebase binding wins, so say that BEFORE the run
-# rather than letting the create path look like it will provision the named
-# instance until the post-hoc warning appears.
+# Say which way this will go BEFORE the run, because quickstart's own output is
+# misleading in BOTH directions:
+#   * app exists     -> ITS Lakebase binding wins and --lakebase-create-new is
+#                       silently ignored, while later summaries still print the name
+#                       that was asked for.
+#   * app absent     -> quickstart prints "Could not fetch app details: App with
+#                       name '...' does not exist or is deleted" and suggests
+#                       `databricks bundle deployment bind`. On a first run nothing
+#                       is wrong: Phase 4 creates the app, and no bind is needed.
 firefly_warn_existing_app_wins "$AGENT_APP_NAME" "$DB_PROFILE"
 
 # Pass --app-name so quickstart does NOT interactively prompt to bind an app.
