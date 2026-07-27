@@ -371,8 +371,40 @@ firefly_reconcile_lakebase() {            # firefly_reconcile_lakebase [agent_bu
     note "Reporting the bound name from here on, so the summary matches reality."
     LAKEBASE_NAME="$bound"
     export LAKEBASE_NAME
+    # An in-shell export is not enough. Non-secret answers are re-sourced from
+    # inputs.env on a later shell or a resumed run, which would resurrect the
+    # requested-but-never-created name in the summary. Persist the truth.
+    firefly_store_input LAKEBASE_NAME "$bound"
   else
     ok "Lakebase '$bound' matches the requested name"
+  fi
+}
+
+# Persist a non-secret answer to inputs.env, the file a resumed run re-sources.
+# bootstrap.sh has its own store_input; this is the library equivalent so the
+# runbook and anything sourcing this lib can persist too, instead of the value
+# living only in one shell.
+firefly_store_input() {                  # firefly_store_input KEY VALUE
+  local key="$1" val="$2" dir file
+  [ -n "$key" ] || return 1
+  dir="${INPUTS_DIR:-$HOME/.firefly-bootstrap}"
+  file="$dir/inputs.env"
+  mkdir -p "$dir" 2>/dev/null || return 1
+  [ -f "$file" ] && grep -v "^${key}=" "$file" > "$file.tmp" 2>/dev/null && mv "$file.tmp" "$file"
+  printf '%s=%s\n' "$key" "$val" >> "$file"
+}
+
+# Set expectations BEFORE quickstart runs, not after it has surprised you.
+# The create path reads as though it will provision the named instance right up
+# until the post-hoc warning appears; if the app already exists, its binding is
+# going to win and that is knowable in advance.
+firefly_warn_existing_app_wins() {        # firefly_warn_existing_app_wins <app> <profile>
+  local app="$1" prof="$2"
+  [ -n "$app" ] && [ -n "$prof" ] || return 0
+  if databricks apps get "$app" --profile "$prof" >/dev/null 2>&1; then
+    warn "app '$app' already exists, so ITS Lakebase binding will win here."
+    note "--lakebase-create-new will not provision '${LAKEBASE_NAME:-}'; the name is"
+    note "reconciled after quickstart and the summary will show what was bound."
   fi
 }
 

@@ -593,6 +593,8 @@ else
   LB_ARG="--lakebase-create-new '${LAKEBASE_NAME}'"
 fi
 note "Lakebase provisioning takes several minutes; let this finish before Phase 4."
+[[ "$DRY_RUN" == "false" ]] && firefly_warn_existing_app_wins "$AGENT_APP_NAME" "$DB_PROFILE"
+
 run "cd '$REPO_DIR/agent-build' && uv run --python 3.12 python scripts/quickstart.py \
   --profile '$DB_PROFILE' ${LB_ARG} --app-name '$AGENT_APP_NAME'"
 

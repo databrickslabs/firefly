@@ -567,8 +567,18 @@ rc = t.find('firefly_reconcile_lakebase')
 sys.exit(0 if (qs != -1 and rc != -1 and qs < rc) else 1)
 PYCHK
 done
+# The reconciled name must PERSIST. An in-shell export is lost when a resumed run
+# re-sources inputs.env, which resurrects the requested-but-never-created name.
+grep -q 'firefly_store_input LAKEBASE_NAME' scripts/lib/runbook.sh \
+  || LB_TRUTH_BAD="$LB_TRUTH_BAD runbook.sh(reconciled-name-not-persisted)"
+# And the create path must not read as though it will provision the name, right up
+# until a post-hoc warning. Say it in advance when the app already exists.
+for f in BOOTSTRAP.md scripts/bootstrap.sh; do
+  grep -q 'firefly_warn_existing_app_wins' "$f" \
+    || LB_TRUTH_BAD="$LB_TRUTH_BAD $f(no-advance-warning)"
+done
 if [[ -z "$LB_TRUTH_BAD" ]]; then
-  pass "the reported Lakebase name is reconciled against the one quickstart bound."
+  pass "the reported Lakebase name is reconciled, persisted, and pre-announced."
 else
   bad "the summary could name a Lakebase project that was never created:$LB_TRUTH_BAD"
 fi

@@ -255,6 +255,11 @@ else
   LB_ARG=(--lakebase-create-new "$LAKEBASE_NAME")           # create new
 fi
 
+# If the app already exists its Lakebase binding wins, so say that BEFORE the run
+# rather than letting the create path look like it will provision the named
+# instance until the post-hoc warning appears.
+firefly_warn_existing_app_wins "$AGENT_APP_NAME" "$DB_PROFILE"
+
 # Pass --app-name so quickstart does NOT interactively prompt to bind an app.
 uv run --python 3.12 python scripts/quickstart.py \
   --profile "$DB_PROFILE" "${LB_ARG[@]}" --app-name "$AGENT_APP_NAME"
