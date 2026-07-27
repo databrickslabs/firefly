@@ -590,7 +590,19 @@ store_secret GENIE_SPACE_ID "$GENIE_SPACE_ID"
 | `already-seeded` | Every sample table was already there — nothing was written |
 | `already-populated` | The schema holds **your** tables; bootstrap left them alone |
 | `declined` | You answered `no` at Phase 0 |
-| `source-unavailable` | `samples.wanderbricks` is not readable from this workspace |
+| `source-not-ready` | `samples.wanderbricks` does not exist **yet**. Not a permissions problem — a new workspace provisions the samples catalog asynchronously, and this phase can win the race. Re-run it in a few minutes |
+| `source-empty` | The schema exists but reported no tables. Same remedy: re-run |
+| `source-denied` | A real permission block. Grant `SELECT` on the source, or answer `no` to `SEED_SAMPLE_DATA` |
+| `source-error` | Something else failed; the server's message is printed alongside |
+
+> **`source-not-ready` is the common one on a fresh workspace, and it is not
+> fatal.** Phase 6c waits up to 180 seconds (`FIREFLY_SEED_SOURCE_WAIT`) for the
+> samples catalog to appear, because a new workspace provisions it asynchronously
+> and this phase can arrive first. If it still gives up, the data is late rather
+> than missing — confirm with
+> `databricks tables list samples wanderbricks --profile "$DB_PROFILE"`, then
+> re-run this phase. Do not go looking for entitlements: a genuine permission
+> problem reports `source-denied`.
 
 ### Point the app at the space
 
@@ -1015,11 +1027,15 @@ already has the app loaded can consume the link before you read it.
 ## Next steps — no UC data
 
 Apply this section **only if `$UC_CATALOG.$UC_SCHEMA` is still empty after Phase 6c** —
-i.e. `SEED_STATUS` was `declined` (you answered `no` to `SEED_SAMPLE_DATA`) or
-`source-unavailable` (`samples.wanderbricks` is not readable from this workspace).
+i.e. `SEED_STATUS` was `declined` (you answered `no` to `SEED_SAMPLE_DATA`),
+`source-denied` (no `SELECT` on the sample source), or `source-error`.
 Bootstrap can complete successfully — app, guest login, and memory may all work —
 but Genie will not answer data questions until queryable tables exist in a schema
 the agent SP can read.
+
+> If `SEED_STATUS` was `source-not-ready` or `source-empty`, **do not follow this
+> section** — nothing is wrong with your entitlements. The samples catalog had not
+> finished provisioning. Re-run Phase 6c's script (below) and it will seed.
 
 To seed after the fact, re-run just Phase 6c's script; it is idempotent:
 

@@ -131,10 +131,58 @@ if [ "$SEED" != "yes" ]; then
   SEED_STATUS="declined"
   note "seeding declined at Phase 0 — leaving ${CATALOG}.${SCHEMA} as-is"
 else
-  SRC_TABLES="$(sql "SHOW TABLES IN \`$SRC_CATALOG\`.\`$SRC_SCHEMA\`" 2>/dev/null | cut -f2 | sed '/^$/d')"
+  # Probe the source, keeping stderr. The previous version discarded it with
+  # 2>/dev/null and reported one message — "not readable from this workspace" —
+  # for four different causes: the schema not existing yet, existing but empty, a
+  # real permission denial, and a warehouse/SQL error. That reads as a permanent
+  # entitlement problem when it is usually neither permanent nor permissions.
+  #
+  # On a BRAND-NEW workspace the real cause is a race: `samples` is provisioned
+  # asynchronously and Phase 6c can run before it lands. Observed on a fresh
+  # workspace — Phase 4 finished 12:04:46Z, Phase 6c probed ~12:05:00Z, and the
+  # samples.wanderbricks schema was not created until 12:05:39Z. A re-run minutes
+  # later seeded all 16 tables. So wait for it rather than declaring defeat 40
+  # seconds early.
+  SRC_TABLES=""
+  SRC_ERR=""
+  _src_out="$(mktemp)"; _src_err="$(mktemp)"
+  _deadline=$(( $(date +%s) + ${FIREFLY_SEED_SOURCE_WAIT:-180} ))
+  while :; do
+    : > "$_src_out"; : > "$_src_err"
+    sql "SHOW TABLES IN \`$SRC_CATALOG\`.\`$SRC_SCHEMA\`" >"$_src_out" 2>"$_src_err"
+    SRC_TABLES="$(cut -f2 "$_src_out" 2>/dev/null | sed '/^$/d')"
+    SRC_ERR="$(tr '\n' ' ' < "$_src_err")"
+    [ -n "$SRC_TABLES" ] && break
+    # A denial will not resolve by waiting; stop immediately and say so.
+    case "$SRC_ERR" in
+      *PERMISSION_DENIED*|*[Pp]ermission*|*[Ff]orbidden*|*UNAUTHORIZED*) break ;;
+    esac
+    [ "$(date +%s)" -ge "$_deadline" ] && break
+    note "$SEED_SOURCE not populated yet — waiting 15s (a fresh workspace provisions it asynchronously)"
+    sleep 15
+  done
+  rm -f "$_src_out" "$_src_err"
+
   if [ -z "$SRC_TABLES" ]; then
-    warn "$SEED_SOURCE is not readable from this workspace — cannot seed"
-    SEED_STATUS="source-unavailable"
+    # Say WHICH of the four it was, and show the server's own words.
+    case "$SRC_ERR" in
+      *PERMISSION_DENIED*|*[Pp]ermission*|*[Ff]orbidden*|*UNAUTHORIZED*)
+        SEED_STATUS="source-denied"
+        warn "no permission to read $SEED_SOURCE — grant SELECT on it, or set SEED_SAMPLE_DATA=no" ;;
+      *SCHEMA_NOT_FOUND*|*does\ not\ exist*|*NOT_FOUND*|*[Nn]ot\ [Ff]ound*)
+        SEED_STATUS="source-not-ready"
+        warn "$SEED_SOURCE does not exist yet after ${FIREFLY_SEED_SOURCE_WAIT:-180}s."
+        note "On a new workspace the samples catalog is provisioned asynchronously."
+        note "Re-run this phase in a few minutes; the data is not missing, just late:"
+        note "  databricks tables list $SRC_CATALOG $SRC_SCHEMA --profile $PROFILE" ;;
+      "")
+        SEED_STATUS="source-empty"
+        warn "$SEED_SOURCE exists but reported no tables after ${FIREFLY_SEED_SOURCE_WAIT:-180}s."
+        note "Re-run this phase once it is populated." ;;
+      *)
+        SEED_STATUS="source-error"
+        warn "could not read $SEED_SOURCE: $SRC_ERR" ;;
+    esac
   else
     # Is every existing table one of ours? Then a partial seed can be completed.
     foreign=0

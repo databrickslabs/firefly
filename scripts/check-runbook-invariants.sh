@@ -471,6 +471,31 @@ else
   bad "the UC grants cannot actually be run as written:$GRANT_BAD"
 fi
 
+# ── 20. A failed seed must say WHICH failure it was. ────────────────────────
+# One status, "source-unavailable", was reported for four different causes: the
+# schema not existing yet, existing but empty, a real permission denial, and a
+# warehouse error — with stderr discarded via 2>/dev/null so the server's own
+# message was thrown away. On a fresh workspace the cause is almost always a
+# race (samples is provisioned asynchronously; Phase 6c probed 40s early on an
+# observed run), but it read as a permanent entitlement problem.
+SEED_DIAG_BAD=""
+grep -qE 'source-not-ready' scripts/genie-data-setup.sh \
+  || SEED_DIAG_BAD="$SEED_DIAG_BAD genie-data-setup.sh(no-cause-classification)"
+grep -qE 'source-denied' scripts/genie-data-setup.sh \
+  || SEED_DIAG_BAD="$SEED_DIAG_BAD genie-data-setup.sh(cannot-report-a-denial)"
+grep -qE 'FIREFLY_SEED_SOURCE_WAIT' scripts/genie-data-setup.sh \
+  || SEED_DIAG_BAD="$SEED_DIAG_BAD genie-data-setup.sh(no-wait-for-async-samples)"
+# The discarded-stderr pattern must not come back on the source probe.
+grep -qE 'SHOW TABLES IN .*SRC_SCHEMA.*2>/dev/null' scripts/genie-data-setup.sh \
+  && SEED_DIAG_BAD="$SEED_DIAG_BAD genie-data-setup.sh(stderr-discarded-again)"
+grep -qE 'source-unavailable' BOOTSTRAP.md \
+  && SEED_DIAG_BAD="$SEED_DIAG_BAD BOOTSTRAP.md(still-documents-the-catch-all)"
+if [[ -z "$SEED_DIAG_BAD" ]]; then
+  pass "a failed seed reports which cause it was, and waits out async samples provisioning."
+else
+  bad "the seed probe would collapse four causes into one misleading status:$SEED_DIAG_BAD"
+fi
+
 # ── 15. The runner itself must parse, under bash AND zsh. ────────────────────
 # Invariant 5 checks every ```bash block in BOOTSTRAP.md and sources the shared
 # libs, but nothing ever ran `bash -n` on scripts/bootstrap.sh. A stray edit left
