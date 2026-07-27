@@ -67,6 +67,24 @@ FIREFLY_TRUST_PROXY_CA=1 firefly_bridge_corp_network   # or: TLS_PEM_PATH=<path>
 > Do **not** work around a blocked registry with `--registry https://registry.npmjs.org`
 > or by disabling TLS verification.
 
+### 0b. Does this workspace enforce an IP allowlist? — **check now, not at Phase 9**
+
+Phases 1–8 all succeed against a workspace with an enabled IP allowlist. The app
+deploys, the frontend deploys, guest login works — and then every Databricks data
+call from Vercel 403s. Phase 9 reports it, which is far enough in that people have
+read the failure as an application bug. One command up front costs nothing:
+
+```bash
+databricks api get /api/2.0/ip-access-lists --profile "$DB_PROFILE" 2>/dev/null \
+  | python3 -c "import sys,json; d=json.load(sys.stdin) or {}; \
+    e=[l['label'] for l in (d.get('ip_access_lists') or []) if l.get('enabled')]; \
+    print('ENABLED allowlist(s):', e) if e else print('no enabled IP allowlist')"
+```
+
+If any are enabled, Vercel's egress must be allowed or the data plane will refuse
+it. That is a network decision, not something this runbook can fix — see
+"Enterprise network controls" below. Everything else still works.
+
 ### Required inputs — confirm each before proceeding to Phase 1
 
 - [ ] **[ASK — REQUIRED, BLOCKING]** `DATABRICKS_HOST` — workspace URL (e.g. `https://dbc-xxxx.cloud.databricks.com`)
@@ -79,7 +97,7 @@ FIREFLY_TRUST_PROXY_CA=1 firefly_bridge_corp_network   # or: TLS_PEM_PATH=<path>
 - [ ] **[ASK — REQUIRED, BLOCKING]** `GRANT_GUEST_SPACE_ACCESS` — **ask this only when `GENIE_SPACE_IDS` is set.** Grant the guest SP `CAN_RUN` on those spaces and `SELECT` on the tables they reference, so guest users can ask data questions too
 - [ ] **[ASK — REQUIRED, BLOCKING]** `AGENT_APP_NAME` — Databricks App name (dev target; bundle hardcodes this)
 - [ ] **[ASK — REQUIRED, BLOCKING]** `DATABRICKS_ACCOUNT_ID` — account ID (a **UUID**, e.g. `32aad83d-ef89-4e74-9969-77784815fd46`) from `accounts.cloud.databricks.com` (Account Console → top-right menu). NB: the account ID is a UUID; the *workspace* ID is the numeric one.
-- [ ] **[ASK — REQUIRED, BLOCKING]** `LAKEBASE_NAME` — name for the new Lakebase instance
+- [ ] **[ASK — REQUIRED, BLOCKING]** `LAKEBASE_NAME` — name for the new Lakebase instance. A **request**, not a guarantee: if `$AGENT_APP_NAME` already exists, its own Lakebase binding wins and Phase 3a reconciles this value to whatever was actually bound
 - [ ] **[ASK — REQUIRED, BLOCKING]** `NEON_PROJECT_NAME` — name for the new Neon project
 - [ ] **[ASK — REQUIRED, BLOCKING]** `VERCEL_TEAM` — team slug (e.g. `acme-corp` from `vercel.com/<team-slug>/...` in the dashboard)
 - [ ] **[ASK — REQUIRED, BLOCKING]** `VERCEL_PROJECT` — new Vercel project name
@@ -102,7 +120,7 @@ FIREFLY_TRUST_PROXY_CA=1 firefly_bridge_corp_network   # or: TLS_PEM_PATH=<path>
 | `GRANT_GUEST_SPACE_ACCESS` | `yes` | Asked **only** when `GENIE_SPACE_IDS` is set |
 | `AGENT_APP_NAME` | `firefly-openai-managed-mem-v2` | Dev target; bundle hardcodes this |
 | `DATABRICKS_ACCOUNT_ID` | — | Account **UUID** from `accounts.cloud.databricks.com` (not the numeric workspace ID) |
-| `LAKEBASE_NAME` | `firefly-lb` | Name for the new Lakebase instance |
+| `LAKEBASE_NAME` | `firefly-lb` | Name for the new Lakebase instance. Reconciled in Phase 3a — an existing app's binding overrides it |
 | `NEON_PROJECT_NAME` | `firefly-genie` | Name for the new Neon project |
 | `VERCEL_TEAM` | — | Team slug from `vercel.com/<team-slug>/...` in the dashboard |
 | `VERCEL_PROJECT` | `firefly-genie` | New Vercel project name |
