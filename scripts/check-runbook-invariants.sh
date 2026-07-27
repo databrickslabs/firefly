@@ -253,13 +253,23 @@ fi
 # fix never reached the readers who follow the doc. ~/Library/.../auth.json only exists
 # after an interactive `vercel login`, which makes the doc path fail outright for CI, for
 # token-based setups, and for the fresh-install harness.
-if grep -qE 'auth\.json' BOOTSTRAP.md; then
-  if grep -qE 'V_TOKEN="\$\{VERCEL_TOKEN:-\}"' BOOTSTRAP.md; then
-    pass "BOOTSTRAP.md prefers \$VERCEL_TOKEN before the CLI's auth.json."
+#
+# The lookup now lives in firefly_vercel_context (scripts/lib/runbook.sh) so that
+# Phases 8a and 8e cannot disagree. Follow the logic to wherever it lives: the
+# runbook satisfies this either by doing it inline or by calling the helper that
+# does. What must never happen is auth.json being read with no $VERCEL_TOKEN
+# preference anywhere in the chain.
+if grep -qE 'V_TOKEN="\$\{VERCEL_TOKEN:-\}"' BOOTSTRAP.md; then
+  pass "BOOTSTRAP.md prefers \$VERCEL_TOKEN before the CLI's auth.json."
+elif grep -qE 'firefly_vercel_context' BOOTSTRAP.md; then
+  if grep -qE 'VERCEL_TOKEN:-' scripts/lib/runbook.sh; then
+    pass "BOOTSTRAP.md defers to firefly_vercel_context, which prefers \$VERCEL_TOKEN."
   else
-    bad "BOOTSTRAP.md reads auth.json without trying \$VERCEL_TOKEN first — drifted from scripts/bootstrap.sh."
-    grep -nE 'auth\.json' BOOTSTRAP.md | sed 's/^/      /'
+    bad "firefly_vercel_context does not prefer \$VERCEL_TOKEN — the drift moved into the library."
   fi
+elif grep -qE 'auth\.json' BOOTSTRAP.md; then
+  bad "BOOTSTRAP.md reads auth.json without trying \$VERCEL_TOKEN first — drifted from scripts/bootstrap.sh."
+  grep -nE 'auth\.json' BOOTSTRAP.md | sed 's/^/      /'
 fi
 
 # ── 9. A write-only secret must not be trusted straight from `vercel env pull`. ──
@@ -311,6 +321,163 @@ if [[ -x scripts/new-guest-link.sh ]]; then
   fi
 else
   bad "scripts/new-guest-link.sh is missing or not executable — an expired guest link has no recovery (#79)."
+fi
+
+# ── 12. Genie mode and space id must never move independently (#83). ─────────
+# agent.py raises ValueError("GENIE_MCP_MODE=space requires GENIE_SPACE_ID"), so
+# a bundle that can set the mode without the id fails the app boot rather than
+# degrading to Genie One. Both must exist as variables, and every command that
+# passes one must pass the other.
+GENIE_COUPLING_BAD=""
+for v in genie_mcp_mode genie_space_id; do
+  grep -qE "^[[:space:]]*${v}:" agent/databricks.yml || GENIE_COUPLING_BAD="$GENIE_COUPLING_BAD ${v}(undeclared)"
+done
+grep -qE 'GENIE_SPACE_ID' agent/databricks.yml || GENIE_COUPLING_BAD="$GENIE_COUPLING_BAD GENIE_SPACE_ID(not-in-app-env)"
+
+# The genie_space_id default must NOT be empty. An empty value makes the bundle
+# render `{"name": "GENIE_SPACE_ID"}` with no `value` key, and the Apps API
+# refuses the whole deploy: "Must specify environment variable source using
+# either value or valueFrom". That broke Phase 4 on the DEFAULT Genie One path
+# in six of nine E2E runs; each one still looked clean because the agent
+# diagnosed it and worked around it, and the app ended up RUNNING either way.
+GSID_DEFAULT="$(awk '
+  /^[[:space:]]*genie_space_id:/ { found = 1 }
+  found && /^[[:space:]]*default:/ {
+    sub(/^[[:space:]]*default:[[:space:]]*/, ""); print; exit
+  }' agent/databricks.yml | tr -d '[:space:]')"
+case "$GSID_DEFAULT" in
+  ''|'""'|"''")
+    GENIE_COUPLING_BAD="$GENIE_COUPLING_BAD genie_space_id(empty-default-breaks-apps-deploy)" ;;
+esac
+
+# Any line setting one --var without the other is the failure mode we care about.
+for f in BOOTSTRAP.md scripts/bootstrap.sh README.md; do
+  [[ -f "$f" ]] || continue
+  while IFS= read -r line; do
+    case "$line" in
+      *genie_mcp_mode=space*)
+        case "$line" in *genie_space_id*) ;; *) GENIE_COUPLING_BAD="$GENIE_COUPLING_BAD $f(mode-without-id)" ;; esac ;;
+    esac
+  done < <(grep -nE 'genie_mcp_mode=space' "$f" 2>/dev/null)
+done
+
+if [[ -z "$GENIE_COUPLING_BAD" ]]; then
+  pass "Genie mode and space id are declared together and always passed together."
+else
+  bad "GENIE_MCP_MODE=space can be set without GENIE_SPACE_ID — the app fails to boot (#83):$GENIE_COUPLING_BAD"
+fi
+
+# ── 13. Seeding must be the user's choice, and offered (#83). ────────────────
+# The runbook used to forbid seeding while never asking, so "unless the user
+# explicitly asks" was unreachable: no Phase 0 input mentioned it. An empty schema
+# means Genie answers nothing, so the fix is an ask — not a silent default either way.
+SEED_ASK_BAD=""
+grep -qE '\*\*\[ASK — REQUIRED, BLOCKING\]\*\* `SEED_SAMPLE_DATA`' BOOTSTRAP.md \
+  || SEED_ASK_BAD="$SEED_ASK_BAD BOOTSTRAP.md(no-blocking-ask)"
+grep -qE '\*\*\[ASK — REQUIRED, BLOCKING\]\*\* `GENIE_SPACE_IDS`' BOOTSTRAP.md \
+  || SEED_ASK_BAD="$SEED_ASK_BAD BOOTSTRAP.md(no-space-ids-ask)"
+grep -qE '^ask SEED_SAMPLE_DATA' scripts/bootstrap.sh \
+  || SEED_ASK_BAD="$SEED_ASK_BAD bootstrap.sh(no-ask)"
+grep -qE '^ask GENIE_SPACE_IDS' scripts/bootstrap.sh \
+  || SEED_ASK_BAD="$SEED_ASK_BAD bootstrap.sh(no-space-ids-ask)"
+# The old prohibition must be gone: it contradicts the ask it predates.
+grep -qE 'Do not auto-create seed tables during bootstrap unless the user explicitly asks' BOOTSTRAP.md \
+  && SEED_ASK_BAD="$SEED_ASK_BAD BOOTSTRAP.md(stale-prohibition)"
+
+if [[ -z "$SEED_ASK_BAD" ]]; then
+  pass "seeding and Genie space setup are offered as Phase 0 blocking asks, in both surfaces."
+else
+  bad "seeding is not a real user choice — the runbook and runner disagree (#83):$SEED_ASK_BAD"
+fi
+
+# ── 14. Phase 6c must exist in BOTH the runbook and the runner (#83). ────────
+# bootstrap.sh had no 6c at all, so the automated path finished "successfully"
+# with an empty schema. This is the same drift class as 8 and 9: one surface
+# implements a phase and the other only describes it.
+SIXC_BAD=""
+grep -qE '^## Phase 6c' BOOTSTRAP.md || SIXC_BAD="$SIXC_BAD BOOTSTRAP.md(no-phase)"
+grep -qE 'run_phase "6c"' scripts/bootstrap.sh || SIXC_BAD="$SIXC_BAD bootstrap.sh(no-phase)"
+[[ -x scripts/genie-data-setup.sh ]] || SIXC_BAD="$SIXC_BAD genie-data-setup.sh(missing-or-not-executable)"
+# Both surfaces must call the SAME implementation, or they drift again.
+for f in BOOTSTRAP.md scripts/bootstrap.sh; do
+  grep -qE 'genie-data-setup\.sh' "$f" || SIXC_BAD="$SIXC_BAD $f(does-not-call-shared-script)"
+done
+
+if [[ -z "$SIXC_BAD" ]]; then
+  pass "Phase 6c exists in both surfaces and both call scripts/genie-data-setup.sh."
+else
+  bad "Phase 6c is not implemented consistently — a fresh workspace can finish with no data (#83):$SIXC_BAD"
+fi
+
+# ── 16. Point-of-use defaults, not source-time-only defaults. ───────────────
+# Two separate bugs, one cause: `: "${VAR:=default}"` runs once when the file is
+# sourced, but the variable is READ later, inside a function. A caller that
+# exports it empty in between gets the empty value.
+#   * INPUTS_DIR empty  -> CA bundle written to /proxy-ca-bundle.pem (5 runs)
+#   * FIREFLY_PLACEHOLDER_EXPERIMENT_ID empty -> `grep -q ""` matches every line,
+#     so a HEALTHY bundle fails assert_bundle_quickstart_ran (3 runs)
+POU_BAD=""
+sed -n '/init_inputs_dir()/,/}/p' scripts/lib/corp-network.sh   | grep -q 'INPUTS_DIR="\$HOME/.firefly-bootstrap"'   || POU_BAD="$POU_BAD init_inputs_dir(no-point-of-use-default)"
+sed -n '/assert_bundle_quickstart_ran()/,/^}/p' scripts/lib/runbook.sh   | grep -q 'FIREFLY_PLACEHOLDER_EXPERIMENT_ID=123237888438046'   || POU_BAD="$POU_BAD assert_bundle_quickstart_ran(no-point-of-use-default)"
+if [[ -z "$POU_BAD" ]]; then
+  pass "helpers re-apply defaults at point of use, not only at source time."
+else
+  bad "defaults that are applied only at source time break when a caller exports them empty:$POU_BAD"
+fi
+
+# ── 17. A crashed deploy must not read as success. ──────────────────────────
+# Databricks CLI v1.9.0 can panic on `bundle deploy` and still exit 0. Both
+# surfaces must assert the app exists rather than trusting the exit code.
+DEPLOY_ASSERT_BAD=""
+grep -q 'did not create' BOOTSTRAP.md || DEPLOY_ASSERT_BAD="$DEPLOY_ASSERT_BAD BOOTSTRAP.md"
+grep -q 'did not create the app' scripts/bootstrap.sh || DEPLOY_ASSERT_BAD="$DEPLOY_ASSERT_BAD bootstrap.sh"
+if [[ -z "$DEPLOY_ASSERT_BAD" ]]; then
+  pass "Phase 4 asserts the app exists instead of trusting the deploy exit code."
+else
+  bad "no post-deploy assertion — a panicking CLI that exits 0 reads as success:$DEPLOY_ASSERT_BAD"
+fi
+
+# ── 18. Phase 5 must say the preview is missing, not fail opaquely. ─────────
+# The most-reported gap across E2E runs (9 of 12).
+MEM_BAD=""
+grep -q 'Managed Memory' BOOTSTRAP.md || MEM_BAD="$MEM_BAD BOOTSTRAP.md(no-preflight)"
+grep -q 'MEMORY_PREVIEW' scripts/bootstrap.sh || MEM_BAD="$MEM_BAD bootstrap.sh(no-preflight)"
+if [[ -z "$MEM_BAD" ]]; then
+  pass "Phase 5 preflights the Managed Memory preview and degrades with a message."
+else
+  bad "Phase 5 still fails opaquely when the preview is off:$MEM_BAD"
+fi
+
+# ── 19. The SQL grants must be executable, not prose. ───────────────────────
+# They were commented-out SQL telling the reader to paste into a warehouse
+# session. A backquoted principal cannot survive `--json "..."`, so in practice
+# the grants were skipped and Genie could not read the data.
+GRANT_BAD=""
+grep -qE '^\s*#\s*GRANT (USE|SELECT)' BOOTSTRAP.md   && GRANT_BAD="$GRANT_BAD BOOTSTRAP.md(grants-still-commented-out)"
+grep -q 'firefly_sql' BOOTSTRAP.md || GRANT_BAD="$GRANT_BAD BOOTSTRAP.md(no-executed-grants)"
+grep -q 'firefly_sql' scripts/bootstrap.sh || GRANT_BAD="$GRANT_BAD bootstrap.sh(no-executed-grants)"
+if [[ -z "$GRANT_BAD" ]]; then
+  pass "the UC grants are executed via firefly_sql, not left as un-pasteable comments."
+else
+  bad "the UC grants cannot actually be run as written:$GRANT_BAD"
+fi
+
+# ── 15. The runner itself must parse, under bash AND zsh. ────────────────────
+# Invariant 5 checks every ```bash block in BOOTSTRAP.md and sources the shared
+# libs, but nothing ever ran `bash -n` on scripts/bootstrap.sh. A stray edit left
+# an unterminated `if` in Phase 3c and this suite still printed "All runbook
+# invariants hold" — the runner is the one file guaranteed to be executed, and it
+# was the one file not being checked.
+SHELL_PARSE_BAD=""
+for f in scripts/bootstrap.sh scripts/genie-data-setup.sh scripts/new-guest-link.sh; do
+  [[ -f "$f" ]] || continue
+  bash -n "$f" 2>/dev/null || SHELL_PARSE_BAD="$SHELL_PARSE_BAD $f(bash)"
+  command -v zsh >/dev/null 2>&1 && { zsh -n "$f" 2>/dev/null || SHELL_PARSE_BAD="$SHELL_PARSE_BAD $f(zsh)"; }
+done
+if [[ -z "$SHELL_PARSE_BAD" ]]; then
+  pass "bootstrap.sh and the helper scripts parse under bash and zsh."
+else
+  bad "these scripts do not parse — the runner would die at that line:$SHELL_PARSE_BAD"
 fi
 
 echo

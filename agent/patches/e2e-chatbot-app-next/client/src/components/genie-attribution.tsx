@@ -27,6 +27,18 @@ function linkLabel(url: string, index: number): string {
   }
 }
 
+/**
+ * With GENIE_MCP_MODE=space the agent answers from a single Genie space, and the
+ * server points this link at /genie/rooms/<id> instead of /one. Calling that
+ * "Genie One" would name a backend that never saw the question.
+ */
+function targetLabel(url: string | null): string {
+  if (!url) {
+    return 'Genie One';
+  }
+  return url.includes('/genie/rooms/') ? 'Genie space' : 'Genie One';
+}
+
 export function GenieAttribution({
   genieOneUrl,
   workspaceHost,
@@ -67,7 +79,7 @@ export function GenieAttribution({
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1.5 font-medium underline underline-offset-2 hover:text-foreground"
             >
-              Genie One
+              {targetLabel(oneUrl)}
               <ExternalLink className="size-4 shrink-0" aria-hidden />
             </a>
           </>

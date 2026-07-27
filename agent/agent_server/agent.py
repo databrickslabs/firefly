@@ -64,7 +64,13 @@ def _genie_mcp_path() -> str:
 
     if mode == "space":
         space_id = os.environ.get("GENIE_SPACE_ID", "").strip()
-        if not space_id:
+        # "none" is the bundle's unset sentinel, not an id. An EMPTY default
+        # cannot be used: the bundle renders `{"name": "GENIE_SPACE_ID"}` with no
+        # `value`, and the Apps API rejects the whole deploy with "Must specify
+        # environment variable source using either value or valueFrom". So the
+        # variable ships a non-empty placeholder and the emptiness check lives
+        # here instead.
+        if space_id.lower() in ("", "none", "null"):
             raise ValueError("GENIE_MCP_MODE=space requires GENIE_SPACE_ID")
         return f"/api/2.0/mcp/genie/{space_id}"
 

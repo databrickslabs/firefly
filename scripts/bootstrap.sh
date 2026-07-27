@@ -271,6 +271,27 @@ validate_url "$DATABRICKS_HOST"
 ask DB_PROFILE       "Databricks CLI profile name"      "firefly-deploy"
 ask UC_CATALOG       "Unity Catalog catalog"            "workspace"
 ask UC_SCHEMA        "Unity Catalog schema"             "default"
+
+# Phase 6c inputs. Asked here, with everything else, because Phase 0 is the only
+# place the runbook is allowed to block on a question (#83). Seeding only ever
+# acts on an EMPTY schema and never overwrites a table, which is what makes `yes`
+# a safe default.
+ask SEED_SAMPLE_DATA "Seed samples.wanderbricks if $UC_CATALOG.$UC_SCHEMA is empty? (yes/no)" "yes"
+ask GENIE_SPACE_IDS  "Existing Genie space id(s) to use, comma-separated (None = create one)" "None"
+case "$(printf '%s' "${GENIE_SPACE_IDS:-None}" | tr 'A-Z' 'a-z')" in
+  none|null|"")
+    GENIE_SPACE_IDS=""
+    ask CREATE_GENIE_SPACE "Create a Genie space over $UC_CATALOG.$UC_SCHEMA? (yes/no)" "yes"
+    GRANT_GUEST_SPACE_ACCESS="no"   # nothing of the user's to grant against
+    ;;
+  *)
+    # Only meaningful when the user named spaces: these are the one set of spaces
+    # bootstrap is permitted to touch, so granting on them is an explicit choice.
+    CREATE_GENIE_SPACE="no"
+    ask GRANT_GUEST_SPACE_ACCESS "Grant the guest SP CAN_RUN on those spaces + SELECT on their tables? (yes/no)" "yes"
+    ;;
+esac
+
 ask AGENT_APP_NAME        "Databricks App name"                        "firefly-openai-managed-mem-v2"
 ask LAKEBASE_NAME         "Lakebase instance name"                     "firefly-lb"
 ask DATABRICKS_ACCOUNT_ID "Databricks account ID (from accounts.cloud.databricks.com URL)"
@@ -586,6 +607,15 @@ note "DATABRICKS_MEMORY_STORE resolves to $UC_CATALOG.$UC_SCHEMA.firefly_managed
 
 echo
 step "3c. Create UC wheels volume"
+# The schema is assumed to exist; on a fresh catalog it does not (the catalog can
+# hold nothing but information_schema), and the volume create then fails with a
+# message about the volume rather than the missing schema.
+if [[ "$DRY_RUN" == "false" ]]; then
+  databricks schemas create "$UC_SCHEMA" "$UC_CATALOG" --profile "$DB_PROFILE" &>/dev/null \
+    && ok "created schema $UC_CATALOG.$UC_SCHEMA" \
+    || note "schema $UC_CATALOG.$UC_SCHEMA already exists — continuing"
+fi
+
 if [[ "$DRY_RUN" == "false" ]] \
    && databricks volumes read "${UC_CATALOG}.${UC_SCHEMA}.firefly_wheels" --profile "$DB_PROFILE" &>/dev/null; then
   ok "UC volume ${UC_CATALOG}.${UC_SCHEMA}.firefly_wheels already exists — skipping create."
@@ -652,6 +682,21 @@ else
     | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d['app_status']['state'])\""
 fi
 
+
+# The deploy's exit code is not evidence. CLI v1.9.0 can panic on bundle deploy
+# and still exit 0, so a crashed deploy reads as success and Phases 5/6/9 then
+# fail opaquely. Assert the app exists.
+if [[ "$DRY_RUN" == "false" ]]; then
+  if databricks apps get "$AGENT_APP_NAME" --profile "$DB_PROFILE" &>/dev/null; then
+    ok "Phase 4 created $AGENT_APP_NAME"
+  else
+    fail "Phase 4 did not create the app $AGENT_APP_NAME (deploy exit code notwithstanding)"
+    note "Check the deploy output for a panic or an env-var rejection."
+    note "Stale bundle state also causes this: if the app was deleted but"
+    note "/Workspace/Users/<you>/.bundle/firefly_openai_managed_mem survives, the CLI"
+    note "diffs against an app that no longer exists. Delete that path and redeploy."
+  fi
+fi
 fi
 stop_if_done "4"
 
@@ -664,10 +709,29 @@ capture SP_CLIENT_ID \
     | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d['service_principal_client_id'])\""
 note "App service principal: $SP_CLIENT_ID"
 
-run "cd '$REPO_DIR/agent-build' && \
-  uv run --python 3.12 python scripts/setup_memory_store.py '$SP_CLIENT_ID' \
-    --memory-store '$UC_CATALOG.$UC_SCHEMA.firefly_managed_memory' \
-    --profile '$DB_PROFILE'"
+# The preview is enabled per-workspace by Databricks; without it this phase fails
+# with NotImplemented and there is no local remedy. It was the most-reported gap
+# in E2E runs (9 of 12) purely because the runbook charged ahead and failed
+# opaquely. Say so up front, and let the rest of the bootstrap finish — only
+# cross-session memory is lost.
+MEMORY_PREVIEW=on
+if [[ "$DRY_RUN" == "false" ]]; then
+  if databricks api get /api/2.0/memory-stores --profile "$DB_PROFILE" 2>&1 \
+       | grep -qiE 'not enabled|NotImplemented|501'; then
+    MEMORY_PREVIEW=off
+  fi
+fi
+
+if [[ "$MEMORY_PREVIEW" == "off" ]]; then
+  warn "Managed Memory for Agents preview is NOT enabled on this workspace."
+  note "Skipping Phase 5. Enable the preview, then re-run this phase."
+  note "The agent still runs; it just has no cross-session memory."
+else
+  run "cd '$REPO_DIR/agent-build' && \
+    uv run --python 3.12 python scripts/setup_memory_store.py '$SP_CLIENT_ID' \
+      --memory-store '$UC_CATALOG.$UC_SCHEMA.firefly_managed_memory' \
+      --profile '$DB_PROFILE'"
+fi
 
 fi
 stop_if_done "5"
@@ -696,6 +760,15 @@ else
   warn "No warehouse found. Create one and grant CAN_USE manually."
 fi
 
+# Executed, not described. These were `note` lines telling the operator to paste
+# SQL by hand; the backquoted principal cannot survive `--json "..."`, so in
+# practice the grants were skipped and Genie could not read the data.
+if [[ -n "$WAREHOUSE_ID" && "$WAREHOUSE_ID" != "<WAREHOUSE_ID-placeholder>" && "$DRY_RUN" == "false" ]]; then
+  firefly_sql "$WAREHOUSE_ID" "GRANT USE SCHEMA ON SCHEMA \`$UC_CATALOG\`.\`$UC_SCHEMA\` TO \`$SP_CLIENT_ID\`" >/dev/null \
+    && ok "granted USE SCHEMA to agent SP" || warn "could not grant USE SCHEMA to agent SP"
+  firefly_sql "$WAREHOUSE_ID" "GRANT SELECT ON SCHEMA \`$UC_CATALOG\`.\`$UC_SCHEMA\` TO \`$SP_CLIENT_ID\`" >/dev/null \
+    && ok "granted SELECT to agent SP" || warn "could not grant SELECT to agent SP"
+fi
 note "Grant USE SCHEMA + SELECT on your data schemas via a SQL warehouse:"
 note "  GRANT USE SCHEMA, SELECT ON SCHEMA $UC_CATALOG.your_schema TO \`$SP_CLIENT_ID\`;"
 
@@ -772,12 +845,63 @@ run "databricks api patch \
   --json '{\"access_control_list\":[{\"service_principal_name\":\"$GUEST_SP_CLIENT_ID\", \
     \"permission_level\":\"CAN_USE\"}]}'"
 
+if [[ -n "$WAREHOUSE_ID" && "$WAREHOUSE_ID" != "<WAREHOUSE_ID-placeholder>" && "$DRY_RUN" == "false" ]]; then
+  firefly_sql "$WAREHOUSE_ID" "GRANT USE CATALOG ON CATALOG \`$UC_CATALOG\` TO \`$GUEST_SP_CLIENT_ID\`" >/dev/null \
+    && ok "granted USE CATALOG to guest SP" || warn "could not grant USE CATALOG to guest SP"
+  firefly_sql "$WAREHOUSE_ID" "GRANT USE SCHEMA ON SCHEMA \`$UC_CATALOG\`.\`$UC_SCHEMA\` TO \`$GUEST_SP_CLIENT_ID\`" >/dev/null \
+    && ok "granted USE SCHEMA to guest SP" || warn "could not grant USE SCHEMA to guest SP"
+  firefly_sql "$WAREHOUSE_ID" "GRANT SELECT ON SCHEMA \`$UC_CATALOG\`.\`$UC_SCHEMA\` TO \`$GUEST_SP_CLIENT_ID\`" >/dev/null \
+    && ok "granted SELECT to guest SP" || warn "could not grant SELECT to guest SP"
+fi
 note "Grant USE CATALOG / USE SCHEMA / SELECT via SQL warehouse if not already done:"
 note "  GRANT USE CATALOG ON CATALOG $UC_CATALOG TO \`$GUEST_SP_CLIENT_ID\`;"
 note "  GRANT USE SCHEMA, SELECT ON SCHEMA $UC_CATALOG.$UC_SCHEMA TO \`$GUEST_SP_CLIENT_ID\`;"
 
 fi
 stop_if_done "6b"
+
+# ─── Phase 6c: data + Genie space ─────────────────────────────────────────────
+# The runner had no 6c at all, so a fresh workspace finished "successfully" with
+# an empty schema and a Genie that could not answer anything (#83). One shared
+# script does the work, called exactly as BOOTSTRAP.md calls it.
+header "Phase 6c — Give Genie data, and a space, to work with"
+if run_phase "6c"; then
+
+step "Seed sample data and resolve a Genie space"
+if [[ "$DRY_RUN" == "true" ]]; then
+  note "[DRY-RUN] scripts/genie-data-setup.sh --catalog $UC_CATALOG --schema $UC_SCHEMA ..."
+  GENIE_MCP_MODE="one"; GENIE_SPACE_ID=""
+else
+  # Progress goes to stderr, KEY=value to stdout, so eval only sees the contract.
+  GENIE_SETUP_OUT="$(bash "$BOOTSTRAP_SCRIPT_DIR/genie-data-setup.sh" \
+    --catalog "$UC_CATALOG" --schema "$UC_SCHEMA" --profile "$DB_PROFILE" \
+    --warehouse-id "${WAREHOUSE_ID:-}" \
+    --seed "${SEED_SAMPLE_DATA:-yes}" \
+    --space-ids "${GENIE_SPACE_IDS:-}" \
+    --create-space "${CREATE_GENIE_SPACE:-yes}" \
+    --grant-guest "${GRANT_GUEST_SPACE_ACCESS:-no}" \
+    --guest-sp "${GUEST_SP_CLIENT_ID:-}" \
+    --agent-sp "${SP_CLIENT_ID:-}")" || warn "Phase 6c setup reported a problem (continuing)"
+  eval "$GENIE_SETUP_OUT"
+  note "seed=${SEED_STATUS:-?} tables=${SEED_TABLE_COUNT:-?} mode=${GENIE_MCP_MODE:-one} space=${GENIE_SPACE_ID:-none}"
+  [[ -n "${GENIE_SPACE_ID:-}" ]] && store_secret GENIE_SPACE_ID "$GENIE_SPACE_ID"
+fi
+
+# Phase 4 deployed the app before a space existed, so space mode needs a redeploy.
+# Both --vars move together or neither does: agent.py raises ValueError on
+# mode=space with an empty id, and the app then fails to boot.
+if [[ "${GENIE_MCP_MODE:-one}" == "space" && -n "${GENIE_SPACE_ID:-}" ]]; then
+  step "Redeploy the agent app in Genie space mode"
+  GENIE_VARS="--var catalog=$UC_CATALOG --var schema=$UC_SCHEMA \
+--var genie_mcp_mode=space --var genie_space_id=$GENIE_SPACE_ID"
+  run "cd '$REPO_DIR/agent-build' && databricks bundle deploy --profile '$DB_PROFILE' -t dev $GENIE_VARS"
+  run "cd '$REPO_DIR/agent-build' && databricks bundle run agent_openai_agents_sdk --profile '$DB_PROFILE' -t dev $GENIE_VARS"
+else
+  note "Staying on Genie One (workspace-wide) — no Genie space was resolved."
+fi
+
+fi
+stop_if_done "6c"
 
 # ─── Phase 7: Neon database ───────────────────────────────────────────────────
 header "Phase 7 — Neon database"
@@ -984,6 +1108,11 @@ note "Omit SPN_AUTH_OKTA_* entirely — the plugin is conditional; absent vars a
 
 for SCOPE in preview production; do
   note "Setting tier-1 vars for scope: $SCOPE"
+  # Empty means Phase 4 never created the app. The env add succeeds anyway and
+  # the frontend deploys pointing at nothing, which reads as a frontend bug.
+  if [[ -z "${AGENT_APP_URL:-}" && "$DRY_RUN" == "false" ]]; then
+    warn "AGENT_APP_URL is empty — Phase 4 produced no running app; the agent panel will not work."
+  fi
   run "vercel env add DATABRICKS_AGENT_APP_URL  $SCOPE --value '$AGENT_APP_URL' --force --non-interactive --scope '$VERCEL_TEAM'"
   run "vercel env add DATABASE_URL              $SCOPE --value '$DB_URL' --force --non-interactive --scope '$VERCEL_TEAM'"
   run "vercel env add BETTER_AUTH_SECRET        $SCOPE --value '$BETTER_AUTH_SECRET' --force --non-interactive --scope '$VERCEL_TEAM'"

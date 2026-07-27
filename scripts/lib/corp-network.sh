@@ -36,8 +36,17 @@ _ff_is_func warn || warn() { echo "  ⚠ $*"; }
 _ff_is_func fail || fail() { echo "  ✗ $*"; }
 
 : "${INPUTS_DIR:=$HOME/.firefly-bootstrap}"
+# Re-apply the default INSIDE the function. The `: "${INPUTS_DIR:=...}"` above
+# runs once, at source time; INPUTS_DIR is read again whenever this is called, so
+# a caller that exports it empty in between sends the CA bundle to
+# /proxy-ca-bundle.pem — an unwritable root path that then breaks curl, the
+# GitHub installs, and uv's CPython download with UnknownIssuer. Five E2E runs
+# hit it and each one had to recover by hand with TLS_PEM_PATH.
 _ff_is_func init_inputs_dir || \
-  init_inputs_dir() { mkdir -p "$INPUTS_DIR"; chmod 700 "$INPUTS_DIR"; }
+  init_inputs_dir() {
+    [ -n "${INPUTS_DIR:-}" ] || INPUTS_DIR="$HOME/.firefly-bootstrap"
+    mkdir -p "$INPUTS_DIR"; chmod 700 "$INPUTS_DIR"
+  }
 
 # Single source of truth for the pnpm version this project installs. Must match the
 # `packageManager` field in package.json.

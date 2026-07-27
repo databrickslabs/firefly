@@ -1,0 +1,352 @@
+#!/usr/bin/env bash
+# genie-data-setup.sh — Phase 6c: make sure Genie has data, and a space, to work with.
+#
+# WHY THIS EXISTS
+# Bootstrap used to finish "successfully" on a fresh workspace while Genie could
+# not answer a single data question, because $UC_CATALOG.$UC_SCHEMA was empty.
+# Phase 6c detected that and the runbook ended with homework. The user was never
+# offered a way to fix it during the run (#83).
+#
+# This script is invoked identically from BOOTSTRAP.md and scripts/bootstrap.sh,
+# for the same reason scripts/lib/runbook.sh exists: one implementation, so the
+# runbook and the automated runner cannot drift.
+#
+# SAFETY RULES (do not relax these)
+#   * Never clobber a table that already exists. CREATE TABLE IF NOT EXISTS only.
+#   * Never touch a Genie space this script did not create, even one covering the
+#     same schema. Create ours alongside it. The sole exception is a space the
+#     user named explicitly in --space-ids.
+#   * Never emit GENIE_MCP_MODE=space without a non-empty GENIE_SPACE_ID:
+#     agent.py raises ValueError on that combination and the app fails to boot.
+#   * Only switch to space mode after confirming the agent SP can actually run
+#     the space. A working agent on Genie One beats a scoped-but-broken one.
+#
+# Output: `KEY=value` lines on stdout for the caller to capture. Everything
+# human-facing goes to stderr, so `eval "$(genie-data-setup.sh ...)"` is safe.
+set -uo pipefail
+
+# Define the progress helpers BEFORE sourcing the lib, which only defines them if
+# they are missing. The lib's versions print to stdout; here stdout is the machine
+# contract, so every human-facing line has to go to stderr instead.
+note() { echo "  $*" >&2; }
+ok()   { echo "  ✓ $*" >&2; }
+warn() { echo "  ⚠ $*" >&2; }
+fail() { echo "  ✗ $*" >&2; }
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/runbook.sh
+. "$SCRIPT_DIR/lib/runbook.sh"
+
+SEED_SOURCE="${FIREFLY_SEED_SOURCE:-samples.wanderbricks}"
+# Ownership marker. A space is "ours" only if the title matches this exactly, so a
+# re-run reuses it instead of creating a duplicate, and a foreign space covering
+# the same schema is never mistaken for ours.
+space_title_for() { printf 'Firefly Genie Agent — %s.%s' "$1" "$2"; }
+
+CATALOG="" SCHEMA="" PROFILE="" WAREHOUSE_ID=""
+SEED="yes" SPACE_IDS="" CREATE_SPACE="yes" GRANT_GUEST="no"
+GUEST_SP="" AGENT_SP=""
+
+usage() {
+  cat >&2 <<'USAGE'
+usage: genie-data-setup.sh --catalog C --schema S --profile P [options]
+
+  --catalog C          UC catalog holding the agent's data
+  --schema S           UC schema within that catalog
+  --profile P          Databricks CLI profile
+  --warehouse-id W     SQL warehouse (default: first available)
+  --seed yes|no        Seed sample data when the schema is empty (default yes)
+  --space-ids a,b      Use these existing Genie space ids instead of creating one
+  --create-space y|n   Create a space when --space-ids is empty (default yes)
+  --grant-guest y|n    Grant the guest SP CAN_RUN on the space(s) + SELECT on
+                       the tables they reference (default no)
+  --guest-sp ID        Guest service principal application (client) id
+  --agent-sp ID        Agent app service principal application (client) id
+
+Emits: SEED_STATUS, SEED_TABLE_COUNT, GENIE_SPACE_ID, GENIE_SPACE_IDS,
+       GENIE_SPACE_SOURCE, GENIE_MCP_MODE
+USAGE
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --catalog) CATALOG="${2:-}"; shift 2 ;;
+    --schema) SCHEMA="${2:-}"; shift 2 ;;
+    --profile) PROFILE="${2:-}"; shift 2 ;;
+    --warehouse-id) WAREHOUSE_ID="${2:-}"; shift 2 ;;
+    --seed) SEED="${2:-yes}"; shift 2 ;;
+    --space-ids) SPACE_IDS="${2:-}"; shift 2 ;;
+    --create-space) CREATE_SPACE="${2:-yes}"; shift 2 ;;
+    --grant-guest) GRANT_GUEST="${2:-no}"; shift 2 ;;
+    --guest-sp) GUEST_SP="${2:-}"; shift 2 ;;
+    --agent-sp) AGENT_SP="${2:-}"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "unknown flag: $1" >&2; usage; exit 2 ;;
+  esac
+done
+
+[ -n "$CATALOG" ] && [ -n "$SCHEMA" ] && [ -n "$PROFILE" ] || { usage; exit 2; }
+
+# Normalize the yes/no flags once; "None"/"none" is how Phase 0 spells "unset".
+yn() { case "$(printf '%s' "${1:-}" | tr 'A-Z' 'a-z')" in y|yes|true|1) echo yes ;; *) echo no ;; esac; }
+SEED="$(yn "$SEED")"; CREATE_SPACE="$(yn "$CREATE_SPACE")"; GRANT_GUEST="$(yn "$GRANT_GUEST")"
+case "$(printf '%s' "$SPACE_IDS" | tr 'A-Z' 'a-z')" in none|null|"") SPACE_IDS="" ;; esac
+
+dbx() { databricks "$@" --profile "$PROFILE"; }
+
+# ─── warehouse ────────────────────────────────────────────────────────────────
+if [ -z "$WAREHOUSE_ID" ]; then
+  WAREHOUSE_ID="$(dbx warehouses list -o json 2>/dev/null | python3 -c 'import sys,json
+try: ws = json.load(sys.stdin) or []
+except Exception: ws = []
+ws = ws.get("warehouses", ws) if isinstance(ws, dict) else ws
+# Prefer a warehouse that is already RUNNING: a cold start adds minutes to Phase 6c.
+for want in ("RUNNING", None):
+    for w in ws:
+        if want is None or w.get("state") == want:
+            print(w.get("id","")); raise SystemExit
+print("")' 2>/dev/null)"
+fi
+[ -n "$WAREHOUSE_ID" ] || { fail "no SQL warehouse available — Genie cannot run queries without one"; exit 1; }
+note "Phase 6c using warehouse $WAREHOUSE_ID"
+
+sql()        { firefly_sql "$WAREHOUSE_ID" "$1" "$PROFILE"; }
+sql_scalar() { firefly_sql_scalar "$WAREHOUSE_ID" "$1" "$PROFILE"; }
+
+# ─── 1. seed ──────────────────────────────────────────────────────────────────
+# The decision to seed is gated on the schema being empty (or holding nothing but
+# our own seed tables — that is how a half-finished seed self-heals on a re-run).
+# A schema with any foreign table is the user's data: report and leave it alone.
+existing_tables() { sql "SHOW TABLES IN \`$CATALOG\`.\`$SCHEMA\`" 2>/dev/null | cut -f2 | sed '/^$/d'; }
+
+SEED_STATUS="skipped"
+SRC_CATALOG="${SEED_SOURCE%%.*}"; SRC_SCHEMA="${SEED_SOURCE#*.}"
+
+# Newline-delimited strings, not arrays: `mapfile` is bash 4+ and the target is
+# stock macOS bash 3.2 (SHELL-PORTABILITY).
+EXISTING="$(existing_tables)"
+EXISTING_COUNT="$(printf '%s\n' "$EXISTING" | sed '/^$/d' | wc -l | tr -d ' ')"
+
+if [ "$SEED" != "yes" ]; then
+  SEED_STATUS="declined"
+  note "seeding declined at Phase 0 — leaving ${CATALOG}.${SCHEMA} as-is"
+else
+  SRC_TABLES="$(sql "SHOW TABLES IN \`$SRC_CATALOG\`.\`$SRC_SCHEMA\`" 2>/dev/null | cut -f2 | sed '/^$/d')"
+  if [ -z "$SRC_TABLES" ]; then
+    warn "$SEED_SOURCE is not readable from this workspace — cannot seed"
+    SEED_STATUS="source-unavailable"
+  else
+    # Is every existing table one of ours? Then a partial seed can be completed.
+    foreign=0
+    for t in $EXISTING; do
+      printf '%s\n' "$SRC_TABLES" | grep -qxF "$t" || { foreign=1; break; }
+    done
+    # Which source tables are still missing? Distinguishing "nothing to do" from
+    # "seeded 16" matters: a re-run that reports `seeded` looks like it rewrote
+    # the schema when it did nothing at all.
+    MISSING=""
+    for t in $SRC_TABLES; do
+      printf '%s\n' "$EXISTING" | grep -qxF "$t" || MISSING="${MISSING}${MISSING:+ }$t"
+    done
+
+    if [ "$EXISTING_COUNT" -gt 0 ] && [ "$foreign" = "1" ]; then
+      SEED_STATUS="already-populated"
+      note "${CATALOG}.${SCHEMA} already holds tables that are not ours — not seeding"
+    elif [ -z "$MISSING" ]; then
+      SEED_STATUS="already-seeded"
+      ok "${CATALOG}.${SCHEMA} already holds all $EXISTING_COUNT seed table(s) — nothing to do"
+    else
+      [ "$EXISTING_COUNT" -gt 0 ] && note "completing a partial seed ($EXISTING_COUNT present, $(set -- $MISSING; echo $#) missing)"
+      made=0 failed=0
+      for t in $MISSING; do
+        # IF NOT EXISTS is what makes this non-destructive and re-runnable.
+        if sql "CREATE TABLE IF NOT EXISTS \`$CATALOG\`.\`$SCHEMA\`.\`$t\` AS SELECT * FROM \`$SRC_CATALOG\`.\`$SRC_SCHEMA\`.\`$t\`" >/dev/null 2>&1; then
+          made=$((made + 1))
+        else
+          failed=$((failed + 1)); warn "could not seed $t"
+        fi
+      done
+      SEED_STATUS="seeded"
+      [ "$failed" -gt 0 ] && SEED_STATUS="seeded-partial"
+      ok "seeded $made table(s) from $SEED_SOURCE into ${CATALOG}.${SCHEMA}"
+    fi
+  fi
+fi
+
+SEED_TABLE_COUNT="$(existing_tables | wc -l | tr -d ' ')"
+
+# ─── 2. Genie space ───────────────────────────────────────────────────────────
+# Table identifiers the space will reference. Sorted, because the API stores
+# data_sources.tables sorted by identifier and an unsorted payload round-trips
+# differently than it was sent.
+space_tables() { existing_tables | sed "s/^/${CATALOG}.${SCHEMA}./" | LC_ALL=C sort; }
+
+get_space() { dbx api get "/api/2.0/genie/spaces/$1?include_serialized_space=true" 2>/dev/null; }
+
+GENIE_SPACE_ID="" GENIE_SPACE_SOURCE="none" GENIE_MCP_MODE="one"
+RESOLVED_IDS=""
+
+if [ -n "$SPACE_IDS" ]; then
+  # User-supplied ids: verify each is real and readable, then use them verbatim.
+  # These are the only spaces this script is permitted to touch.
+  for sid in $(printf '%s' "$SPACE_IDS" | tr ', ' '\n' | sed '/^$/d'); do
+    if get_space "$sid" | grep -q '"space_id"'; then
+      RESOLVED_IDS="${RESOLVED_IDS}${RESOLVED_IDS:+ }$sid"
+    else
+      warn "Genie space $sid is not readable with this profile — skipping it"
+    fi
+  done
+  if [ -n "$RESOLVED_IDS" ]; then
+    GENIE_SPACE_ID="${RESOLVED_IDS%% *}"
+    GENIE_SPACE_SOURCE="user-supplied"
+    ok "using user-supplied Genie space(s): $RESOLVED_IDS"
+  else
+    warn "none of the supplied space ids were usable — falling back to Genie One"
+  fi
+elif [ "$CREATE_SPACE" = "yes" ]; then
+  WANT_TITLE="$(space_title_for "$CATALOG" "$SCHEMA")"
+  # Ours = exact title match AND covers this schema. Anything else is off-limits.
+  MINE="$(dbx api get "/api/2.0/genie/spaces?page_size=100" 2>/dev/null | FF_TITLE="$WANT_TITLE" python3 -c 'import sys,json,os
+want = os.environ["FF_TITLE"]
+try: d = json.load(sys.stdin) or {}
+except Exception: d = {}
+for s in d.get("spaces") or []:
+    if (s.get("title") or "") == want:
+        print(s.get("space_id","")); break' 2>/dev/null)"
+
+  if [ -n "$MINE" ]; then
+    GENIE_SPACE_ID="$MINE"; GENIE_SPACE_SOURCE="reused-ours"
+    ok "reusing the Genie space this bootstrap created earlier ($MINE)"
+  else
+    TABLES="$(space_tables)"
+    if [ -z "$TABLES" ]; then
+      warn "no tables in ${CATALOG}.${SCHEMA} — not creating an empty Genie space"
+    else
+      REQ="$(mktemp -t ffgenie)"
+      FF_TABLES="$TABLES" FF_TITLE="$WANT_TITLE" FF_WH="$WAREHOUSE_ID" \
+      FF_DESC="Firefly agent data in ${CATALOG}.${SCHEMA}. Created by BOOTSTRAP.md Phase 6c." \
+      python3 -c 'import json, os, sys
+tables = [t for t in os.environ["FF_TABLES"].split("\n") if t.strip()]
+space = {
+    "version": 2,
+    "data_sources": {"tables": [{"identifier": t} for t in sorted(tables)]},
+    "instructions": {},
+}
+sys.stdout.write(json.dumps({
+    "title": os.environ["FF_TITLE"],
+    "description": os.environ["FF_DESC"],
+    "warehouse_id": os.environ["FF_WH"],
+    "serialized_space": json.dumps(space),
+}))' > "$REQ"
+      NEW="$(dbx api post /api/2.0/genie/spaces --json "@$REQ" 2>&1)"
+      rm -f "$REQ"
+      GENIE_SPACE_ID="$(printf '%s' "$NEW" | python3 -c 'import sys,json
+try: print((json.load(sys.stdin) or {}).get("space_id") or "")
+except Exception: print("")' 2>/dev/null)"
+      if [ -n "$GENIE_SPACE_ID" ]; then
+        GENIE_SPACE_SOURCE="created"
+        ok "created Genie space $GENIE_SPACE_ID over $(printf '%s\n' "$TABLES" | sed '/^$/d' | wc -l | tr -d ' ') table(s)"
+        # Round-trip verify: the stored space must hold the tables we sent.
+        got="$(get_space "$GENIE_SPACE_ID" | python3 -c 'import sys,json
+try: d = json.load(sys.stdin) or {}
+except Exception: raise SystemExit
+ss = d.get("serialized_space") or "{}"
+ss = json.loads(ss) if isinstance(ss, str) else ss
+print(len((ss.get("data_sources") or {}).get("tables") or []))' 2>/dev/null)"
+        note "round-trip: space reports ${got:-0} table(s)"
+      else
+        warn "Genie space creation failed — staying on Genie One"
+        printf '%s\n' "$NEW" | head -3 >&2
+      fi
+    fi
+  fi
+else
+  note "Genie space creation declined at Phase 0 — staying on Genie One"
+fi
+
+[ -n "$RESOLVED_IDS" ] || RESOLVED_IDS="$GENIE_SPACE_ID"
+
+# ─── 3. grants ────────────────────────────────────────────────────────────────
+# CAN_RUN is "view and ask questions" — the level an SP needs to serve the agent.
+grant_space_run() {                      # grant_space_run <space_id> <sp_client_id>
+  local sid="$1" sp="$2" req
+  [ -n "$sid" ] && [ -n "$sp" ] || return 0
+  req="$(mktemp -t ffperm)"
+  FF_SP="$sp" python3 -c 'import json,os,sys
+sys.stdout.write(json.dumps({"access_control_list":[
+    {"service_principal_name": os.environ["FF_SP"], "permission_level": "CAN_RUN"}]}))' > "$req"
+  # PATCH adds to the ACL; PUT would replace it and drop the owner's CAN_MANAGE.
+  if dbx api patch "/api/2.0/permissions/genie/$sid" --json "@$req" >/dev/null 2>&1; then
+    ok "granted CAN_RUN on space $sid to $sp"
+  else
+    warn "could not grant CAN_RUN on space $sid to $sp"
+  fi
+  rm -f "$req"
+}
+
+# The tables a space actually references — the set that needs SELECT.
+space_table_identifiers() {              # space_table_identifiers <space_id>
+  get_space "$1" | python3 -c 'import sys,json
+try: d = json.load(sys.stdin) or {}
+except Exception: raise SystemExit
+ss = d.get("serialized_space") or "{}"
+ss = json.loads(ss) if isinstance(ss, str) else ss
+for t in (ss.get("data_sources") or {}).get("tables") or []:
+    ident = t.get("identifier")
+    if ident: print(ident)' 2>/dev/null
+}
+
+grant_table_select() {                   # grant_table_select <sp_client_id> <space_id...>
+  local sp="$1"; shift
+  [ -n "$sp" ] || return 0
+  local sid ident cat sch seen="" n=0
+  for sid in "$@"; do
+    [ -n "$sid" ] || continue
+    for ident in $(space_table_identifiers "$sid"); do
+      cat="${ident%%.*}"; sch="${ident#*.}"; sch="${sch%%.*}"
+      # USE CATALOG / USE SCHEMA once per namespace, then SELECT per table.
+      case " $seen " in
+        *" $cat.$sch "*) ;;
+        *)
+          sql "GRANT USE CATALOG ON CATALOG \`$cat\` TO \`$sp\`" >/dev/null 2>&1
+          sql "GRANT USE SCHEMA ON SCHEMA \`$cat\`.\`$sch\` TO \`$sp\`" >/dev/null 2>&1
+          seen="$seen $cat.$sch"
+          ;;
+      esac
+      sql "GRANT SELECT ON TABLE $ident TO \`$sp\`" >/dev/null 2>&1 && n=$((n + 1))
+    done
+  done
+  [ "$n" -gt 0 ] && ok "granted SELECT on $n table(s) to $sp"
+}
+
+for sid in $RESOLVED_IDS; do
+  [ -n "$AGENT_SP" ] && grant_space_run "$sid" "$AGENT_SP"
+done
+
+if [ "$GRANT_GUEST" = "yes" ] && [ -n "$GUEST_SP" ]; then
+  for sid in $RESOLVED_IDS; do grant_space_run "$sid" "$GUEST_SP"; done
+  # shellcheck disable=SC2086
+  grant_table_select "$GUEST_SP" $RESOLVED_IDS
+elif [ "$GRANT_GUEST" = "yes" ]; then
+  warn "--grant-guest yes but no --guest-sp given — skipping guest grants"
+fi
+
+# ─── 4. decide the app's Genie mode ───────────────────────────────────────────
+# Only claim space mode if the space is really there. agent.py raises ValueError
+# when GENIE_MCP_MODE=space and GENIE_SPACE_ID is empty, which fails the app boot.
+if [ -n "$GENIE_SPACE_ID" ]; then
+  if get_space "$GENIE_SPACE_ID" | grep -q '"space_id"'; then
+    GENIE_MCP_MODE="space"
+  else
+    warn "space $GENIE_SPACE_ID is not readable — staying on Genie One"
+    GENIE_SPACE_ID=""; GENIE_MCP_MODE="one"
+  fi
+fi
+[ "$GENIE_MCP_MODE" = "space" ] || GENIE_SPACE_ID=""
+
+printf 'SEED_STATUS=%s\n'         "$SEED_STATUS"
+printf 'SEED_TABLE_COUNT=%s\n'    "$SEED_TABLE_COUNT"
+printf 'GENIE_SPACE_ID=%s\n'      "$GENIE_SPACE_ID"
+printf 'GENIE_SPACE_IDS=%s\n'     "$RESOLVED_IDS"
+printf 'GENIE_SPACE_SOURCE=%s\n'  "$GENIE_SPACE_SOURCE"
+printf 'GENIE_MCP_MODE=%s\n'      "$GENIE_MCP_MODE"

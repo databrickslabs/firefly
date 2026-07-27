@@ -193,6 +193,14 @@ firefly_neon_project_id() {
 assert_bundle_quickstart_ran() {         # assert_bundle_quickstart_ran <databricks.yml>
   local yml="${1:-agent-build/databricks.yml}"
   [ -f "$yml" ] || { fail "$yml not found — run scripts/assemble_agent.sh (Phase 2) first."; return 1; }
+  # Re-apply the default HERE, not just at source time. The id is set with
+  # `: "${VAR:=...}"` at the top of this file, which runs once; if the caller's
+  # shell has it exported empty, the grep below becomes `grep -q ""` — and that
+  # matches EVERY line, so a bundle quickstart had already rewritten correctly
+  # fails the assert and the reader is told to re-run Phase 3a. Three E2E runs
+  # lost time to that.
+  [ -n "${FIREFLY_PLACEHOLDER_EXPERIMENT_ID:-}" ] \
+    || FIREFLY_PLACEHOLDER_EXPERIMENT_ID=123237888438046
   if grep -q "$FIREFLY_PLACEHOLDER_EXPERIMENT_ID" "$yml"; then
     fail "$yml still holds the placeholder experiment id ($FIREFLY_PLACEHOLDER_EXPERIMENT_ID)."
     note "Phase 3a (quickstart) has not completed against this workspace, so the bundle"
@@ -248,4 +256,116 @@ if bad:
     sys.exit(1)
 print(f"  \u2713 sync.exclude rules hold ({len(block)} entries)")
 PY
+}
+
+# ─── SQL over a warehouse (Phase 6c) ─────────────────────────────────────────
+# Every SQL step in this runbook used to be a `note` telling the reader to open a
+# warehouse session and paste it themselves, so nothing SQL-shaped was ever
+# actually executed or verified. Phase 6c needs real execution (seeding, grants,
+# table counts), so this is the one primitive that runs a statement and returns
+# rows.
+#
+# `wait_timeout` maxes out at 50s server-side, which a 16-table CTAS can exceed,
+# so a statement that is still PENDING/RUNNING when the wait expires is polled to
+# completion rather than reported as a failure. on_wait_timeout=CONTINUE is what
+# keeps it running instead of being cancelled at the 50s mark.
+#
+# Output: one line per result row, tab-separated. Non-zero exit means the
+# statement did not reach SUCCEEDED, with the server's message on stderr.
+: "${FIREFLY_SQL_DEADLINE:=900}"          # seconds to wait for one statement
+
+firefly_sql() {                          # firefly_sql <warehouse_id> <sql> [profile]
+  local wh="$1" sql="$2" prof="${3:-${DB_PROFILE:-}}"
+  [ -n "$wh" ] || { fail "firefly_sql: no warehouse id given"; return 2; }
+  [ -n "$prof" ] || { fail "firefly_sql: no Databricks profile given"; return 2; }
+
+  local req; req="$(mktemp -t ffsql)" || return 2
+  FF_WH="$wh" FF_SQL="$sql" python3 -c 'import json,os,sys
+sys.stdout.write(json.dumps({
+    "warehouse_id": os.environ["FF_WH"],
+    "statement": os.environ["FF_SQL"],
+    "wait_timeout": "50s",
+    "on_wait_timeout": "CONTINUE",
+}))' > "$req" || { rm -f "$req"; fail "firefly_sql: could not build request"; return 2; }
+
+  local out rc
+  out="$(databricks api post /api/2.0/sql/statements --json "@$req" --profile "$prof" 2>&1)"; rc=$?
+  rm -f "$req"
+  if [ "$rc" -ne 0 ]; then
+    fail "firefly_sql: statement submit failed"
+    printf '%s\n' "$out" | head -3 >&2
+    return 1
+  fi
+
+  # PENDING/RUNNING → poll. Anything else is terminal and parsed below.
+  local sid deadline state
+  sid="$(printf '%s' "$out" | python3 -c 'import sys,json
+try: print((json.load(sys.stdin) or {}).get("statement_id") or "")
+except Exception: print("")' 2>/dev/null)"
+  state="$(printf '%s' "$out" | python3 -c 'import sys,json
+try: print(((json.load(sys.stdin) or {}).get("status") or {}).get("state") or "")
+except Exception: print("")' 2>/dev/null)"
+
+  deadline=$(( $(date +%s) + FIREFLY_SQL_DEADLINE ))
+  while [ "$state" = "PENDING" ] || [ "$state" = "RUNNING" ]; do
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+      databricks api post "/api/2.0/sql/statements/$sid/cancel" --profile "$prof" >/dev/null 2>&1
+      fail "firefly_sql: statement $sid still $state after ${FIREFLY_SQL_DEADLINE}s (cancelled)"
+      return 1
+    fi
+    sleep 5
+    out="$(databricks api get "/api/2.0/sql/statements/$sid" --profile "$prof" 2>&1)" || {
+      fail "firefly_sql: polling $sid failed"; return 1; }
+    state="$(printf '%s' "$out" | python3 -c 'import sys,json
+try: print(((json.load(sys.stdin) or {}).get("status") or {}).get("state") or "")
+except Exception: print("")' 2>/dev/null)"
+  done
+
+  printf '%s' "$out" | python3 -c 'import sys,json
+try:
+    d = json.load(sys.stdin) or {}
+except Exception:
+    sys.stderr.write("firefly_sql: unparseable response\n"); sys.exit(1)
+st = d.get("status") or {}
+if st.get("state") != "SUCCEEDED":
+    msg = (st.get("error") or {}).get("message", "")
+    sys.stderr.write("firefly_sql: %s %s\n" % (st.get("state"), msg[:400])); sys.exit(1)
+for row in ((d.get("result") or {}).get("data_array") or []):
+    print("\t".join("" if c is None else str(c) for c in row))
+'
+}
+
+# ─── Vercel API context (Phases 8a and 8e) ───────────────────────────────────
+# Sets V_TOKEN / V_ORG / V_PROJ. Both phases need them and 8a used to be the only
+# place they were derived, so running 8e in a fresh shell produced an empty
+# Authorization header — the verify curl failed and reported "production does not
+# serve $APP_ORIGIN" for a deployment that was perfectly fine. Deriving in one
+# reusable place means a new shell cannot change the answer.
+#
+# Token precedence: explicit env first (CI / token-based setups), then the CLI's
+# macOS store, then its XDG location. A hardcoded path is a silent failure for
+# anyone whose Vercel auth lives elsewhere.
+firefly_vercel_context() {               # firefly_vercel_context [repo_dir]
+  local repo="${1:-${REPO_DIR:-$PWD}}" auth
+  V_TOKEN="${VERCEL_TOKEN:-${V_TOKEN:-}}"
+  for auth in "$HOME/Library/Application Support/com.vercel.cli/auth.json" \
+              "$HOME/.local/share/com.vercel.cli/auth.json"; do
+    [ -n "$V_TOKEN" ] && break
+    [ -f "$auth" ] || continue
+    V_TOKEN=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("token",""))' "$auth" 2>/dev/null || echo "")
+  done
+  [ -n "$V_TOKEN" ] || warn "no Vercel token found — project API calls will fail"
+
+  if [ -f "$repo/.vercel/project.json" ]; then
+    V_ORG=$(python3 -c "import json;print(json.load(open('$repo/.vercel/project.json'))['orgId'])" 2>/dev/null || echo "")
+    V_PROJ=$(python3 -c "import json;print(json.load(open('$repo/.vercel/project.json'))['projectId'])" 2>/dev/null || echo "")
+  else
+    warn "$repo/.vercel/project.json not found — run Phase 8a (vercel link) first"
+  fi
+  export V_TOKEN V_ORG V_PROJ
+}
+
+# Convenience: the single scalar a lot of Phase 6c checks want (COUNT(*), etc).
+firefly_sql_scalar() {                   # firefly_sql_scalar <warehouse_id> <sql> [profile]
+  firefly_sql "$1" "$2" "${3:-${DB_PROFILE:-}}" | head -1 | cut -f1
 }

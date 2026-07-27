@@ -73,6 +73,10 @@ FIREFLY_TRUST_PROXY_CA=1 firefly_bridge_corp_network   # or: TLS_PEM_PATH=<path>
 - [ ] **[ASK — REQUIRED, BLOCKING]** `DB_PROFILE` — name for the local Databricks CLI profile
 - [ ] **[ASK — REQUIRED, BLOCKING]** `UC_CATALOG` — Unity Catalog catalog to use (must allow MANAGE)
 - [ ] **[ASK — REQUIRED, BLOCKING]** `UC_SCHEMA` — schema within that catalog
+- [ ] **[ASK — REQUIRED, BLOCKING]** `SEED_SAMPLE_DATA` — if `$UC_CATALOG.$UC_SCHEMA` has **no tables**, copy `samples.wanderbricks` into it so Genie has something to answer from (16 tables, ~815k rows). `no` leaves the schema untouched
+- [ ] **[ASK — REQUIRED, BLOCKING]** `GENIE_SPACE_IDS` — existing Genie space id(s) to point the agent at, comma-separated. `None` (the default) means bootstrap may create one for you
+- [ ] **[ASK — REQUIRED, BLOCKING]** `CREATE_GENIE_SPACE` — when `GENIE_SPACE_IDS=None`, create a Genie space over the data in `$UC_CATALOG.$UC_SCHEMA`. Ignored when you supplied space ids
+- [ ] **[ASK — REQUIRED, BLOCKING]** `GRANT_GUEST_SPACE_ACCESS` — **ask this only when `GENIE_SPACE_IDS` is set.** Grant the guest SP `CAN_RUN` on those spaces and `SELECT` on the tables they reference, so guest users can ask data questions too
 - [ ] **[ASK — REQUIRED, BLOCKING]** `AGENT_APP_NAME` — Databricks App name (dev target; bundle hardcodes this)
 - [ ] **[ASK — REQUIRED, BLOCKING]** `DATABRICKS_ACCOUNT_ID` — account ID (a **UUID**, e.g. `32aad83d-ef89-4e74-9969-77784815fd46`) from `accounts.cloud.databricks.com` (Account Console → top-right menu). NB: the account ID is a UUID; the *workspace* ID is the numeric one.
 - [ ] **[ASK — REQUIRED, BLOCKING]** `LAKEBASE_NAME` — name for the new Lakebase instance
@@ -92,6 +96,10 @@ FIREFLY_TRUST_PROXY_CA=1 firefly_bridge_corp_network   # or: TLS_PEM_PATH=<path>
 | `DB_PROFILE` | `firefly-deploy` | Any name for the profile in `~/.databrickscfg` |
 | `UC_CATALOG` | `workspace` | Writable catalog with MANAGE permission |
 | `UC_SCHEMA` | `default` | Schema within that catalog |
+| `SEED_SAMPLE_DATA` | `yes` | Only acts when the schema is empty; never overwrites an existing table |
+| `GENIE_SPACE_IDS` | `None` | From a space's URL: `…/genie/rooms/<space-id>`, or `databricks genie list-spaces` |
+| `CREATE_GENIE_SPACE` | `yes` | Titled `Firefly Genie Agent — <catalog>.<schema>`; reused, not duplicated, on a re-run |
+| `GRANT_GUEST_SPACE_ACCESS` | `yes` | Asked **only** when `GENIE_SPACE_IDS` is set |
 | `AGENT_APP_NAME` | `firefly-openai-managed-mem-v2` | Dev target; bundle hardcodes this |
 | `DATABRICKS_ACCOUNT_ID` | — | Account **UUID** from `accounts.cloud.databricks.com` (not the numeric workspace ID) |
 | `LAKEBASE_NAME` | `firefly-lb` | Name for the new Lakebase instance |
@@ -277,6 +285,13 @@ on every `bundle deploy`/`bundle run`.
 ### 3c. Create the UC wheels volume
 
 ```bash
+# The schema is assumed to exist, and on a fresh catalog it does not — the
+# catalog can hold nothing but `information_schema`, and the volume create then
+# fails with a message about the volume rather than the missing schema. Create it
+# first; this is a no-op when it is already there.
+databricks schemas create "$UC_SCHEMA" "$UC_CATALOG" --profile "$DB_PROFILE" 2>/dev/null \
+  || echo "schema ${UC_CATALOG}.${UC_SCHEMA} already exists — continuing."
+
 # Idempotent: create only if the volume doesn't already exist (create errors on re-run).
 if databricks volumes read "${UC_CATALOG}.${UC_SCHEMA}.firefly_wheels" --profile "$DB_PROFILE" &>/dev/null; then
   echo "UC volume ${UC_CATALOG}.${UC_SCHEMA}.firefly_wheels already exists — skipping."
@@ -338,6 +353,19 @@ databricks apps get "$AGENT_APP_NAME" -o json --profile "$DB_PROFILE" \
   | python3 -c "import sys,json; d=json.load(sys.stdin); \
     print(d['app_status']['state'], d.get('active_deployment',{}).get('status',{}).get('state',''))"
 # Expected: RUNNING SUCCEEDED
+
+# Do NOT trust the deploy's exit code. Databricks CLI v1.9.0 can panic
+# (nil pointer in ResourceApp.OverrideChangeDesc) and still exit 0, so the
+# runbook reads a crashed deploy as success and every later phase then fails
+# opaquely on JSON-parsing a CLI error string. Assert the app actually exists.
+if ! databricks apps get "$AGENT_APP_NAME" --profile "$DB_PROFILE" >/dev/null 2>&1; then
+  echo "✗ Phase 4 did not create $AGENT_APP_NAME, whatever the deploy exit code said." >&2
+  echo "  Re-read the deploy output for a panic or an env-var rejection." >&2
+  echo "  A stale bundle state can also cause this: if the app was deleted but" >&2
+  echo "  /Workspace/Users/<you>/.bundle/firefly_openai_managed_mem survives, the" >&2
+  echo "  CLI diffs against an app that is gone. Delete that path and redeploy." >&2
+  return 2>/dev/null || exit 1
+fi
 # bootstrap.sh Phase 4 fails closed if agent-build or guest-manager uv.lock
 # stamps pypi-proxy.dev.databricks.com (unsanctioned index; implicated in the Apps
 # install timeouts). Live pip/uv config only WARNS — set FIREFLY_STRICT_PYPI_PROXY=1
@@ -354,6 +382,14 @@ databricks apps get "$AGENT_APP_NAME" -o json --profile "$DB_PROFILE" \
 
 ## Phase 5 — Set up UC managed memory (required for the headline feature)
 
+> **Workspace prerequisite: the "Managed Memory for Agents" preview.** Without it
+> this phase fails with `NotImplemented: The Managed Memory for Agents preview is
+> not enabled for this workspace` — and there is nothing you can do about it from
+> here; it is enabled per-workspace by Databricks. This was the single
+> most-reported gap in E2E runs (9 of 12) because the runbook charged ahead and
+> failed opaquely. The preflight below tells you up front, and lets the rest of
+> the bootstrap continue: everything except cross-session memory still works.
+
 ```bash
 # Get the app service principal's client ID from the deployed app
 SP_CLIENT_ID=$(databricks apps get "$AGENT_APP_NAME" -o json \
@@ -362,10 +398,21 @@ SP_CLIENT_ID=$(databricks apps get "$AGENT_APP_NAME" -o json \
     d=json.load(sys.stdin); \
     print(d['service_principal_client_id'])")
 
-cd "$REPO_DIR/agent-build"
-uv run --python 3.12 python scripts/setup_memory_store.py "$SP_CLIENT_ID" \
-  --memory-store "$UC_CATALOG.$UC_SCHEMA.firefly_managed_memory" \
-  --profile "$DB_PROFILE"
+# Preflight: is the preview on? A 501/NotImplemented here means it is not.
+MEMORY_PREVIEW=$(databricks api get /api/2.0/memory-stores --profile "$DB_PROFILE" 2>&1 \
+  | grep -qiE 'not enabled|NotImplemented|501' && echo off || echo on)
+echo "Managed Memory preview: $MEMORY_PREVIEW"
+
+if [ "$MEMORY_PREVIEW" = "off" ]; then
+  echo "SKIPPING Phase 5 — enable the 'Managed Memory for Agents' preview on this"
+  echo "workspace, then re-run this phase. Bootstrap continues; the agent will run"
+  echo "without cross-session memory until then."
+else
+  cd "$REPO_DIR/agent-build"
+  uv run --python 3.12 python scripts/setup_memory_store.py "$SP_CLIENT_ID" \
+    --memory-store "$UC_CATALOG.$UC_SCHEMA.firefly_managed_memory" \
+    --profile "$DB_PROFILE"
+fi
 # The UC memory store is a distinct securable — not Lakebase, not auto-created.
 # setup_memory_store.py calls the REST API directly (no CLI equivalent).
 ```
@@ -382,11 +429,8 @@ databricks api patch "/api/2.1/unity-catalog/permissions/catalog/$UC_CATALOG" \
   --profile "$DB_PROFILE" \
   --json "{\"changes\":[{\"principal\":\"$SP_CLIENT_ID\",\"add\":[\"USE CATALOG\"]}]}"
 
-# Then USE SCHEMA + SELECT on the schemas/tables you want Genie to answer over.
-# The easiest path is a warehouse SQL session:
-#   GRANT USE SCHEMA, SELECT ON SCHEMA $UC_CATALOG.$UC_SCHEMA TO `$SP_CLIENT_ID`;
-
-# 2. SQL warehouse CAN_USE (required for Genie to run queries)
+# 2. SQL warehouse CAN_USE (required for Genie to run queries, and by the
+#    GRANTs below — resolve it before them).
 WAREHOUSE_ID=$(databricks warehouses list -o json --profile "$DB_PROFILE" \
   | python3 -c "import sys,json; ws=json.load(sys.stdin); \
     print(ws[0]['id'] if ws else '')")
@@ -395,6 +439,18 @@ databricks api patch \
   --profile "$DB_PROFILE" \
   --json "{\"access_control_list\":[{\"service_principal_name\":\"$SP_CLIENT_ID\", \
     \"permission_level\":\"CAN_USE\"}]}"
+
+# 3. USE SCHEMA + SELECT on the data Genie answers over.
+#
+# These used to be commented-out SQL telling you to "open a warehouse session"
+# and paste them yourself — which does not work: the principal has to be
+# backquoted in SQL, and backquotes inside a double-quoted `--json "..."`
+# argument are command substitution. Nobody could run them as written, so the
+# grants were silently skipped. firefly_sql executes them directly.
+firefly_sql "$WAREHOUSE_ID" \
+  "GRANT USE SCHEMA ON SCHEMA \`$UC_CATALOG\`.\`$UC_SCHEMA\` TO \`$SP_CLIENT_ID\`"
+firefly_sql "$WAREHOUSE_ID" \
+  "GRANT SELECT ON SCHEMA \`$UC_CATALOG\`.\`$UC_SCHEMA\` TO \`$SP_CLIENT_ID\`"
 ```
 
 ---
@@ -436,9 +492,14 @@ GUEST_SP_SECRET=$(databricks service-principal-secrets-proxy create \
 store_secret GUEST_SP_CLIENT_ID "$GUEST_SP_CLIENT_ID"
 store_secret GUEST_SP_SECRET    "$GUEST_SP_SECRET"
 
-# 4. Grant the guest SP data access (run in a SQL warehouse session):
-#    GRANT USE CATALOG ON CATALOG $UC_CATALOG TO `$GUEST_SP_CLIENT_ID`;
-#    GRANT USE SCHEMA, SELECT ON SCHEMA $UC_CATALOG.$UC_SCHEMA TO `$GUEST_SP_CLIENT_ID`;
+# 4. Grant the guest SP data access. Executed, not described: see the note in
+#    Phase 6 — backquoted principals cannot be pasted into `--json "..."`.
+firefly_sql "$WAREHOUSE_ID" \
+  "GRANT USE CATALOG ON CATALOG \`$UC_CATALOG\` TO \`$GUEST_SP_CLIENT_ID\`"
+firefly_sql "$WAREHOUSE_ID" \
+  "GRANT USE SCHEMA ON SCHEMA \`$UC_CATALOG\`.\`$UC_SCHEMA\` TO \`$GUEST_SP_CLIENT_ID\`"
+firefly_sql "$WAREHOUSE_ID" \
+  "GRANT SELECT ON SCHEMA \`$UC_CATALOG\`.\`$UC_SCHEMA\` TO \`$GUEST_SP_CLIENT_ID\`"
 
 # 5. SQL warehouse CAN_USE (required for Genie to run queries as the guest SP)
 # Re-use WAREHOUSE_ID from Phase 6 if still in shell; otherwise list warehouses again.
@@ -458,20 +519,23 @@ databricks api patch \
 
 ---
 
-## Phase 6c — Confirm Genie has data to query
+## Phase 6c — Give Genie data, and a space, to work with
 
 Phases 6 and 6b grant catalog, schema, and warehouse access. On a **fresh
 workspace**, Genie One can still return empty or useless answers when the
 granted schema has **no tables** — the agent and MCP plumbing work, but there
-is nothing to query. Check now and record the result; do **not** create tables
-on the user's behalf.
+is nothing to query.
+
+This phase acts on the four Phase 0 answers: `SEED_SAMPLE_DATA`,
+`GENIE_SPACE_IDS`, `CREATE_GENIE_SPACE`, and `GRANT_GUEST_SPACE_ACCESS`. It runs
+here, after Phase 6, because a Genie space needs the `WAREHOUSE_ID` that Phase 6
+resolves.
 
 ### Check
 
 ```bash
 # Tables in the schema you granted in Phase 6?
 databricks tables list "$UC_CATALOG" "$UC_SCHEMA" --profile "$DB_PROFILE"
-# Empty output → note it and continue bootstrap. Tables present → proceed.
 ```
 
 Or, in a SQL warehouse session:
@@ -480,8 +544,71 @@ Or, in a SQL warehouse session:
 SHOW TABLES IN $UC_CATALOG.$UC_SCHEMA;
 ```
 
-If the check is empty, continue through Phases 7–9 (infra and guest login can
-still verify). At the end of this runbook, follow **Next steps — no UC data**.
+### Seed data and resolve a Genie space
+
+One script does all of it, and `scripts/bootstrap.sh` calls it identically, so the
+runbook and the automated runner cannot drift. It is safe to re-run: it never
+overwrites an existing table and never creates a second space.
+
+```bash
+cd "$REPO_DIR"
+
+# $SP_CLIENT_ID is the agent App's service principal, captured in Phase 5. Re-read
+# it if this is a fresh shell — the app needs CAN_RUN on whatever space we use.
+: "${SP_CLIENT_ID:=$(databricks apps get "$AGENT_APP_NAME" -o json --profile "$DB_PROFILE" \
+  | python3 -c 'import sys,json; print(json.load(sys.stdin).get("service_principal_client_id") or "")')}"
+
+# Captures SEED_STATUS / GENIE_SPACE_ID / GENIE_MCP_MODE into this shell.
+# Progress goes to stderr, so `eval` only ever consumes KEY=value lines.
+eval "$(bash scripts/genie-data-setup.sh \
+  --catalog "$UC_CATALOG" --schema "$UC_SCHEMA" --profile "$DB_PROFILE" \
+  --warehouse-id "${WAREHOUSE_ID:-}" \
+  --seed "${SEED_SAMPLE_DATA:-yes}" \
+  --space-ids "${GENIE_SPACE_IDS:-None}" \
+  --create-space "${CREATE_GENIE_SPACE:-yes}" \
+  --grant-guest "${GRANT_GUEST_SPACE_ACCESS:-no}" \
+  --guest-sp "${GUEST_SP_CLIENT_ID:-}" \
+  --agent-sp "$SP_CLIENT_ID")"
+
+echo "seed=$SEED_STATUS tables=$SEED_TABLE_COUNT mode=$GENIE_MCP_MODE space=$GENIE_SPACE_ID"
+store_secret GENIE_SPACE_ID "$GENIE_SPACE_ID"
+```
+
+`SEED_STATUS` tells you what happened, and each value is a deliberate outcome:
+
+| `SEED_STATUS` | Meaning |
+|---|---|
+| `seeded` | The schema was empty; sample tables were copied in |
+| `already-seeded` | Every sample table was already there — nothing was written |
+| `already-populated` | The schema holds **your** tables; bootstrap left them alone |
+| `declined` | You answered `no` at Phase 0 |
+| `source-unavailable` | `samples.wanderbricks` is not readable from this workspace |
+
+### Point the app at the space
+
+Only when `GENIE_MCP_MODE=space`. Phase 4 deployed the app before this phase, so
+the app does not yet know the space exists — the env var arrives with a redeploy.
+
+```bash
+if [ "$GENIE_MCP_MODE" = "space" ]; then
+  cd "$REPO_DIR/agent-build"
+  databricks bundle deploy --profile "$DB_PROFILE" -t dev \
+    --var "catalog=$UC_CATALOG" --var "schema=$UC_SCHEMA" \
+    --var "genie_mcp_mode=space" --var "genie_space_id=$GENIE_SPACE_ID"
+  databricks bundle run agent_openai_agents_sdk --profile "$DB_PROFILE" -t dev \
+    --var "catalog=$UC_CATALOG" --var "schema=$UC_SCHEMA" \
+    --var "genie_mcp_mode=space" --var "genie_space_id=$GENIE_SPACE_ID"
+fi
+```
+
+> **Pass both `--var`s or neither.** `agent.py` raises
+> `ValueError: GENIE_MCP_MODE=space requires GENIE_SPACE_ID` when the mode is
+> `space` and the id is empty, and the app fails to boot instead of falling back.
+> The bundle defaults (`one` / empty) are the safe pair, which is why a run that
+> resolved no space simply skips this block.
+
+If the schema is still empty after this phase, continue through Phases 7–9 (infra
+and guest login can still verify) and then follow **Next steps — no UC data**.
 
 ---
 
@@ -552,16 +679,9 @@ vercel link --project "$VERCEL_PROJECT" --scope "$VERCEL_TEAM" --yes --non-inter
 # then the CLI's store on macOS, then its XDG location. A single hardcoded path is a
 # silent 404 or a hard stop for anyone whose Vercel auth does not live there — and
 # ~/Library/.../auth.json only exists after an interactive `vercel login`.
-V_TOKEN="${VERCEL_TOKEN:-}"
-for _v_auth in "$HOME/Library/Application Support/com.vercel.cli/auth.json" \
-               "$HOME/.local/share/com.vercel.cli/auth.json"; do
-  [[ -n "$V_TOKEN" ]] && break
-  [[ -f "$_v_auth" ]] || continue
-  V_TOKEN=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("token",""))' "$_v_auth" 2>/dev/null || echo "")
-done
-[[ -n "$V_TOKEN" ]] || echo "WARNING: no Vercel token found; framework preset will not be set (routes may 404)"
-V_ORG=$(python3 -c "import json;print(json.load(open('$REPO_DIR/.vercel/project.json'))['orgId'])")
-V_PROJ=$(python3 -c "import json;print(json.load(open('$REPO_DIR/.vercel/project.json'))['projectId'])")
+# Sets V_TOKEN / V_ORG / V_PROJ (scripts/lib/runbook.sh). Phase 8e calls the same
+# helper, so a fresh shell there cannot produce a different answer.
+firefly_vercel_context "$REPO_DIR"
 curl -s -X PATCH "https://api.vercel.com/v9/projects/$V_PROJ?teamId=$V_ORG" \
   -H "Authorization: Bearer $V_TOKEN" -H "Content-Type: application/json" \
   -d '{"framework":"nextjs"}' -o /dev/null
@@ -615,6 +735,15 @@ ENCRYPTION_KEY=$(openssl rand -hex 32)
 GUEST_API_SECRET=$(openssl rand -hex 64)
 DB_URL=$(read_secret DATABASE_URL)   # from state.env
 
+# Persist the minted secrets NOW, not at the end of Phase 8. They are generated
+# here and were only written to state.env in 8d; a shell that died in between
+# left Vercel holding a value the local side no longer knew, and `vercel env
+# pull` returns an 11-character redacted placeholder rather than the secret. The
+# only recovery was a remint. Writing them at mint time removes that window.
+store_secret BETTER_AUTH_SECRET "$BETTER_AUTH_SECRET"
+store_secret ENCRYPTION_KEY     "$ENCRYPTION_KEY"
+store_secret GUEST_API_SECRET   "$GUEST_API_SECRET"
+
 # Clear stale JWKS. Phase 7 REUSES a same-named Neon project, but BETTER_AUTH_SECRET above is
 # freshly minted every run. Better Auth's jwt plugin stores a JWKS encrypted under that secret;
 # a leftover jwks row from an earlier run (different secret) fails to decrypt, so every
@@ -625,6 +754,15 @@ cd "$REPO_DIR" && DATABASE_URL="$DB_URL" node --input-type=module -e \
 
 # Use --value (no stdin) + --force (idempotent overwrite) + --non-interactive. A plain
 # `vercel env add … <<< value` for PREVIEW scope stalls on a "? Git branch?" prompt.
+# An empty AGENT_APP_URL means Phase 4 never created the app. Setting it anyway
+# succeeds, and the frontend then deploys pointing at nothing — the guest panel
+# loads and simply cannot reach the agent, which looks like a frontend bug.
+if [ -z "${AGENT_APP_URL:-}" ]; then
+  echo "✗ AGENT_APP_URL is empty — Phase 4 did not produce a running app." >&2
+  echo "  Fix Phase 4 before deploying the frontend, or it will point at nothing." >&2
+  return 2>/dev/null || exit 1
+fi
+
 for SCOPE in preview production; do
   add() { vercel env add "$1" "$SCOPE" --value "$2" --force --non-interactive --scope "$VERCEL_TEAM"; }
   add DATABRICKS_AGENT_APP_URL          "$AGENT_APP_URL"
@@ -711,6 +849,12 @@ store_secret GUEST_API_SECRET "$GUEST_API_SECRET"
 ```bash
 # #19 reports success at every earlier step and only surfaces later as "Invalid token"
 # on the guest login link, so assert the match rather than assuming it.
+#
+# Re-derive the Vercel context: these come from 8a, and in a new shell they are
+# empty. The curl then sends "Authorization: Bearer " and this step reports that
+# production does not serve $APP_ORIGIN when the deployment is in fact correct.
+firefly_vercel_context "$REPO_DIR"
+
 SERVING=$(curl -sf -H "Authorization: Bearer $V_TOKEN" \
   "https://api.vercel.com/v9/projects/$V_PROJ?teamId=$V_ORG" \
   | python3 -c 'import json,sys; t=(json.load(sys.stdin).get("targets") or {}).get("production") or {}; print("\n".join(t.get("alias") or []))')
@@ -862,10 +1006,20 @@ already has the app loaded can consume the link before you read it.
 
 ## Next steps — no UC data
 
-Apply this section **only if Phase 6c found no tables** in `$UC_CATALOG.$UC_SCHEMA`.
+Apply this section **only if `$UC_CATALOG.$UC_SCHEMA` is still empty after Phase 6c** —
+i.e. `SEED_STATUS` was `declined` (you answered `no` to `SEED_SAMPLE_DATA`) or
+`source-unavailable` (`samples.wanderbricks` is not readable from this workspace).
 Bootstrap can complete successfully — app, guest login, and memory may all work —
 but Genie will not answer data questions until queryable tables exist in a schema
 the agent SP can read.
+
+To seed after the fact, re-run just Phase 6c's script; it is idempotent:
+
+```bash
+cd "$REPO_DIR" && bash scripts/genie-data-setup.sh \
+  --catalog "$UC_CATALOG" --schema "$UC_SCHEMA" --profile "$DB_PROFILE" \
+  --seed yes --create-space yes --agent-sp "$SP_CLIENT_ID"
+```
 
 **Recommended next steps for the user:**
 
@@ -881,7 +1035,10 @@ the agent SP can read.
    "does the panel load?"). Empty or evasive answers after data is loaded usually
    mean missing grants on the new schema/tables, not a broken deploy.
 
-Do not auto-create seed tables during bootstrap unless the user explicitly asks.
+Seeding is offered as a Phase 0 blocking ask (`SEED_SAMPLE_DATA`), so it is always
+the user's decision. Never seed a schema that already holds tables you did not
+create, and never overwrite an existing table — Phase 6c reports
+`already-populated` and leaves such a schema alone.
 
 ---
 
