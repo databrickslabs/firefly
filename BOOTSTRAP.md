@@ -155,10 +155,23 @@ databricks auth login --host "$DATABRICKS_HOST" --profile "$DB_PROFILE"
 # succeed with one enabled: the app deploys, the frontend deploys, guest login
 # works, and then every Databricks data call from Vercel 403s. Meeting that after
 # everything looks fine is how it gets misread as an application bug.
-databricks api get /api/2.0/ip-access-lists --profile "$DB_PROFILE" 2>/dev/null \
-  | python3 -c "import sys,json; d=json.load(sys.stdin) or {}; \
-    e=[l['label'] for l in (d.get('ip_access_lists') or []) if l.get('enabled')]; \
-    print('ENABLED IP allowlist(s):', e) if e else print('no enabled IP allowlist')"
+# Keep stderr, and never let the parser assume success. Piping a discarded-stderr
+# call into json.load means any failure — endpoint 404, expired auth, CLI missing —
+# surfaces as `JSONDecodeError: Expecting value`, which reads like a bad API
+# response rather than naming the real cause.
+ACL_RAW="$(databricks api get /api/2.0/ip-access-lists --profile "$DB_PROFILE" 2>&1)"
+printf '%s' "$ACL_RAW" | python3 -c "
+import sys, json
+raw = sys.stdin.read().strip()
+if not raw:
+    print('could not check the IP allowlist: no response from the API'); raise SystemExit
+try:
+    d = json.loads(raw) or {}
+except ValueError:
+    print('could not check the IP allowlist. The API said:'); print('  ' + raw[:200]); raise SystemExit
+e = [l.get('label') for l in (d.get('ip_access_lists') or []) if l.get('enabled')]
+print('ENABLED IP allowlist(s): ' + ', '.join(filter(None, e)) if e else 'no enabled IP allowlist')
+"
 # If any are enabled, Vercel's egress must be allowed or the data plane refuses it.
 # That is a network decision this runbook cannot make — see "Enterprise network
 # controls". Everything else still works.
@@ -534,7 +547,13 @@ the embedded panel redirects to Databricks OAuth instead of loading.
 #    orphans the old one. Reuse an existing firefly-guest-sp if present.
 GUEST_SP_RESP=$(databricks service-principals list \
   --filter 'displayName eq "firefly-guest-sp"' -o json --profile "$DB_PROFILE" 2>/dev/null \
-  | python3 -c "import sys,json;l=json.load(sys.stdin) or [];m=[s for s in l if s.get('displayName')=='firefly-guest-sp'];print(json.dumps(m[0]) if m else '')")
+  | python3 -c "
+import sys, json
+raw = sys.stdin.read().strip()
+try: l = json.loads(raw) if raw else []
+except ValueError: l = []          # a failed call means 'no match', not a traceback
+m = [s for s in (l or []) if s.get('displayName') == 'firefly-guest-sp']
+print(json.dumps(m[0]) if m else '')")
 if [[ -z "$GUEST_SP_RESP" ]]; then
   GUEST_SP_RESP=$(databricks service-principals create \
     --display-name "firefly-guest-sp" -o json --profile "$DB_PROFILE")
@@ -694,7 +713,12 @@ and guest login can still verify) and then follow **Next steps — no UC data**.
 
 # Get org ID (if the account belongs to an org; skip --org-id if personal account)
 ORG_ID=$(neonctl orgs list --output json 2>/dev/null \
-  | python3 -c "import sys,json; orgs=json.load(sys.stdin); print(orgs[0]['id'] if orgs else '')" \
+  | python3 -c "
+import sys, json
+raw = sys.stdin.read().strip()
+try: orgs = json.loads(raw) if raw else []
+except ValueError: orgs = []       # empty rather than JSONDecodeError
+print(orgs[0]['id'] if orgs else '')" \
   || echo "")
 
 # Create project — IDEMPOTENT: Neon project names are NOT unique (id-based); a plain

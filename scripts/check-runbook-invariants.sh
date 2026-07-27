@@ -638,6 +638,30 @@ else
   bad "a step runs before the tool that runs it exists:$ORDER_BAD"
 fi
 
+# ── 27. Never pipe a discarded-stderr call into a parser. ───────────────────
+# Written three separate times today, and each time the failure mode was the same:
+# `cmd 2>/dev/null | python3 -c "json.load(...)"` turns ANY failure — endpoint 404,
+# expired auth, tool not installed — into `JSONDecodeError: Expecting value`, which
+# reads like a bad API response and hides the real cause. The seed probe had it, the
+# Phase 5 preflight had it, and the IP-allowlist check had it.
+PIPE_BLIND_BAD="$(python3 - <<'PYCHK'
+import re
+t = open('BOOTSTRAP.md').read()
+bad = []
+# A `2>/dev/null` command piped straight into a json.load with no guard.
+for m in re.finditer(r'2>/dev/null[^\n]*\\?\n?[^\n]*\|[^\n]*python3[^\n]*', t):
+    seg = t[m.start():m.start() + 400]
+    if 'json.load' in seg and 'except' not in seg and 'if not raw' not in seg:
+        bad.append(m.group(0)[:60].replace('\n', ' '))
+print(' '.join(bad))
+PYCHK
+)"
+if [[ -z "$PIPE_BLIND_BAD" ]]; then
+  pass "no runbook step pipes a discarded-stderr call into an unguarded parser."
+else
+  bad "a parser will report JSONDecodeError instead of the real cause:$PIPE_BLIND_BAD"
+fi
+
 # ── 15. The runner itself must parse, under bash AND zsh. ────────────────────
 # Invariant 5 checks every ```bash block in BOOTSTRAP.md and sources the shared
 # libs, but nothing ever ran `bash -n` on scripts/bootstrap.sh. A stray edit left
