@@ -731,6 +731,31 @@ else
   bad "these scripts do not parse — the runner would die at that line:$SHELL_PARSE_BAD"
 fi
 
+# ── 28. Phase 0a's confirmation command must list every var the bridge sets ───
+# The bridge exported CURL_CA_BUNDLE and REQUESTS_CA_BUNDLE, and Phase 9's smoke
+# tests depend on CURL_CA_BUNDLE, but the documented `env | grep` omitted both --
+# so a reader following the runbook could not verify the trust var the later phases
+# rely on. Derive the expected set from the bridge itself rather than restating it
+# here, so adding an export cannot silently outrun the confirmation step.
+CONFIRM_MISSING="$(python3 - <<'PYCHK'
+import re
+bridge = open('scripts/lib/corp-network.sh').read()
+names = ('UV_DEFAULT_INDEX', 'UV_SYSTEM_CERTS', 'PIP_INDEX_URL',
+         'COREPACK_NPM_REGISTRY', 'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE',
+         'CURL_CA_BUNDLE', 'REQUESTS_CA_BUNDLE')
+want = [n for n in names if re.search(r'\b' + n + r'\b', bridge)]
+# Every line of the runbook that documents an `env | grep` confirmation.
+confirm = [l for l in open('BOOTSTRAP.md') if 'env |' in l and 'grep' in l]
+blob = ' '.join(confirm)
+print(' '.join(n for n in want if n not in blob))
+PYCHK
+)"
+if [[ -z "$CONFIRM_MISSING" ]]; then
+  pass "Phase 0a's confirmation lists every proxy/CA var the bridge sets."
+else
+  bad "the bridge sets vars Phase 0a's confirmation cannot show:$CONFIRM_MISSING"
+fi
+
 echo
 if [[ "$FAILED" -eq 0 ]]; then
   echo "All runbook invariants hold."

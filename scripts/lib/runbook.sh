@@ -345,11 +345,17 @@ for row in ((d.get("result") or {}).get("data_array") or []):
 # decides whether the data plane works at all, and it appears in the phase people
 # read when something has already gone wrong.
 #
-# "Could not determine" is a distinct answer from "there is none". Echoes exactly
-# one of:
-#   none                 checked, nothing enabled
-#   enabled:<labels>     checked, these are enabled
-#   unknown:<reason>      could not check — say why, never imply safety
+# "Could not determine" is a distinct answer from "there is none" — and a workspace
+# whose TIER has no IP-allowlist feature is a third thing again. That one reads like
+# a failure ("Error: IP access list is not available in the pricing tier of this
+# workspace") but is actually a determinate, reassuring answer: the feature does not
+# exist here, so nothing can be enabled and the data-plane risk does not apply.
+# Reporting it as "could not check" is needlessly alarming; reporting it as a bare
+# "none" throws away why. Echoes exactly one of:
+#   none                    checked, nothing enabled
+#   enabled:<labels>        checked, these are enabled
+#   unavailable:<reason>    the tier has no such feature — implies none, safely
+#   unknown:<reason>        could not check — say why, never imply safety
 firefly_ip_allowlist_status() {           # firefly_ip_allowlist_status [profile]
   local prof="${1:-${DB_PROFILE:-}}" raw
   [ -n "$prof" ] || { echo "unknown:no profile given"; return 0; }
@@ -362,10 +368,16 @@ if not raw:
 try:
     d = json.loads(raw)
 except ValueError:
-    # Not JSON: the CLI or the API said something. Pass its own words through —
-    # a trial workspace answers "not available in the pricing tier", which is a
-    # real answer and must never be rendered as "none".
-    print("unknown:" + " ".join(raw.split())[:160]); sys.exit()
+    # Not JSON: the CLI or the API said something. Pass its own words through, but
+    # separate the tier answer from a genuine failure — it is determinate, and
+    # calling it "could not check" sends the reader hunting an auth problem.
+    flat = " ".join(raw.split())
+    if re.search(r"not available in the pricing tier|not supported.{0,30}tier"
+                 r"|requires.{0,20}(premium|enterprise)", flat, re.I):
+        print("unavailable:" + flat[:160])
+    else:
+        print("unknown:" + flat[:160])
+    sys.exit()
 if not isinstance(d, dict):
     print("unknown:unexpected response shape"); sys.exit()
 on = [l.get("label") or "?" for l in (d.get("ip_access_lists") or [])

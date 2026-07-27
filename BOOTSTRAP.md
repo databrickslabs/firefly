@@ -48,7 +48,7 @@ source scripts/lib/runbook.sh        # store_secret / read_secret, CLI installer
 firefly_bridge_corp_network
 
 # Confirm what got set (empty output just means nothing needed bridging):
-env | grep -E 'UV_DEFAULT_INDEX|COREPACK_NPM_REGISTRY|NODE_EXTRA_CA_CERTS|SSL_CERT_FILE'
+env | grep -E 'UV_DEFAULT_INDEX|UV_SYSTEM_CERTS|PIP_INDEX_URL|COREPACK_NPM_REGISTRY|NODE_EXTRA_CA_CERTS|SSL_CERT_FILE|CURL_CA_BUNDLE|REQUESTS_CA_BUNDLE'
 ```
 
 **Keep this shell.** Both `source` lines define functions that later phases call
@@ -164,6 +164,12 @@ case "$ACL_STATUS" in
   none)      echo "no enabled IP allowlist on this workspace" ;;
   enabled:*) echo "ENABLED IP allowlist(s): ${ACL_STATUS#enabled:}"
              echo "  Vercel's egress must be allowed or every data call 403s." ;;
+  unavailable:*)
+             # A determinate, reassuring answer that merely LOOKS like an error.
+             echo "no IP allowlist is possible on this workspace's tier"
+             echo "  (${ACL_STATUS#unavailable:})"
+             echo "  The feature does not exist here, so the data-plane risk this"
+             echo "  check exists for does not apply. Not a failure." ;;
   unknown:*) echo "could NOT determine the IP allowlist: ${ACL_STATUS#unknown:}"
              echo "  Treat that as unknown, never as safe." ;;
 esac
@@ -999,6 +1005,12 @@ WARN
     ;;
   none)
     echo "  ok: no enabled IP allowlist on this workspace - the app can reach it"
+    ;;
+  unavailable:*)
+    # Looks like an error, is actually an answer: no allowlist can exist here.
+    echo "  ok: this workspace's tier has no IP-allowlist feature, so none is"
+    echo "      enforced - the app can reach it"
+    echo "      (${ACL_STATUS#unavailable:})"
     ;;
   unknown:*)
     # NOT "ok". The check did not run, and saying otherwise is a false all-clear
