@@ -607,6 +607,15 @@ note "DATABRICKS_MEMORY_STORE resolves to $UC_CATALOG.$UC_SCHEMA.firefly_managed
 
 echo
 step "3c. Create UC wheels volume"
+# The schema is assumed to exist; on a fresh catalog it does not (the catalog can
+# hold nothing but information_schema), and the volume create then fails with a
+# message about the volume rather than the missing schema.
+if [[ "$DRY_RUN" == "false" ]]; then
+  databricks schemas create "$UC_SCHEMA" "$UC_CATALOG" --profile "$DB_PROFILE" &>/dev/null \
+    && ok "created schema $UC_CATALOG.$UC_SCHEMA" \
+    || note "schema $UC_CATALOG.$UC_SCHEMA already exists — continuing"
+fi
+
 if [[ "$DRY_RUN" == "false" ]] \
    && databricks volumes read "${UC_CATALOG}.${UC_SCHEMA}.firefly_wheels" --profile "$DB_PROFILE" &>/dev/null; then
   ok "UC volume ${UC_CATALOG}.${UC_SCHEMA}.firefly_wheels already exists — skipping create."
@@ -673,6 +682,21 @@ else
     | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d['app_status']['state'])\""
 fi
 
+
+# The deploy's exit code is not evidence. CLI v1.9.0 can panic on bundle deploy
+# and still exit 0, so a crashed deploy reads as success and Phases 5/6/9 then
+# fail opaquely. Assert the app exists.
+if [[ "$DRY_RUN" == "false" ]]; then
+  if databricks apps get "$AGENT_APP_NAME" --profile "$DB_PROFILE" &>/dev/null; then
+    ok "Phase 4 created $AGENT_APP_NAME"
+  else
+    fail "Phase 4 did not create the app $AGENT_APP_NAME (deploy exit code notwithstanding)"
+    note "Check the deploy output for a panic or an env-var rejection."
+    note "Stale bundle state also causes this: if the app was deleted but"
+    note "/Workspace/Users/<you>/.bundle/firefly_openai_managed_mem survives, the CLI"
+    note "diffs against an app that no longer exists. Delete that path and redeploy."
+  fi
+fi
 fi
 stop_if_done "4"
 
@@ -685,10 +709,29 @@ capture SP_CLIENT_ID \
     | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d['service_principal_client_id'])\""
 note "App service principal: $SP_CLIENT_ID"
 
-run "cd '$REPO_DIR/agent-build' && \
-  uv run --python 3.12 python scripts/setup_memory_store.py '$SP_CLIENT_ID' \
-    --memory-store '$UC_CATALOG.$UC_SCHEMA.firefly_managed_memory' \
-    --profile '$DB_PROFILE'"
+# The preview is enabled per-workspace by Databricks; without it this phase fails
+# with NotImplemented and there is no local remedy. It was the most-reported gap
+# in E2E runs (9 of 12) purely because the runbook charged ahead and failed
+# opaquely. Say so up front, and let the rest of the bootstrap finish — only
+# cross-session memory is lost.
+MEMORY_PREVIEW=on
+if [[ "$DRY_RUN" == "false" ]]; then
+  if databricks api get /api/2.0/memory-stores --profile "$DB_PROFILE" 2>&1 \
+       | grep -qiE 'not enabled|NotImplemented|501'; then
+    MEMORY_PREVIEW=off
+  fi
+fi
+
+if [[ "$MEMORY_PREVIEW" == "off" ]]; then
+  warn "Managed Memory for Agents preview is NOT enabled on this workspace."
+  note "Skipping Phase 5. Enable the preview, then re-run this phase."
+  note "The agent still runs; it just has no cross-session memory."
+else
+  run "cd '$REPO_DIR/agent-build' && \
+    uv run --python 3.12 python scripts/setup_memory_store.py '$SP_CLIENT_ID' \
+      --memory-store '$UC_CATALOG.$UC_SCHEMA.firefly_managed_memory' \
+      --profile '$DB_PROFILE'"
+fi
 
 fi
 stop_if_done "5"
@@ -717,6 +760,15 @@ else
   warn "No warehouse found. Create one and grant CAN_USE manually."
 fi
 
+# Executed, not described. These were `note` lines telling the operator to paste
+# SQL by hand; the backquoted principal cannot survive `--json "..."`, so in
+# practice the grants were skipped and Genie could not read the data.
+if [[ -n "$WAREHOUSE_ID" && "$WAREHOUSE_ID" != "<WAREHOUSE_ID-placeholder>" && "$DRY_RUN" == "false" ]]; then
+  firefly_sql "$WAREHOUSE_ID" "GRANT USE SCHEMA ON SCHEMA \`$UC_CATALOG\`.\`$UC_SCHEMA\` TO \`$SP_CLIENT_ID\`" >/dev/null \
+    && ok "granted USE SCHEMA to agent SP" || warn "could not grant USE SCHEMA to agent SP"
+  firefly_sql "$WAREHOUSE_ID" "GRANT SELECT ON SCHEMA \`$UC_CATALOG\`.\`$UC_SCHEMA\` TO \`$SP_CLIENT_ID\`" >/dev/null \
+    && ok "granted SELECT to agent SP" || warn "could not grant SELECT to agent SP"
+fi
 note "Grant USE SCHEMA + SELECT on your data schemas via a SQL warehouse:"
 note "  GRANT USE SCHEMA, SELECT ON SCHEMA $UC_CATALOG.your_schema TO \`$SP_CLIENT_ID\`;"
 
@@ -793,6 +845,14 @@ run "databricks api patch \
   --json '{\"access_control_list\":[{\"service_principal_name\":\"$GUEST_SP_CLIENT_ID\", \
     \"permission_level\":\"CAN_USE\"}]}'"
 
+if [[ -n "$WAREHOUSE_ID" && "$WAREHOUSE_ID" != "<WAREHOUSE_ID-placeholder>" && "$DRY_RUN" == "false" ]]; then
+  firefly_sql "$WAREHOUSE_ID" "GRANT USE CATALOG ON CATALOG \`$UC_CATALOG\` TO \`$GUEST_SP_CLIENT_ID\`" >/dev/null \
+    && ok "granted USE CATALOG to guest SP" || warn "could not grant USE CATALOG to guest SP"
+  firefly_sql "$WAREHOUSE_ID" "GRANT USE SCHEMA ON SCHEMA \`$UC_CATALOG\`.\`$UC_SCHEMA\` TO \`$GUEST_SP_CLIENT_ID\`" >/dev/null \
+    && ok "granted USE SCHEMA to guest SP" || warn "could not grant USE SCHEMA to guest SP"
+  firefly_sql "$WAREHOUSE_ID" "GRANT SELECT ON SCHEMA \`$UC_CATALOG\`.\`$UC_SCHEMA\` TO \`$GUEST_SP_CLIENT_ID\`" >/dev/null \
+    && ok "granted SELECT to guest SP" || warn "could not grant SELECT to guest SP"
+fi
 note "Grant USE CATALOG / USE SCHEMA / SELECT via SQL warehouse if not already done:"
 note "  GRANT USE CATALOG ON CATALOG $UC_CATALOG TO \`$GUEST_SP_CLIENT_ID\`;"
 note "  GRANT USE SCHEMA, SELECT ON SCHEMA $UC_CATALOG.$UC_SCHEMA TO \`$GUEST_SP_CLIENT_ID\`;"
@@ -1048,6 +1108,11 @@ note "Omit SPN_AUTH_OKTA_* entirely — the plugin is conditional; absent vars a
 
 for SCOPE in preview production; do
   note "Setting tier-1 vars for scope: $SCOPE"
+  # Empty means Phase 4 never created the app. The env add succeeds anyway and
+  # the frontend deploys pointing at nothing, which reads as a frontend bug.
+  if [[ -z "${AGENT_APP_URL:-}" && "$DRY_RUN" == "false" ]]; then
+    warn "AGENT_APP_URL is empty — Phase 4 produced no running app; the agent panel will not work."
+  fi
   run "vercel env add DATABRICKS_AGENT_APP_URL  $SCOPE --value '$AGENT_APP_URL' --force --non-interactive --scope '$VERCEL_TEAM'"
   run "vercel env add DATABASE_URL              $SCOPE --value '$DB_URL' --force --non-interactive --scope '$VERCEL_TEAM'"
   run "vercel env add BETTER_AUTH_SECRET        $SCOPE --value '$BETTER_AUTH_SECRET' --force --non-interactive --scope '$VERCEL_TEAM'"

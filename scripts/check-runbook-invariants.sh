@@ -399,6 +399,77 @@ else
   bad "Phase 6c is not implemented consistently — a fresh workspace can finish with no data (#83):$SIXC_BAD"
 fi
 
+# ── 16. Point-of-use defaults, not source-time-only defaults. ───────────────
+# Two separate bugs, one cause: `: "${VAR:=default}"` runs once when the file is
+# sourced, but the variable is READ later, inside a function. A caller that
+# exports it empty in between gets the empty value.
+#   * INPUTS_DIR empty  -> CA bundle written to /proxy-ca-bundle.pem (5 runs)
+#   * FIREFLY_PLACEHOLDER_EXPERIMENT_ID empty -> `grep -q ""` matches every line,
+#     so a HEALTHY bundle fails assert_bundle_quickstart_ran (3 runs)
+POU_BAD=""
+sed -n '/init_inputs_dir()/,/}/p' scripts/lib/corp-network.sh   | grep -q 'INPUTS_DIR="\$HOME/.firefly-bootstrap"'   || POU_BAD="$POU_BAD init_inputs_dir(no-point-of-use-default)"
+sed -n '/assert_bundle_quickstart_ran()/,/^}/p' scripts/lib/runbook.sh   | grep -q 'FIREFLY_PLACEHOLDER_EXPERIMENT_ID=123237888438046'   || POU_BAD="$POU_BAD assert_bundle_quickstart_ran(no-point-of-use-default)"
+if [[ -z "$POU_BAD" ]]; then
+  pass "helpers re-apply defaults at point of use, not only at source time."
+else
+  bad "defaults that are applied only at source time break when a caller exports them empty:$POU_BAD"
+fi
+
+# ── 17. A crashed deploy must not read as success. ──────────────────────────
+# Databricks CLI v1.9.0 can panic on `bundle deploy` and still exit 0. Both
+# surfaces must assert the app exists rather than trusting the exit code.
+DEPLOY_ASSERT_BAD=""
+grep -q 'did not create' BOOTSTRAP.md || DEPLOY_ASSERT_BAD="$DEPLOY_ASSERT_BAD BOOTSTRAP.md"
+grep -q 'did not create the app' scripts/bootstrap.sh || DEPLOY_ASSERT_BAD="$DEPLOY_ASSERT_BAD bootstrap.sh"
+if [[ -z "$DEPLOY_ASSERT_BAD" ]]; then
+  pass "Phase 4 asserts the app exists instead of trusting the deploy exit code."
+else
+  bad "no post-deploy assertion — a panicking CLI that exits 0 reads as success:$DEPLOY_ASSERT_BAD"
+fi
+
+# ── 18. Phase 5 must say the preview is missing, not fail opaquely. ─────────
+# The most-reported gap across E2E runs (9 of 12).
+MEM_BAD=""
+grep -q 'Managed Memory' BOOTSTRAP.md || MEM_BAD="$MEM_BAD BOOTSTRAP.md(no-preflight)"
+grep -q 'MEMORY_PREVIEW' scripts/bootstrap.sh || MEM_BAD="$MEM_BAD bootstrap.sh(no-preflight)"
+if [[ -z "$MEM_BAD" ]]; then
+  pass "Phase 5 preflights the Managed Memory preview and degrades with a message."
+else
+  bad "Phase 5 still fails opaquely when the preview is off:$MEM_BAD"
+fi
+
+# ── 19. The SQL grants must be executable, not prose. ───────────────────────
+# They were commented-out SQL telling the reader to paste into a warehouse
+# session. A backquoted principal cannot survive `--json "..."`, so in practice
+# the grants were skipped and Genie could not read the data.
+GRANT_BAD=""
+grep -qE '^\s*#\s*GRANT (USE|SELECT)' BOOTSTRAP.md   && GRANT_BAD="$GRANT_BAD BOOTSTRAP.md(grants-still-commented-out)"
+grep -q 'firefly_sql' BOOTSTRAP.md || GRANT_BAD="$GRANT_BAD BOOTSTRAP.md(no-executed-grants)"
+grep -q 'firefly_sql' scripts/bootstrap.sh || GRANT_BAD="$GRANT_BAD bootstrap.sh(no-executed-grants)"
+if [[ -z "$GRANT_BAD" ]]; then
+  pass "the UC grants are executed via firefly_sql, not left as un-pasteable comments."
+else
+  bad "the UC grants cannot actually be run as written:$GRANT_BAD"
+fi
+
+# ── 15. The runner itself must parse, under bash AND zsh. ────────────────────
+# Invariant 5 checks every ```bash block in BOOTSTRAP.md and sources the shared
+# libs, but nothing ever ran `bash -n` on scripts/bootstrap.sh. A stray edit left
+# an unterminated `if` in Phase 3c and this suite still printed "All runbook
+# invariants hold" — the runner is the one file guaranteed to be executed, and it
+# was the one file not being checked.
+SHELL_PARSE_BAD=""
+for f in scripts/bootstrap.sh scripts/genie-data-setup.sh scripts/new-guest-link.sh; do
+  [[ -f "$f" ]] || continue
+  bash -n "$f" 2>/dev/null || SHELL_PARSE_BAD="$SHELL_PARSE_BAD $f(bash)"
+  command -v zsh >/dev/null 2>&1 && { zsh -n "$f" 2>/dev/null || SHELL_PARSE_BAD="$SHELL_PARSE_BAD $f(zsh)"; }
+done
+if [[ -z "$SHELL_PARSE_BAD" ]]; then
+  pass "bootstrap.sh and the helper scripts parse under bash and zsh."
+else
+  bad "these scripts do not parse — the runner would die at that line:$SHELL_PARSE_BAD"
+fi
+
 echo
 if [[ "$FAILED" -eq 0 ]]; then
   echo "All runbook invariants hold."

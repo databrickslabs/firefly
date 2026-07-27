@@ -193,6 +193,14 @@ firefly_neon_project_id() {
 assert_bundle_quickstart_ran() {         # assert_bundle_quickstart_ran <databricks.yml>
   local yml="${1:-agent-build/databricks.yml}"
   [ -f "$yml" ] || { fail "$yml not found — run scripts/assemble_agent.sh (Phase 2) first."; return 1; }
+  # Re-apply the default HERE, not just at source time. The id is set with
+  # `: "${VAR:=...}"` at the top of this file, which runs once; if the caller's
+  # shell has it exported empty, the grep below becomes `grep -q ""` — and that
+  # matches EVERY line, so a bundle quickstart had already rewritten correctly
+  # fails the assert and the reader is told to re-run Phase 3a. Three E2E runs
+  # lost time to that.
+  [ -n "${FIREFLY_PLACEHOLDER_EXPERIMENT_ID:-}" ] \
+    || FIREFLY_PLACEHOLDER_EXPERIMENT_ID=123237888438046
   if grep -q "$FIREFLY_PLACEHOLDER_EXPERIMENT_ID" "$yml"; then
     fail "$yml still holds the placeholder experiment id ($FIREFLY_PLACEHOLDER_EXPERIMENT_ID)."
     note "Phase 3a (quickstart) has not completed against this workspace, so the bundle"

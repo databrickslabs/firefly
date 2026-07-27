@@ -285,6 +285,13 @@ on every `bundle deploy`/`bundle run`.
 ### 3c. Create the UC wheels volume
 
 ```bash
+# The schema is assumed to exist, and on a fresh catalog it does not — the
+# catalog can hold nothing but `information_schema`, and the volume create then
+# fails with a message about the volume rather than the missing schema. Create it
+# first; this is a no-op when it is already there.
+databricks schemas create "$UC_SCHEMA" "$UC_CATALOG" --profile "$DB_PROFILE" 2>/dev/null \
+  || echo "schema ${UC_CATALOG}.${UC_SCHEMA} already exists — continuing."
+
 # Idempotent: create only if the volume doesn't already exist (create errors on re-run).
 if databricks volumes read "${UC_CATALOG}.${UC_SCHEMA}.firefly_wheels" --profile "$DB_PROFILE" &>/dev/null; then
   echo "UC volume ${UC_CATALOG}.${UC_SCHEMA}.firefly_wheels already exists — skipping."
@@ -346,6 +353,19 @@ databricks apps get "$AGENT_APP_NAME" -o json --profile "$DB_PROFILE" \
   | python3 -c "import sys,json; d=json.load(sys.stdin); \
     print(d['app_status']['state'], d.get('active_deployment',{}).get('status',{}).get('state',''))"
 # Expected: RUNNING SUCCEEDED
+
+# Do NOT trust the deploy's exit code. Databricks CLI v1.9.0 can panic
+# (nil pointer in ResourceApp.OverrideChangeDesc) and still exit 0, so the
+# runbook reads a crashed deploy as success and every later phase then fails
+# opaquely on JSON-parsing a CLI error string. Assert the app actually exists.
+if ! databricks apps get "$AGENT_APP_NAME" --profile "$DB_PROFILE" >/dev/null 2>&1; then
+  echo "✗ Phase 4 did not create $AGENT_APP_NAME, whatever the deploy exit code said." >&2
+  echo "  Re-read the deploy output for a panic or an env-var rejection." >&2
+  echo "  A stale bundle state can also cause this: if the app was deleted but" >&2
+  echo "  /Workspace/Users/<you>/.bundle/firefly_openai_managed_mem survives, the" >&2
+  echo "  CLI diffs against an app that is gone. Delete that path and redeploy." >&2
+  return 2>/dev/null || exit 1
+fi
 # bootstrap.sh Phase 4 fails closed if agent-build or guest-manager uv.lock
 # stamps pypi-proxy.dev.databricks.com (unsanctioned index; implicated in the Apps
 # install timeouts). Live pip/uv config only WARNS — set FIREFLY_STRICT_PYPI_PROXY=1
@@ -362,6 +382,14 @@ databricks apps get "$AGENT_APP_NAME" -o json --profile "$DB_PROFILE" \
 
 ## Phase 5 — Set up UC managed memory (required for the headline feature)
 
+> **Workspace prerequisite: the "Managed Memory for Agents" preview.** Without it
+> this phase fails with `NotImplemented: The Managed Memory for Agents preview is
+> not enabled for this workspace` — and there is nothing you can do about it from
+> here; it is enabled per-workspace by Databricks. This was the single
+> most-reported gap in E2E runs (9 of 12) because the runbook charged ahead and
+> failed opaquely. The preflight below tells you up front, and lets the rest of
+> the bootstrap continue: everything except cross-session memory still works.
+
 ```bash
 # Get the app service principal's client ID from the deployed app
 SP_CLIENT_ID=$(databricks apps get "$AGENT_APP_NAME" -o json \
@@ -370,10 +398,21 @@ SP_CLIENT_ID=$(databricks apps get "$AGENT_APP_NAME" -o json \
     d=json.load(sys.stdin); \
     print(d['service_principal_client_id'])")
 
-cd "$REPO_DIR/agent-build"
-uv run --python 3.12 python scripts/setup_memory_store.py "$SP_CLIENT_ID" \
-  --memory-store "$UC_CATALOG.$UC_SCHEMA.firefly_managed_memory" \
-  --profile "$DB_PROFILE"
+# Preflight: is the preview on? A 501/NotImplemented here means it is not.
+MEMORY_PREVIEW=$(databricks api get /api/2.0/memory-stores --profile "$DB_PROFILE" 2>&1 \
+  | grep -qiE 'not enabled|NotImplemented|501' && echo off || echo on)
+echo "Managed Memory preview: $MEMORY_PREVIEW"
+
+if [ "$MEMORY_PREVIEW" = "off" ]; then
+  echo "SKIPPING Phase 5 — enable the 'Managed Memory for Agents' preview on this"
+  echo "workspace, then re-run this phase. Bootstrap continues; the agent will run"
+  echo "without cross-session memory until then."
+else
+  cd "$REPO_DIR/agent-build"
+  uv run --python 3.12 python scripts/setup_memory_store.py "$SP_CLIENT_ID" \
+    --memory-store "$UC_CATALOG.$UC_SCHEMA.firefly_managed_memory" \
+    --profile "$DB_PROFILE"
+fi
 # The UC memory store is a distinct securable — not Lakebase, not auto-created.
 # setup_memory_store.py calls the REST API directly (no CLI equivalent).
 ```
@@ -390,11 +429,8 @@ databricks api patch "/api/2.1/unity-catalog/permissions/catalog/$UC_CATALOG" \
   --profile "$DB_PROFILE" \
   --json "{\"changes\":[{\"principal\":\"$SP_CLIENT_ID\",\"add\":[\"USE CATALOG\"]}]}"
 
-# Then USE SCHEMA + SELECT on the schemas/tables you want Genie to answer over.
-# The easiest path is a warehouse SQL session:
-#   GRANT USE SCHEMA, SELECT ON SCHEMA $UC_CATALOG.$UC_SCHEMA TO `$SP_CLIENT_ID`;
-
-# 2. SQL warehouse CAN_USE (required for Genie to run queries)
+# 2. SQL warehouse CAN_USE (required for Genie to run queries, and by the
+#    GRANTs below — resolve it before them).
 WAREHOUSE_ID=$(databricks warehouses list -o json --profile "$DB_PROFILE" \
   | python3 -c "import sys,json; ws=json.load(sys.stdin); \
     print(ws[0]['id'] if ws else '')")
@@ -403,6 +439,18 @@ databricks api patch \
   --profile "$DB_PROFILE" \
   --json "{\"access_control_list\":[{\"service_principal_name\":\"$SP_CLIENT_ID\", \
     \"permission_level\":\"CAN_USE\"}]}"
+
+# 3. USE SCHEMA + SELECT on the data Genie answers over.
+#
+# These used to be commented-out SQL telling you to "open a warehouse session"
+# and paste them yourself — which does not work: the principal has to be
+# backquoted in SQL, and backquotes inside a double-quoted `--json "..."`
+# argument are command substitution. Nobody could run them as written, so the
+# grants were silently skipped. firefly_sql executes them directly.
+firefly_sql "$WAREHOUSE_ID" \
+  "GRANT USE SCHEMA ON SCHEMA \`$UC_CATALOG\`.\`$UC_SCHEMA\` TO \`$SP_CLIENT_ID\`"
+firefly_sql "$WAREHOUSE_ID" \
+  "GRANT SELECT ON SCHEMA \`$UC_CATALOG\`.\`$UC_SCHEMA\` TO \`$SP_CLIENT_ID\`"
 ```
 
 ---
@@ -444,9 +492,14 @@ GUEST_SP_SECRET=$(databricks service-principal-secrets-proxy create \
 store_secret GUEST_SP_CLIENT_ID "$GUEST_SP_CLIENT_ID"
 store_secret GUEST_SP_SECRET    "$GUEST_SP_SECRET"
 
-# 4. Grant the guest SP data access (run in a SQL warehouse session):
-#    GRANT USE CATALOG ON CATALOG $UC_CATALOG TO `$GUEST_SP_CLIENT_ID`;
-#    GRANT USE SCHEMA, SELECT ON SCHEMA $UC_CATALOG.$UC_SCHEMA TO `$GUEST_SP_CLIENT_ID`;
+# 4. Grant the guest SP data access. Executed, not described: see the note in
+#    Phase 6 — backquoted principals cannot be pasted into `--json "..."`.
+firefly_sql "$WAREHOUSE_ID" \
+  "GRANT USE CATALOG ON CATALOG \`$UC_CATALOG\` TO \`$GUEST_SP_CLIENT_ID\`"
+firefly_sql "$WAREHOUSE_ID" \
+  "GRANT USE SCHEMA ON SCHEMA \`$UC_CATALOG\`.\`$UC_SCHEMA\` TO \`$GUEST_SP_CLIENT_ID\`"
+firefly_sql "$WAREHOUSE_ID" \
+  "GRANT SELECT ON SCHEMA \`$UC_CATALOG\`.\`$UC_SCHEMA\` TO \`$GUEST_SP_CLIENT_ID\`"
 
 # 5. SQL warehouse CAN_USE (required for Genie to run queries as the guest SP)
 # Re-use WAREHOUSE_ID from Phase 6 if still in shell; otherwise list warehouses again.
@@ -699,6 +752,15 @@ cd "$REPO_DIR" && DATABASE_URL="$DB_URL" node --input-type=module -e \
 
 # Use --value (no stdin) + --force (idempotent overwrite) + --non-interactive. A plain
 # `vercel env add … <<< value` for PREVIEW scope stalls on a "? Git branch?" prompt.
+# An empty AGENT_APP_URL means Phase 4 never created the app. Setting it anyway
+# succeeds, and the frontend then deploys pointing at nothing — the guest panel
+# loads and simply cannot reach the agent, which looks like a frontend bug.
+if [ -z "${AGENT_APP_URL:-}" ]; then
+  echo "✗ AGENT_APP_URL is empty — Phase 4 did not produce a running app." >&2
+  echo "  Fix Phase 4 before deploying the frontend, or it will point at nothing." >&2
+  return 2>/dev/null || exit 1
+fi
+
 for SCOPE in preview production; do
   add() { vercel env add "$1" "$SCOPE" --value "$2" --force --non-interactive --scope "$VERCEL_TEAM"; }
   add DATABRICKS_AGENT_APP_URL          "$AGENT_APP_URL"
