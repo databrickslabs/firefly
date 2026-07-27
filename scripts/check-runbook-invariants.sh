@@ -324,6 +324,22 @@ for v in genie_mcp_mode genie_space_id; do
 done
 grep -qE 'GENIE_SPACE_ID' agent/databricks.yml || GENIE_COUPLING_BAD="$GENIE_COUPLING_BAD GENIE_SPACE_ID(not-in-app-env)"
 
+# The genie_space_id default must NOT be empty. An empty value makes the bundle
+# render `{"name": "GENIE_SPACE_ID"}` with no `value` key, and the Apps API
+# refuses the whole deploy: "Must specify environment variable source using
+# either value or valueFrom". That broke Phase 4 on the DEFAULT Genie One path
+# in six of nine E2E runs; each one still looked clean because the agent
+# diagnosed it and worked around it, and the app ended up RUNNING either way.
+GSID_DEFAULT="$(awk '
+  /^[[:space:]]*genie_space_id:/ { found = 1 }
+  found && /^[[:space:]]*default:/ {
+    sub(/^[[:space:]]*default:[[:space:]]*/, ""); print; exit
+  }' agent/databricks.yml | tr -d '[:space:]')"
+case "$GSID_DEFAULT" in
+  ''|'""'|"''")
+    GENIE_COUPLING_BAD="$GENIE_COUPLING_BAD genie_space_id(empty-default-breaks-apps-deploy)" ;;
+esac
+
 # Any line setting one --var without the other is the failure mode we care about.
 for f in BOOTSTRAP.md scripts/bootstrap.sh README.md; do
   [[ -f "$f" ]] || continue

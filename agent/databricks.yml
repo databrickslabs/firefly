@@ -31,8 +31,14 @@ variables:
     description: "`one` for Genie One (workspace-wide), or `space` for a single Genie space."
     default: one
   genie_space_id:
-    description: Genie space id — required when genie_mcp_mode=space, empty otherwise.
-    default: ""
+    description: Genie space id — required when genie_mcp_mode=space, `none` otherwise.
+    # NOT empty. An empty value makes the bundle render this env entry as
+    # `{"name": "GENIE_SPACE_ID"}` with no `value` key, and the Apps API refuses
+    # the deploy: "Must specify environment variable source using either value
+    # or valueFrom". That broke Phase 4 on the DEFAULT (Genie One) path, which is
+    # the path most deployments take. agent.py treats `none` as unset, so the
+    # mode=space guard still raises rather than querying a bogus space.
+    default: "none"
 
 sync:
   exclude:
