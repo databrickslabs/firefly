@@ -335,6 +335,39 @@ for row in ((d.get("result") or {}).get("data_array") or []):
 '
 }
 
+# ─── sha256sum shim (Phase 1: before the uv installer) ───────────────────────
+# The astral.sh uv installer verifies its own download with `sha256sum`, which
+# does not exist on stock macOS — the tool there is `shasum`. So it prints
+#
+#   skipping sha256 checksum verification (it requires the 'sha256sum' command)
+#
+# and installs an UNVERIFIED binary. On a clean VM that is the default path, and
+# the message scrolls past in the middle of a long install. We are fetching an
+# executable over the network; declining to check its integrity is not something
+# to accept silently just because the installer offers to.
+#
+# `shasum -a 256` is byte-identical to `sha256sum` for both hashing and -c check
+# mode (verified), so a two-line shim on PATH restores the installer's own
+# verification rather than working around it.
+firefly_ensure_sha256sum() {
+  command -v sha256sum >/dev/null 2>&1 && return 0
+  if ! command -v shasum >/dev/null 2>&1; then
+    warn "neither sha256sum nor shasum found — installers cannot verify checksums"
+    return 1
+  fi
+  mkdir -p "$HOME/bin" || return 1
+  cat > "$HOME/bin/sha256sum" <<'SHIM'
+#!/bin/sh
+# Shim: stock macOS ships `shasum`, not `sha256sum`. Output and -c behaviour are
+# identical for SHA-256, so installers that require sha256sum can verify their
+# downloads instead of skipping the check.
+exec shasum -a 256 "$@"
+SHIM
+  chmod +x "$HOME/bin/sha256sum"
+  case ":$PATH:" in *":$HOME/bin:"*) ;; *) PATH="$HOME/bin:$PATH"; export PATH ;; esac
+  ok "provided a sha256sum shim so installers can verify their downloads"
+}
+
 # ─── Vercel API context (Phases 8a and 8e) ───────────────────────────────────
 # Sets V_TOKEN / V_ORG / V_PROJ. Both phases need them and 8a used to be the only
 # place they were derived, so running 8e in a fresh shell produced an empty

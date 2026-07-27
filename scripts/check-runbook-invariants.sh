@@ -521,6 +521,32 @@ else
   bad "a workspace attribution link is back in a guest-facing panel:$ATTRIB_LINK_BAD"
 fi
 
+# ── 22. Installers must be able to verify their downloads. ──────────────────
+# The astral.sh uv installer checks its download with `sha256sum`, which does not
+# exist on macOS 14 or earlier (the tool there is `shasum`). Without a shim it
+# prints "skipping sha256 checksum verification" and installs an UNVERIFIED
+# binary — the default path on a clean VM, with the message buried in a long
+# install. Reported by the E2E agent once the gap prompt asked about detours as
+# well as workarounds.
+SHA_SHIM_BAD=""
+grep -q 'firefly_ensure_sha256sum()' scripts/lib/runbook.sh \
+  || SHA_SHIM_BAD="$SHA_SHIM_BAD runbook.sh(no-shim-helper)"
+for f in BOOTSTRAP.md scripts/bootstrap.sh; do
+  # The shim has to run BEFORE the installer, or it changes nothing.
+  python3 - "$f" <<'PYCHK' || SHA_SHIM_BAD="$SHA_SHIM_BAD $f(shim-not-before-uv-install)"
+import sys
+t = open(sys.argv[1]).read()
+shim = t.find('firefly_ensure_sha256sum')
+inst = t.find('astral.sh/uv/install.sh')
+sys.exit(0 if (shim != -1 and inst != -1 and shim < inst) else 1)
+PYCHK
+done
+if [[ -z "$SHA_SHIM_BAD" ]]; then
+  pass "the uv installer can verify its own download (sha256sum shim precedes it)."
+else
+  bad "uv would install an unverified binary on macOS 14 and earlier:$SHA_SHIM_BAD"
+fi
+
 # ── 15. The runner itself must parse, under bash AND zsh. ────────────────────
 # Invariant 5 checks every ```bash block in BOOTSTRAP.md and sources the shared
 # libs, but nothing ever ran `bash -n` on scripts/bootstrap.sh. A stray edit left

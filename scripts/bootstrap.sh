@@ -523,6 +523,9 @@ elif [[ "$DRY_RUN" == "true" ]]; then
   run "# install uv via astral.sh installer to \$HOME/.local/bin"
 else
   note "Installing uv (astral.sh installer; no Homebrew required)..."
+  # Stock macOS has no sha256sum, so the installer would skip verifying its own
+  # download and install an unverified binary. Restore the check first.
+  firefly_ensure_sha256sum
   curl -LsSf https://astral.sh/uv/install.sh | sh
   export PATH="$HOME/.local/bin:$PATH"
   ok "uv installed to \$HOME/.local/bin ($(uv --version 2>/dev/null || echo '?'))"

@@ -183,6 +183,12 @@ if ! gh auth status &>/dev/null; then gh auth login; fi   # browser or PAT
 ### 1f. uv (Python package manager; installs to $HOME/.local/bin)
 
 ```bash
+# The astral.sh installer verifies its download with `sha256sum`, which stock
+# macOS does not have (it ships `shasum`). Without this it prints "skipping
+# sha256 checksum verification" and installs an UNVERIFIED binary. The shim makes
+# the installer's own check work; it does not bypass anything.
+firefly_ensure_sha256sum
+
 command -v uv || curl -LsSf https://astral.sh/uv/install.sh | sh
 uv --version
 ```
