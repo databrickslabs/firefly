@@ -295,7 +295,6 @@ const PurePreviewMessage = ({
 
           {showGenieAttribution && genieConfig && (
             <GenieAttribution
-              genieOneUrl={genieConfig.genieOneUrl}
               workspaceHost={genieConfig.workspaceHost}
               workspaceId={genieConfig.workspaceId}
               links={genieLinks}
@@ -462,7 +461,6 @@ const ToolPartRenderer = ({
                     </div>
                     {isGenieTool && genieConfig && (
                       <GenieAttribution
-                        genieOneUrl={genieConfig.genieOneUrl}
                         workspaceHost={genieConfig.workspaceHost}
                         workspaceId={genieConfig.workspaceId}
                         links={genieLinks}
@@ -499,7 +497,6 @@ const ToolPartRenderer = ({
                   </div>
                   {isGenieTool && genieConfig && (
                     <GenieAttribution
-                      genieOneUrl={genieConfig.genieOneUrl}
                       workspaceHost={genieConfig.workspaceHost}
                       workspaceId={genieConfig.workspaceId}
                       links={genieLinks}

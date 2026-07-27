@@ -22,22 +22,6 @@ export function messageUsesGenie(parts: ChatMessage['parts']): boolean {
   return parts.some(isGenieToolPart);
 }
 
-export function buildGenieOneUrl(
-  workspaceHost: string,
-  workspaceId?: string,
-  explicitUrl?: string,
-): string | null {
-  if (explicitUrl?.trim()) {
-    return explicitUrl.trim();
-  }
-  if (!workspaceHost) return null;
-  const host = workspaceHost.replace(/\/$/, '');
-  if (workspaceId?.trim()) {
-    return `${host}/one?o=${workspaceId.trim()}`;
-  }
-  return `${host}/one`;
-}
-
 function normalizeUrl(url: string): string {
   return url.replace(/[.,;]+$/g, '');
 }

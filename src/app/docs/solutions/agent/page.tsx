@@ -189,11 +189,6 @@ export default async function AgentPage() {
                     <td className="border border-gray-200 px-4 py-2">Set to <code>one</code> to use Genie One (workspace-wide)</td>
                   </tr>
                   <tr>
-                    <td className="border border-gray-200 px-4 py-2"><code className="text-sm">GENIE_ONE_URL</code></td>
-                    <td className="border border-gray-200 px-4 py-2 text-sm">Derived</td>
-                    <td className="border border-gray-200 px-4 py-2">Attribution link (via <code>/api/config</code>), <strong>composed at runtime</strong> from the auto-injected <code>DATABRICKS_HOST</code> + <code>DATABRICKS_WORKSPACE_ID</code> — not set in the bundle</td>
-                  </tr>
-                  <tr>
                     <td className="border border-gray-200 px-4 py-2"><code className="text-sm">DATABRICKS_MEMORY_STORE</code></td>
                     <td className="border border-gray-200 px-4 py-2 text-sm">Agent App</td>
                     <td className="border border-gray-200 px-4 py-2">Fully-qualified name (<code>catalog.schema.name</code>) of the <strong>UC memory store</strong> backing durable cross-session memory. You <strong>must create this UC securable and grant the app SP <code>READ/WRITE_MEMORY_STORE</code></strong> after deploy (<code>scripts/setup_memory_store.py</code>) — it is not created by quickstart or the bundle, and is <strong>not</strong> the Lakebase instance. Without it, memory silently no-ops.</td>

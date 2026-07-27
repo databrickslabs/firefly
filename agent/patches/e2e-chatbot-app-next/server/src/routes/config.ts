@@ -43,43 +43,20 @@ function workspaceHostFromEnv(): string {
 }
 
 /**
- * The attribution target must match whatever actually answered the question.
- * With GENIE_MCP_MODE=space the agent is scoped to one Genie space, so linking to
- * Genie One would send the user somewhere that never saw their question.
+ * No attribution URL is exposed. The panel's audience is guest users with no
+ * Databricks workspace access, so any workspace link is dead for them — and once
+ * GENIE_MCP_MODE defaults to a space, a "Genie One" link names a backend that
+ * never answered the question. The UI shows plain-text attribution instead.
  */
-function genieTargetFromEnv(workspaceHost: string, workspaceId?: string): string {
-  const spaceMode = process.env.GENIE_MCP_MODE?.trim().toLowerCase() === 'space';
-  const spaceId = process.env.GENIE_SPACE_ID?.trim();
-  const explicit = process.env.GENIE_ONE_URL?.trim();
-  const suffix = workspaceId ? `?o=${workspaceId}` : '';
-
-  // The client labels the link from its path, so /genie/rooms/ is what tells the
-  // UI to stop calling this "Genie One".
-  if (spaceMode && spaceId) {
-    // GENIE_ONE_URL stays an escape hatch, but it cannot name a space it does not
-    // know about, so an explicit space id wins here.
-    return workspaceHost ? `${workspaceHost}/genie/rooms/${spaceId}${suffix}` : '';
-  }
-  if (explicit) {
-    return explicit;
-  }
-  if (!workspaceHost) {
-    return '';
-  }
-  return `${workspaceHost}/one${suffix}`;
-}
-
 function genieConfigFromEnv() {
   const workspaceHost = workspaceHostFromEnv();
   const workspaceId = process.env.DATABRICKS_WORKSPACE_ID?.trim();
-  const genieOneUrl = genieTargetFromEnv(workspaceHost, workspaceId);
-  if (!genieOneUrl && !workspaceHost) {
+  if (!workspaceHost) {
     return null;
   }
   return {
     workspaceHost,
     workspaceId: workspaceId || undefined,
-    genieOneUrl: genieOneUrl || undefined,
   };
 }
 

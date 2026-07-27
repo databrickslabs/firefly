@@ -496,6 +496,31 @@ else
   bad "the seed probe would collapse four causes into one misleading status:$SEED_DIAG_BAD"
 fi
 
+# ── 21. No workspace attribution link in the guest panel. ───────────────────
+# The panel's audience is GUEST users, who have no Databricks workspace access,
+# so a workspace link is dead for every one of them. It also named "Genie One"
+# while GENIE_MCP_MODE defaults to a space — the wrong backend. Attribution is
+# plain text; the link must not come back, and neither must the env var that fed
+# it.
+ATTRIB_LINK_BAD=""
+APP_SRC="agent/patches/e2e-chatbot-app-next"
+if [[ -d "$APP_SRC" ]]; then
+  grep -rqE 'genieOneUrl|buildGenieOneUrl' "$APP_SRC/client/src" "$APP_SRC/server/src" 2>/dev/null \
+    && ATTRIB_LINK_BAD="$ATTRIB_LINK_BAD app(genieOneUrl-is-back)"
+  # A bare "/one?o=" means someone rebuilt the workspace-wide link by hand.
+  grep -rqE '/one\?o=' "$APP_SRC/client/src" "$APP_SRC/server/src" 2>/dev/null \
+    && ATTRIB_LINK_BAD="$ATTRIB_LINK_BAD app(workspace-link-rebuilt)"
+fi
+# The env var must not be reintroduced as a real setting (prose explaining its
+# removal is fine, so only an actual `name:`/export counts).
+grep -qE '^\s*(- name: GENIE_ONE_URL|export GENIE_ONE_URL|GENIE_ONE_URL=)' agent/databricks.yml scripts/bootstrap.sh BOOTSTRAP.md 2>/dev/null \
+  && ATTRIB_LINK_BAD="$ATTRIB_LINK_BAD GENIE_ONE_URL(set-again)"
+if [[ -z "$ATTRIB_LINK_BAD" ]]; then
+  pass "the guest panel carries no workspace attribution link (dead for guests, wrong backend)."
+else
+  bad "a workspace attribution link is back in a guest-facing panel:$ATTRIB_LINK_BAD"
+fi
+
 # ── 15. The runner itself must parse, under bash AND zsh. ────────────────────
 # Invariant 5 checks every ```bash block in BOOTSTRAP.md and sources the shared
 # libs, but nothing ever ran `bash -n` on scripts/bootstrap.sh. A stray edit left

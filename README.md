@@ -281,8 +281,14 @@ frontend `.env.local`):
 | --- | --- |
 | `GENIE_MCP_MODE` | `one` for Genie One (workspace-wide), `space` for a single space. Bundle variable `genie_mcp_mode`, default `one` |
 | `GENIE_SPACE_ID` | Required when `GENIE_MCP_MODE=space`, empty otherwise. Bundle variable `genie_space_id`, default empty. **Move it with the mode**: `agent.py` raises `ValueError` on `space` + empty id and the app fails to boot |
-| `DATABRICKS_HOST`, `DATABRICKS_WORKSPACE_ID` | **Auto-injected** by the Databricks Apps runtime — never set in the bundle. The frontend `/api/config` composes the "Powered by Genie" attribution link from them: `${DATABRICKS_HOST}/one?o=${WORKSPACE_ID}` in `one` mode, `${DATABRICKS_HOST}/genie/rooms/${GENIE_SPACE_ID}?o=${WORKSPACE_ID}` in `space` mode (the UI labels it from the path, so it reads "Genie space" there) |
-| `GENIE_ONE_URL` | *Optional* override for the attribution link, honoured in `one` mode only. Leave **unset**: it is derived from the two auto-injected vars above, so there is nothing to hand-edit per workspace (see "Derive — don't store" in `agent/databricks.yml`) |
+| `DATABRICKS_HOST`, `DATABRICKS_WORKSPACE_ID` | **Auto-injected** by the Databricks Apps runtime — never set in the bundle. Used to identify the workspace; **no attribution link is built from them** (see below) |
+
+The panel shows plain-text "Powered by Genie" attribution with **no link**. There
+was one, pointing at Genie One, and it was wrong in two ways at once: the audience
+for this panel is guest users who have no Databricks workspace access, so the link
+led somewhere they could not open; and once `GENIE_MCP_MODE` defaults to a space,
+"Genie One" named a backend that never saw the question. `GENIE_ONE_URL` no longer
+exists.
 
 Switching an existing deployment to a space means passing **both** variables:
 
@@ -420,8 +426,9 @@ databricks volumes create workspace default firefly_wheels MANAGED -p <your-cli-
 > **`agent-build/databricks.yml`**, which is gitignored and rebuilt from scratch by
 > `scripts/assemble_agent.sh`. Copy those two resource blocks into the tracked overlay
 > **`agent/databricks.yml`**, or they are lost on the next assemble. You do **not**
-> edit `DATABRICKS_HOST`, `DATABRICKS_WORKSPACE_ID`, or `GENIE_ONE_URL` any more —
-> they are auto-injected/derived at runtime (see "Derive — don't store"). And you do
+> edit `DATABRICKS_HOST` or `DATABRICKS_WORKSPACE_ID` any more — they are
+> auto-injected at runtime (see "Derive — don't store"), and `GENIE_ONE_URL` no
+> longer exists. And you do
 > **not** edit the memory-store / wheels-volume namespace unless overriding the
 > `workspace.default` default via `--var`.
 
@@ -536,8 +543,9 @@ CLI for memory stores (CLI v0.298.0); the script uses the REST API via the SDK.
   `client/src/main.tsx` contains `__FIREFLY_PROXY_BASENAME__`.
 - **Genie/memory config lives in the bundle**, not the frontend — see
   `agent/databricks.yml` (`GENIE_MCP_MODE`, and `DATABRICKS_MEMORY_STORE` built
-  from the `catalog`/`schema` bundle variables). `GENIE_ONE_URL`/`DATABRICKS_HOST`/
-  `DATABRICKS_WORKSPACE_ID` are intentionally absent (derived at runtime).
+  from the `catalog`/`schema` bundle variables). `DATABRICKS_HOST` and
+  `DATABRICKS_WORKSPACE_ID` are intentionally absent (auto-injected at runtime);
+  `GENIE_ONE_URL` was removed along with the attribution link.
 
 Re-run `bash scripts/assemble_agent.sh` after any change under `agent/` (overlay)
 or a submodule bump; it rebuilds `agent-build/` from scratch each time.

@@ -5,7 +5,6 @@ import { fetcher } from '@/lib/utils';
 export interface GenieConfig {
   workspaceHost: string;
   workspaceId?: string;
-  genieOneUrl?: string;
 }
 
 interface ConfigResponse {

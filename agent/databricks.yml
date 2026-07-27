@@ -99,16 +99,18 @@ resources:
           - name: DATABRICKS_MEMORY_STORE
             value: "${var.catalog}.${var.schema}.${var.memory_store_name}"
           # --- Derive, don't store (GAP-4 fix) ---------------------------------
-          # None of DATABRICKS_HOST, DATABRICKS_WORKSPACE_ID, or GENIE_ONE_URL are
-          # stored here. The Databricks Apps runtime auto-injects DATABRICKS_HOST
-          # and DATABRICKS_WORKSPACE_ID into every app, and the frontend
-          # (e2e-chatbot-app-next/server/src/routes/config.ts) composes
-          # GENIE_ONE_URL from them per request as
-          #   ${DATABRICKS_HOST}/one?o=${DATABRICKS_WORKSPACE_ID}
-          # Bundle substitutions can't do this portably: ${workspace.host} is empty
-          # when the host comes from a CLI profile (the `deploy -p <profile>` flow),
-          # and ${workspace.workspace_id} does not resolve into app env. Runtime
+          # Neither DATABRICKS_HOST nor DATABRICKS_WORKSPACE_ID is stored here: the
+          # Databricks Apps runtime auto-injects both into every app. Bundle
+          # substitutions cannot do this portably — ${workspace.host} is empty when
+          # the host comes from a CLI profile (the `deploy -p <profile>` flow), and
+          # ${workspace.workspace_id} does not resolve into app env. Runtime
           # injection means nothing to hand-rewrite and nothing to go stale.
+          #
+          # There is no GENIE_ONE_URL. The frontend used to compose a workspace
+          # attribution link from those two vars, but this panel's audience is
+          # guest users with no workspace access, so the link was dead for them —
+          # and with GENIE_MCP_MODE defaulting to a space it also named the wrong
+          # backend. Attribution is plain text now.
           - name: GENIE_MCP_URL
             value: "/api/2.0/mcp/genie"
           - name: GENIE_MCP_MODE

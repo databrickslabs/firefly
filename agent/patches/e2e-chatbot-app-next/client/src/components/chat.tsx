@@ -301,7 +301,6 @@ export function Chat({
 
   const genieFooter = genieConfig ? (
     <GenieAttribution
-      genieOneUrl={genieConfig.genieOneUrl}
       workspaceHost={genieConfig.workspaceHost}
       workspaceId={genieConfig.workspaceId}
       variant="footer"

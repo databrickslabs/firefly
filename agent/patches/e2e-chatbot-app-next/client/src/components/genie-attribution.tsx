@@ -1,10 +1,13 @@
 import { ExternalLink, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { buildGenieOneUrl } from '@/lib/genie-attribution';
 
+/**
+ * `workspaceHost` / `workspaceId` are retained because callers pass them and
+ * they identify the workspace for display, but there is deliberately no longer a
+ * link built from them. See the note on the removed attribution link below.
+ */
 export type GenieAttributionProps = {
-  genieOneUrl?: string | null;
-  workspaceHost: string;
+  workspaceHost?: string;
   workspaceId?: string;
   links?: string[];
   variant?: 'inline' | 'footer' | 'compact';
@@ -27,28 +30,11 @@ function linkLabel(url: string, index: number): string {
   }
 }
 
-/**
- * With GENIE_MCP_MODE=space the agent answers from a single Genie space, and the
- * server points this link at /genie/rooms/<id> instead of /one. Calling that
- * "Genie One" would name a backend that never saw the question.
- */
-function targetLabel(url: string | null): string {
-  if (!url) {
-    return 'Genie One';
-  }
-  return url.includes('/genie/rooms/') ? 'Genie space' : 'Genie One';
-}
-
 export function GenieAttribution({
-  genieOneUrl,
-  workspaceHost,
-  workspaceId,
   links = [],
   variant = 'inline',
   className,
 }: GenieAttributionProps) {
-  const oneUrl =
-    genieOneUrl ?? buildGenieOneUrl(workspaceHost, workspaceId) ?? null;
   const uniqueLinks = [...new Set(links.filter((link) => link.startsWith('http')))];
 
   return (
@@ -66,24 +52,18 @@ export function GenieAttribution({
           variant === 'compact' || variant === 'footer' ? 'text-sm' : 'text-base',
         )}
       >
+        {/*
+          Attribution is plain text on purpose. There used to be a "Genie One"
+          link here, and it was wrong twice over: the audience for this panel is
+          guest users who have no Databricks workspace access, so the link led
+          somewhere they cannot open; and once the agent defaults to a Genie
+          space, "Genie One" names a backend that never saw the question. A dead
+          link labelled with the wrong backend is worse than no link.
+        */}
         <span className="inline-flex items-center gap-1.5 font-semibold text-foreground/90">
           <Sparkles className="size-4 shrink-0" aria-hidden />
           Powered by Genie
         </span>
-        {oneUrl && (
-          <>
-            <span aria-hidden>•</span>
-            <a
-              href={oneUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 font-medium underline underline-offset-2 hover:text-foreground"
-            >
-              {targetLabel(oneUrl)}
-              <ExternalLink className="size-4 shrink-0" aria-hidden />
-            </a>
-          </>
-        )}
       </div>
       {uniqueLinks.length > 0 && (
         <ul className="mt-1.5 space-y-1 text-xs">

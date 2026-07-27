@@ -272,8 +272,11 @@ assert_bundle_quickstart_ran databricks.yml || return 2>/dev/null || exit 1
 
 ### 3b. Verify bundle variables (catalog/schema only)
 
-`DATABRICKS_HOST`, `DATABRICKS_WORKSPACE_ID`, and `GENIE_ONE_URL` are injected at
-runtime by `quickstart.py` — **do not edit them manually**. The bundle also declares
+`DATABRICKS_HOST` and `DATABRICKS_WORKSPACE_ID` are injected at runtime by
+`quickstart.py` — **do not edit them manually**. (`GENIE_ONE_URL` no longer
+exists: the attribution link it fed was dead for guest users, who have no
+workspace access, and named the wrong backend once the agent defaults to a Genie
+space.) The bundle also declares
 `catalog` and `schema` variables that default to `workspace` and `default`.
 
 `catalog` and `schema` are applied at **deploy time via `--var`** (Phase 4) — **do not

@@ -601,7 +601,7 @@ fi
 
 echo
 step "3b. Catalog/schema → bundle vars (applied at deploy; no yml edit)"
-note "HOST/WORKSPACE_ID/GENIE_ONE_URL are injected by quickstart."
+note "HOST/WORKSPACE_ID are injected by quickstart (no GENIE_ONE_URL — the attribution link was removed)."
 note "catalog=$UC_CATALOG schema=$UC_SCHEMA are passed via --var at deploy (Phase 4);"
 note "DATABRICKS_MEMORY_STORE resolves to $UC_CATALOG.$UC_SCHEMA.firefly_managed_memory."
 
