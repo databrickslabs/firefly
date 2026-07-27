@@ -253,13 +253,23 @@ fi
 # fix never reached the readers who follow the doc. ~/Library/.../auth.json only exists
 # after an interactive `vercel login`, which makes the doc path fail outright for CI, for
 # token-based setups, and for the fresh-install harness.
-if grep -qE 'auth\.json' BOOTSTRAP.md; then
-  if grep -qE 'V_TOKEN="\$\{VERCEL_TOKEN:-\}"' BOOTSTRAP.md; then
-    pass "BOOTSTRAP.md prefers \$VERCEL_TOKEN before the CLI's auth.json."
+#
+# The lookup now lives in firefly_vercel_context (scripts/lib/runbook.sh) so that
+# Phases 8a and 8e cannot disagree. Follow the logic to wherever it lives: the
+# runbook satisfies this either by doing it inline or by calling the helper that
+# does. What must never happen is auth.json being read with no $VERCEL_TOKEN
+# preference anywhere in the chain.
+if grep -qE 'V_TOKEN="\$\{VERCEL_TOKEN:-\}"' BOOTSTRAP.md; then
+  pass "BOOTSTRAP.md prefers \$VERCEL_TOKEN before the CLI's auth.json."
+elif grep -qE 'firefly_vercel_context' BOOTSTRAP.md; then
+  if grep -qE 'VERCEL_TOKEN:-' scripts/lib/runbook.sh; then
+    pass "BOOTSTRAP.md defers to firefly_vercel_context, which prefers \$VERCEL_TOKEN."
   else
-    bad "BOOTSTRAP.md reads auth.json without trying \$VERCEL_TOKEN first — drifted from scripts/bootstrap.sh."
-    grep -nE 'auth\.json' BOOTSTRAP.md | sed 's/^/      /'
+    bad "firefly_vercel_context does not prefer \$VERCEL_TOKEN — the drift moved into the library."
   fi
+elif grep -qE 'auth\.json' BOOTSTRAP.md; then
+  bad "BOOTSTRAP.md reads auth.json without trying \$VERCEL_TOKEN first — drifted from scripts/bootstrap.sh."
+  grep -nE 'auth\.json' BOOTSTRAP.md | sed 's/^/      /'
 fi
 
 # ── 9. A write-only secret must not be trusted straight from `vercel env pull`. ──

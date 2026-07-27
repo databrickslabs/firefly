@@ -335,6 +335,36 @@ for row in ((d.get("result") or {}).get("data_array") or []):
 '
 }
 
+# ─── Vercel API context (Phases 8a and 8e) ───────────────────────────────────
+# Sets V_TOKEN / V_ORG / V_PROJ. Both phases need them and 8a used to be the only
+# place they were derived, so running 8e in a fresh shell produced an empty
+# Authorization header — the verify curl failed and reported "production does not
+# serve $APP_ORIGIN" for a deployment that was perfectly fine. Deriving in one
+# reusable place means a new shell cannot change the answer.
+#
+# Token precedence: explicit env first (CI / token-based setups), then the CLI's
+# macOS store, then its XDG location. A hardcoded path is a silent failure for
+# anyone whose Vercel auth lives elsewhere.
+firefly_vercel_context() {               # firefly_vercel_context [repo_dir]
+  local repo="${1:-${REPO_DIR:-$PWD}}" auth
+  V_TOKEN="${VERCEL_TOKEN:-${V_TOKEN:-}}"
+  for auth in "$HOME/Library/Application Support/com.vercel.cli/auth.json" \
+              "$HOME/.local/share/com.vercel.cli/auth.json"; do
+    [ -n "$V_TOKEN" ] && break
+    [ -f "$auth" ] || continue
+    V_TOKEN=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("token",""))' "$auth" 2>/dev/null || echo "")
+  done
+  [ -n "$V_TOKEN" ] || warn "no Vercel token found — project API calls will fail"
+
+  if [ -f "$repo/.vercel/project.json" ]; then
+    V_ORG=$(python3 -c "import json;print(json.load(open('$repo/.vercel/project.json'))['orgId'])" 2>/dev/null || echo "")
+    V_PROJ=$(python3 -c "import json;print(json.load(open('$repo/.vercel/project.json'))['projectId'])" 2>/dev/null || echo "")
+  else
+    warn "$repo/.vercel/project.json not found — run Phase 8a (vercel link) first"
+  fi
+  export V_TOKEN V_ORG V_PROJ
+}
+
 # Convenience: the single scalar a lot of Phase 6c checks want (COUNT(*), etc).
 firefly_sql_scalar() {                   # firefly_sql_scalar <warehouse_id> <sql> [profile]
   firefly_sql "$1" "$2" "${3:-${DB_PROFILE:-}}" | head -1 | cut -f1

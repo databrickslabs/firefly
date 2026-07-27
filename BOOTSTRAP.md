@@ -679,16 +679,9 @@ vercel link --project "$VERCEL_PROJECT" --scope "$VERCEL_TEAM" --yes --non-inter
 # then the CLI's store on macOS, then its XDG location. A single hardcoded path is a
 # silent 404 or a hard stop for anyone whose Vercel auth does not live there — and
 # ~/Library/.../auth.json only exists after an interactive `vercel login`.
-V_TOKEN="${VERCEL_TOKEN:-}"
-for _v_auth in "$HOME/Library/Application Support/com.vercel.cli/auth.json" \
-               "$HOME/.local/share/com.vercel.cli/auth.json"; do
-  [[ -n "$V_TOKEN" ]] && break
-  [[ -f "$_v_auth" ]] || continue
-  V_TOKEN=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("token",""))' "$_v_auth" 2>/dev/null || echo "")
-done
-[[ -n "$V_TOKEN" ]] || echo "WARNING: no Vercel token found; framework preset will not be set (routes may 404)"
-V_ORG=$(python3 -c "import json;print(json.load(open('$REPO_DIR/.vercel/project.json'))['orgId'])")
-V_PROJ=$(python3 -c "import json;print(json.load(open('$REPO_DIR/.vercel/project.json'))['projectId'])")
+# Sets V_TOKEN / V_ORG / V_PROJ (scripts/lib/runbook.sh). Phase 8e calls the same
+# helper, so a fresh shell there cannot produce a different answer.
+firefly_vercel_context "$REPO_DIR"
 curl -s -X PATCH "https://api.vercel.com/v9/projects/$V_PROJ?teamId=$V_ORG" \
   -H "Authorization: Bearer $V_TOKEN" -H "Content-Type: application/json" \
   -d '{"framework":"nextjs"}' -o /dev/null
@@ -741,6 +734,15 @@ BETTER_AUTH_SECRET=$(openssl rand -base64 32)
 ENCRYPTION_KEY=$(openssl rand -hex 32)
 GUEST_API_SECRET=$(openssl rand -hex 64)
 DB_URL=$(read_secret DATABASE_URL)   # from state.env
+
+# Persist the minted secrets NOW, not at the end of Phase 8. They are generated
+# here and were only written to state.env in 8d; a shell that died in between
+# left Vercel holding a value the local side no longer knew, and `vercel env
+# pull` returns an 11-character redacted placeholder rather than the secret. The
+# only recovery was a remint. Writing them at mint time removes that window.
+store_secret BETTER_AUTH_SECRET "$BETTER_AUTH_SECRET"
+store_secret ENCRYPTION_KEY     "$ENCRYPTION_KEY"
+store_secret GUEST_API_SECRET   "$GUEST_API_SECRET"
 
 # Clear stale JWKS. Phase 7 REUSES a same-named Neon project, but BETTER_AUTH_SECRET above is
 # freshly minted every run. Better Auth's jwt plugin stores a JWKS encrypted under that secret;
@@ -847,6 +849,12 @@ store_secret GUEST_API_SECRET "$GUEST_API_SECRET"
 ```bash
 # #19 reports success at every earlier step and only surfaces later as "Invalid token"
 # on the guest login link, so assert the match rather than assuming it.
+#
+# Re-derive the Vercel context: these come from 8a, and in a new shell they are
+# empty. The curl then sends "Authorization: Bearer " and this step reports that
+# production does not serve $APP_ORIGIN when the deployment is in fact correct.
+firefly_vercel_context "$REPO_DIR"
+
 SERVING=$(curl -sf -H "Authorization: Bearer $V_TOKEN" \
   "https://api.vercel.com/v9/projects/$V_PROJ?teamId=$V_ORG" \
   | python3 -c 'import json,sys; t=(json.load(sys.stdin).get("targets") or {}).get("production") or {}; print("\n".join(t.get("alias") or []))')
