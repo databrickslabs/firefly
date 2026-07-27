@@ -335,6 +335,45 @@ for row in ((d.get("result") or {}).get("data_array") or []):
 '
 }
 
+# ─── IP allowlist: three outcomes, never two ─────────────────────────────────
+# There were two copies of this check and they reached OPPOSITE conclusions on the
+# same workspace. Phase 1b surfaced "IP access list is not available in the pricing
+# tier of this workspace"; Phase 9 discarded stderr, failed to parse, and printed
+# "ok: no enabled IP allowlist on this workspace - the app can reach it".
+#
+# That is worse than a confusing message. It is a false all-clear on a control that
+# decides whether the data plane works at all, and it appears in the phase people
+# read when something has already gone wrong.
+#
+# "Could not determine" is a distinct answer from "there is none". Echoes exactly
+# one of:
+#   none                 checked, nothing enabled
+#   enabled:<labels>     checked, these are enabled
+#   unknown:<reason>      could not check — say why, never imply safety
+firefly_ip_allowlist_status() {           # firefly_ip_allowlist_status [profile]
+  local prof="${1:-${DB_PROFILE:-}}" raw
+  [ -n "$prof" ] || { echo "unknown:no profile given"; return 0; }
+  raw="$(databricks api get /api/2.0/ip-access-lists --profile "$prof" 2>&1)"
+  FF_RAW="$raw" python3 -c '
+import json, os, re, sys
+raw = (os.environ.get("FF_RAW") or "").strip()
+if not raw:
+    print("unknown:no response from the API"); sys.exit()
+try:
+    d = json.loads(raw)
+except ValueError:
+    # Not JSON: the CLI or the API said something. Pass its own words through —
+    # a trial workspace answers "not available in the pricing tier", which is a
+    # real answer and must never be rendered as "none".
+    print("unknown:" + " ".join(raw.split())[:160]); sys.exit()
+if not isinstance(d, dict):
+    print("unknown:unexpected response shape"); sys.exit()
+on = [l.get("label") or "?" for l in (d.get("ip_access_lists") or [])
+      if l.get("enabled") and l.get("list_type") == "ALLOW"]
+print("enabled:" + " / ".join(on) if on else "none")
+'
+}
+
 # ─── Lakebase: report what got BOUND, not what was asked for ─────────────────
 # Passing --app-name for an app that already exists makes quickstart bind Lakebase
 # from that app's existing configuration and ignore --lakebase-create-new. The

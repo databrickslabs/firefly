@@ -155,23 +155,18 @@ databricks auth login --host "$DATABRICKS_HOST" --profile "$DB_PROFILE"
 # succeed with one enabled: the app deploys, the frontend deploys, guest login
 # works, and then every Databricks data call from Vercel 403s. Meeting that after
 # everything looks fine is how it gets misread as an application bug.
-# Keep stderr, and never let the parser assume success. Piping a discarded-stderr
-# call into json.load means any failure — endpoint 404, expired auth, CLI missing —
-# surfaces as `JSONDecodeError: Expecting value`, which reads like a bad API
-# response rather than naming the real cause.
-ACL_RAW="$(databricks api get /api/2.0/ip-access-lists --profile "$DB_PROFILE" 2>&1)"
-printf '%s' "$ACL_RAW" | python3 -c "
-import sys, json
-raw = sys.stdin.read().strip()
-if not raw:
-    print('could not check the IP allowlist: no response from the API'); raise SystemExit
-try:
-    d = json.loads(raw) or {}
-except ValueError:
-    print('could not check the IP allowlist. The API said:'); print('  ' + raw[:200]); raise SystemExit
-e = [l.get('label') for l in (d.get('ip_access_lists') or []) if l.get('enabled')]
-print('ENABLED IP allowlist(s): ' + ', '.join(filter(None, e)) if e else 'no enabled IP allowlist')
-"
+# One shared implementation (scripts/lib/runbook.sh), used here and again at
+# Phase 9. There used to be two copies and they reached OPPOSITE conclusions on the
+# same workspace: this one reported the pricing-tier error, Phase 9 swallowed it and
+# printed "ok: no enabled IP allowlist".
+ACL_STATUS="$(firefly_ip_allowlist_status "$DB_PROFILE")"
+case "$ACL_STATUS" in
+  none)      echo "no enabled IP allowlist on this workspace" ;;
+  enabled:*) echo "ENABLED IP allowlist(s): ${ACL_STATUS#enabled:}"
+             echo "  Vercel's egress must be allowed or every data call 403s." ;;
+  unknown:*) echo "could NOT determine the IP allowlist: ${ACL_STATUS#unknown:}"
+             echo "  Treat that as unknown, never as safe." ;;
+esac
 # If any are enabled, Vercel's egress must be allowed or the data plane refuses it.
 # That is a network decision this runbook cannot make — see "Enterprise network
 # controls". Everything else still works.
@@ -551,7 +546,8 @@ GUEST_SP_RESP=$(databricks service-principals list \
 import sys, json
 raw = sys.stdin.read().strip()
 try: l = json.loads(raw) if raw else []
-except ValueError: l = []          # a failed call means 'no match', not a traceback
+except ValueError: l = []   # SAFE-EMPTY: empty means 'no match', and the next
+                            # step CREATES the SP. No claim is made about state.
 m = [s for s in (l or []) if s.get('displayName') == 'firefly-guest-sp']
 print(json.dumps(m[0]) if m else '')")
 if [[ -z "$GUEST_SP_RESP" ]]; then
@@ -717,7 +713,8 @@ ORG_ID=$(neonctl orgs list --output json 2>/dev/null \
 import sys, json
 raw = sys.stdin.read().strip()
 try: orgs = json.loads(raw) if raw else []
-except ValueError: orgs = []       # empty rather than JSONDecodeError
+except ValueError: orgs = []  # SAFE-EMPTY: empty means 'personal account', and
+                              # --org-id is simply omitted. No claim is made.
 print(orgs[0]['id'] if orgs else '')" \
   || echo "")
 
@@ -982,20 +979,13 @@ office or VPN ranges. Every data call then returns a bare `403`, and the UI show
 wrong with the deployment; the workspace is refusing the caller.
 
 ```bash
-# Does this workspace enforce an IP allowlist?
-ACL=$(databricks api get /api/2.0/ip-access-lists --profile "$DB_PROFILE" 2>/dev/null)
-ENABLED=$(printf '%s' "$ACL" | python3 -c "
-import sys, json
-try: d = json.load(sys.stdin)
-except Exception: raise SystemExit
-on = [l for l in (d.get('ip_access_lists') or [])
-      if l.get('enabled') and l.get('list_type') == 'ALLOW']
-print(' / '.join(l.get('label','?') for l in on))
-" 2>/dev/null)
-
-if [[ -n "$ENABLED" ]]; then
-  cat <<WARN
-  !! This workspace enforces an IP allowlist: $ENABLED
+# Does this workspace enforce an IP allowlist? Same shared helper as Phase 1b, so
+# the two cannot disagree — which they did, in opposite directions.
+ACL_STATUS="$(firefly_ip_allowlist_status "$DB_PROFILE")"
+case "$ACL_STATUS" in
+  enabled:*)
+    cat <<WARN
+  !! This workspace enforces an IP allowlist: ${ACL_STATUS#enabled:}
      The app is served from Vercel, so its OUTBOUND addresses must be on that
      list or every Databricks call from the app will fail with 403 Forbidden.
      Phases 1-8 still succeed and the app will load - only data calls break.
@@ -1006,9 +996,18 @@ if [[ -n "$ENABLED" ]]; then
        - host the frontend inside an already-permitted network.
      This is your organisation's network policy, NOT a defect in this project.
 WARN
-else
-  echo "  ok: no enabled IP allowlist on this workspace - the app can reach it"
-fi
+    ;;
+  none)
+    echo "  ok: no enabled IP allowlist on this workspace - the app can reach it"
+    ;;
+  unknown:*)
+    # NOT "ok". The check did not run, and saying otherwise is a false all-clear
+    # on the control that decides whether the data plane works at all.
+    echo "  ?? could NOT determine whether an IP allowlist is enabled:"
+    echo "     ${ACL_STATUS#unknown:}"
+    echo "     If data calls 403 later, this is the first thing to re-check."
+    ;;
+esac
 ```
 
 ### Guest login

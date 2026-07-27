@@ -644,16 +644,67 @@ fi
 # expired auth, tool not installed — into `JSONDecodeError: Expecting value`, which
 # reads like a bad API response and hides the real cause. The seed probe had it, the
 # Phase 5 preflight had it, and the IP-allowlist check had it.
+#
+# Two shapes evaded the first version of this check, and the second one shipped a
+# false all-clear on the IP allowlist:
+#
+#   1. Assignment, then parse on a LATER line:
+#        ACL=$(databricks api get ... 2>/dev/null)
+#        ENABLED=$(printf '%s' "$ACL" | python3 -c "...json.load...")
+#      The discard and the parser are separate statements, so a same-line regex
+#      never sees them together.
+#
+#   2. An `except` that swallows instead of speaking:
+#        except Exception: raise SystemExit
+#      This satisfies "has a guard" while printing NOTHING — and the caller read
+#      that empty string as "no allowlist is enabled" and printed
+#      "ok: ... the app can reach it". A handler that exits silently is not a
+#      guard; it manufactures a confident wrong answer.
 PIPE_BLIND_BAD="$(python3 - <<'PYCHK'
 import re
 t = open('BOOTSTRAP.md').read()
 bad = []
-# A `2>/dev/null` command piped straight into a json.load with no guard.
+
+def guarded(seg):
+    """A parser is guarded only if every failure path SAYS something."""
+    if 'json.load' not in seg:
+        return True
+    for h in re.finditer(r'except[^\n:]*:\s*([^\n]*)\n((?:[ \t]+[^\n]*\n)*)', seg):
+        body = (h.group(1) + ' ' + h.group(2)).strip()
+        if not body:
+            return False
+        # Swallowing silently is as misleading as crashing: no print, no raise
+        # of anything a human reads.
+        if not re.search(r'print|sys\.stderr|write|echo', body):
+            # An empty fallback is legitimate when it feeds a self-correcting
+            # ACTION (create the missing thing, omit an optional flag) rather
+            # than a CLAIM about state. That difference is not mechanically
+            # detectable, so it must be declared and reviewed: mark the handler
+            # `# SAFE-EMPTY: <why>`. Undeclared silence stays a failure — that
+            # is precisely how "ok: no enabled IP allowlist" got printed for a
+            # check that never ran.
+            if 'SAFE-EMPTY' not in body:
+                return False
+    return bool(re.search(r'except|if not raw', seg))
+
+# Shape 1: discarded stderr piped straight into a parser.
 for m in re.finditer(r'2>/dev/null[^\n]*\\?\n?[^\n]*\|[^\n]*python3[^\n]*', t):
     seg = t[m.start():m.start() + 400]
-    if 'json.load' in seg and 'except' not in seg and 'if not raw' not in seg:
-        bad.append(m.group(0)[:60].replace('\n', ' '))
-print(' '.join(bad))
+    if 'json.load' in seg and not guarded(seg):
+        bad.append('inline:' + m.group(0)[:52].replace('\n', ' '))
+
+# Shape 2: stderr discarded into a variable that a parser later reads.
+for m in re.finditer(r'(\w+)=\$\([^\n]*2>/dev/null\s*\)', t):
+    var, tail = m.group(1), t[m.end():m.end() + 900]
+    use = re.search(r'\$(?:\{)?' + re.escape(var) + r'\}?[^\n]*\|[^\n]*python3', tail)
+    if use and not guarded(tail[use.start():use.start() + 500]):
+        bad.append('via-$' + var)
+
+# Shape 3: any silent swallow, wherever it lives.
+for m in re.finditer(r'except[^\n:]*:\s*(?:raise SystemExit|pass|sys\.exit\(\))\s*\n', t):
+    bad.append('silent-swallow:' + t[m.start():m.start() + 34].replace('\n', ' '))
+
+print(' '.join(sorted(set(bad))))
 PYCHK
 )"
 if [[ -z "$PIPE_BLIND_BAD" ]]; then
