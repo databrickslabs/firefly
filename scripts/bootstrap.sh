@@ -450,6 +450,11 @@ fi
 
 echo
 step "Vercel CLI OAuth (opens browser)"
+# Best-effort: silence the CLI's update/telemetry check, which reaches public npm
+# and fails behind a corp proxy, printing an "Error:" line before commands that
+# then succeed. UNVERIFIED — reproduces only on a proxied network.
+export VERCEL_TELEMETRY_DISABLED=1
+note "the vercel dist-tags 'Error:' line is its update check, not a failure"
 # Pin to a Tart-tested floor — do not chase npm `latest` (CLI deploy semantics move).
 # Override with VERCEL_CLI_VERSION=x.y.z if you need to bump deliberately.
 VERCEL_CLI_VERSION="${VERCEL_CLI_VERSION:-56.3.1}"

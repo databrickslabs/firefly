@@ -177,9 +177,23 @@ if command -v vercel &>/dev/null; then
 else
   npm install -g "vercel@${VERCEL_CLI_VERSION}"     # install BEFORE login
 fi
+# Best-effort suppression of the CLI's background update/telemetry check, which
+# reaches for PUBLIC npm and fails behind a corp proxy. UNVERIFIED: the failure
+# only reproduces on a proxied network, so whether this silences it is not
+# something we have confirmed — the note below is the part you can rely on.
+export VERCEL_TELEMETRY_DISABLED=1
+
 if ! vercel whoami &>/dev/null; then vercel login; fi
 vercel whoami
 ```
+
+> **`Error: Failed to get package info: Error: Failed to fetch dist-tags from npm`
+> is harmless — expect it on nearly every `vercel` command.** It is the CLI's own
+> background update check reaching public npm, which a corporate proxy blocks. It
+> is printed to stderr, prefixed `Error:`, and appears before output that then
+> succeeds — so it reads like an auth or install failure and has stopped readers
+> mid-phase. The command's real result is whatever follows. Judge `vercel` by its
+> exit code and its output, never by this line.
 
 ### 1e. GitHub CLI (for the submodule; optional otherwise)
 

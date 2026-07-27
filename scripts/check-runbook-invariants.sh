@@ -600,6 +600,22 @@ else
   bad "a tool advertises the one version that breaks the build:$PIN_ADVERT_BAD"
 fi
 
+# ── 25. Recurring harmless noise must be documented where it appears. ───────
+# The Vercel CLI prints `Error: Failed to get package info ... dist-tags` on nearly
+# every command behind a corp proxy. It is its own update check, it exits 0, and
+# the command succeeds — but it is on stderr, prefixed "Error:", and printed before
+# the real output, so it reads like an auth/install failure. SEVEN separate E2E
+# agents flagged it, each rediscovering it, because the runbook never mentioned it.
+# "Accepted" in a triage registry is not the same as telling the reader.
+NOISE_DOC_BAD=""
+grep -q 'dist-tags' BOOTSTRAP.md \
+  || NOISE_DOC_BAD="$NOISE_DOC_BAD BOOTSTRAP.md(noise-undocumented)"
+if [[ -z "$NOISE_DOC_BAD" ]]; then
+  pass "the recurring vercel 'Error:' line is documented as harmless where it appears."
+else
+  bad "output that reads like a failure but is not is left unexplained:$NOISE_DOC_BAD"
+fi
+
 # ── 15. The runner itself must parse, under bash AND zsh. ────────────────────
 # Invariant 5 checks every ```bash block in BOOTSTRAP.md and sources the shared
 # libs, but nothing ever ran `bash -n` on scripts/bootstrap.sh. A stray edit left
