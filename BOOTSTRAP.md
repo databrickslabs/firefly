@@ -88,7 +88,7 @@ FIREFLY_TRUST_PROXY_CA=1 firefly_bridge_corp_network   # or: TLS_PEM_PATH=<path>
 - [ ] **[ASK — REQUIRED, BLOCKING]** `SEED_SAMPLE_DATA` — if `$UC_CATALOG.$UC_SCHEMA` has **no tables**, copy `samples.wanderbricks` into it so Genie has something to answer from (16 tables, ~815k rows). `no` leaves the schema untouched
 - [ ] **[ASK — REQUIRED, BLOCKING]** `GENIE_SPACE_IDS` — existing Genie space id(s) to point the agent at, comma-separated. `None` (the default) means bootstrap may create one for you
 - [ ] **[ASK — REQUIRED, BLOCKING]** `CREATE_GENIE_SPACE` — when `GENIE_SPACE_IDS=None`, create a Genie space over the data in `$UC_CATALOG.$UC_SCHEMA`. Ignored when you supplied space ids
-- [ ] **[ASK — REQUIRED, BLOCKING]** `GRANT_GUEST_SPACE_ACCESS` — **ask this only when `GENIE_SPACE_IDS` is set.** Grant the guest SP `CAN_RUN` on those spaces and `SELECT` on the tables they reference, so guest users can ask data questions too
+- [ ] **[ASK — REQUIRED, BLOCKING]** `GRANT_GUEST_SPACE_ACCESS` — **ask this on every path**, default `yes`. Grants the guest SP `CAN_RUN` on whichever space the app ends up using — one you supplied or one this bootstrap creates — and `SELECT` on the tables it references. Answer `no` and guest users will reach the app but be unable to ask data questions, which is the point of the guest flow; Phase 6c says so plainly when it happens. This answer is honoured exactly: an earlier version silently overrode `no` for a bootstrap-created space, which made this ask a lie
 - [ ] **[ASK — REQUIRED, BLOCKING]** `AGENT_APP_NAME` — Databricks App name (dev target; bundle hardcodes this)
 - [ ] **[ASK — REQUIRED, BLOCKING]** `DATABRICKS_ACCOUNT_ID` — account ID (a **UUID**, e.g. `32aad83d-ef89-4e74-9969-77784815fd46`) from `accounts.cloud.databricks.com` (Account Console → top-right menu). NB: the account ID is a UUID; the *workspace* ID is the numeric one.
 - [ ] **[ASK — REQUIRED, BLOCKING]** `LAKEBASE_NAME` — name for the new Lakebase instance. A **request**, not a guarantee: if `$AGENT_APP_NAME` already exists, its own Lakebase binding wins and Phase 3a reconciles this value to whatever was actually bound
@@ -111,7 +111,7 @@ FIREFLY_TRUST_PROXY_CA=1 firefly_bridge_corp_network   # or: TLS_PEM_PATH=<path>
 | `SEED_SAMPLE_DATA` | `yes` | Only acts when the schema is empty; never overwrites an existing table |
 | `GENIE_SPACE_IDS` | `None` | From a space's URL: `…/genie/rooms/<space-id>`, or `databricks genie list-spaces` |
 | `CREATE_GENIE_SPACE` | `yes` | Titled `Firefly Genie Agent — <catalog>.<schema>`; reused, not duplicated, on a re-run |
-| `GRANT_GUEST_SPACE_ACCESS` | `yes` | Asked **only** when `GENIE_SPACE_IDS` is set |
+| `GRANT_GUEST_SPACE_ACCESS` | `yes` | Asked on every path; honoured exactly |
 | `AGENT_APP_NAME` | `firefly-openai-managed-mem-v2` | Dev target; bundle hardcodes this |
 | `DATABRICKS_ACCOUNT_ID` | — | Account **UUID** from `accounts.cloud.databricks.com` (not the numeric workspace ID) |
 | `LAKEBASE_NAME` | `firefly-lb` | Name for the new Lakebase instance. Reconciled in Phase 3a — an existing app's binding overrides it |
@@ -683,7 +683,7 @@ eval "$(bash scripts/genie-data-setup.sh \
   --seed "${SEED_SAMPLE_DATA:-yes}" \
   --space-ids "${GENIE_SPACE_IDS:-None}" \
   --create-space "${CREATE_GENIE_SPACE:-yes}" \
-  --grant-guest "${GRANT_GUEST_SPACE_ACCESS:-no}" \
+  --grant-guest "${GRANT_GUEST_SPACE_ACCESS:-yes}" \
   --guest-sp "${GUEST_SP_CLIENT_ID:-}" \
   --agent-sp "$SP_CLIENT_ID")"
 

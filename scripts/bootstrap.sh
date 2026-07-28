@@ -900,7 +900,7 @@ else
     --seed "${SEED_SAMPLE_DATA:-yes}" \
     --space-ids "${GENIE_SPACE_IDS:-}" \
     --create-space "${CREATE_GENIE_SPACE:-yes}" \
-    --grant-guest "${GRANT_GUEST_SPACE_ACCESS:-no}" \
+    --grant-guest "${GRANT_GUEST_SPACE_ACCESS:-yes}" \
     --guest-sp "${GUEST_SP_CLIENT_ID:-}" \
     --agent-sp "${SP_CLIENT_ID:-}")" || warn "Phase 6c setup reported a problem (continuing)"
   eval "$GENIE_SETUP_OUT"
