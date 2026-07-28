@@ -912,6 +912,7 @@ fi
 # Both --vars move together or neither does: agent.py raises ValueError on
 # mode=space with an empty id, and the app then fails to boot.
 if [[ "${GENIE_MCP_MODE:-one}" == "space" && -n "${GENIE_SPACE_ID:-}" ]]; then
+  firefly_restore_phase6_context "$DB_PROFILE"
   step "Redeploy the agent app in Genie space mode"
   # Phase 4's deployment may still be pending; the Apps API rejects an overlapping
   # update with "Cannot update app ... as there is a pending deployment in progress".
@@ -921,7 +922,9 @@ if [[ "${GENIE_MCP_MODE:-one}" == "space" && -n "${GENIE_SPACE_ID:-}" ]]; then
   run "cd '$REPO_DIR/agent-build' && databricks bundle deploy --profile '$DB_PROFILE' -t dev $GENIE_VARS"
   run "cd '$REPO_DIR/agent-build' && databricks bundle run agent_openai_agents_sdk --profile '$DB_PROFILE' -t dev $GENIE_VARS"
 else
-  note "Staying on Genie One (workspace-wide) — no Genie space was resolved."
+  warn "NOT redeploying in space mode: GENIE_MCP_MODE='${GENIE_MCP_MODE:-}' GENIE_SPACE_ID='${GENIE_SPACE_ID:-}'."
+  note "The app stays on Genie One, which guest users cannot use. If a space was"
+  note "created, the shell most likely lost these vars - see firefly_restore_phase6_context."
 fi
 
 fi

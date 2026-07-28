@@ -526,9 +526,19 @@ databricks api patch "/api/2.1/unity-catalog/permissions/catalog/$UC_CATALOG" \
 
 # 2. SQL warehouse CAN_USE (required for Genie to run queries, and by the
 #    GRANTs below — resolve it before them).
+# Phases 6, 6b and 6c all read WAREHOUSE_ID, SP_CLIENT_ID and GUEST_SP_CLIENT_ID from
+# the shell, so a new terminal — or an agent running the phases as separate commands —
+# arrives with them empty, and every downstream error then names something else. An
+# empty warehouse id turns the PATCH below into `/permissions/warehouses/`, which the
+# API rejects as "No API found for 'PATCH /permissions/warehouses/'": a missing route,
+# apparently, rather than a missing variable. Restore first, and assert before using.
+firefly_restore_phase6_context "$DB_PROFILE"
 WAREHOUSE_ID=$(databricks warehouses list -o json --profile "$DB_PROFILE" \
   | python3 -c "import sys,json; ws=json.load(sys.stdin); \
     print(ws[0]['id'] if ws else '')")
+# Persist it so 6b and 6c can recover it instead of assuming this shell survived.
+firefly_store_input WAREHOUSE_ID "$WAREHOUSE_ID"
+firefly_require WAREHOUSE_ID SP_CLIENT_ID || return 2>/dev/null || exit 1
 databricks api patch \
   "/api/2.0/permissions/warehouses/$WAREHOUSE_ID" \
   --profile "$DB_PROFILE" \
@@ -592,6 +602,11 @@ GUEST_SP_SECRET=$(databricks service-principal-secrets-proxy create \
 
 # 3. Store both values in $REPO_DIR/.firefly-bootstrap/state.env (0600, gitignored) — never print them
 store_secret GUEST_SP_CLIENT_ID "$GUEST_SP_CLIENT_ID"
+# An empty principal makes the warehouse PATCH answer "Principal:
+# ServicePrincipalName() does not exist", which reads as a SCIM problem rather than an
+# unset variable. Assert here, where the name is still the obvious cause.
+firefly_restore_phase6_context "$DB_PROFILE"
+firefly_require GUEST_SP_CLIENT_ID WAREHOUSE_ID || return 2>/dev/null || exit 1
 store_secret GUEST_SP_SECRET    "$GUEST_SP_SECRET"
 
 # 4. Grant the guest SP data access. Executed, not described: see the note in
@@ -709,7 +724,12 @@ Only when `GENIE_MCP_MODE=space`. Phase 4 deployed the app before this phase, so
 the app does not yet know the space exists — the env var arrives with a redeploy.
 
 ```bash
+# GENIE_MCP_MODE and GENIE_SPACE_ID live only in this shell, so a fresh one made this
+# gate fall through in silence: no redeploy, no warning, and an app that never learned
+# the space exists. Restore them, then say plainly which branch was taken.
+firefly_restore_phase6_context "$DB_PROFILE"
 if [ "$GENIE_MCP_MODE" = "space" ]; then
+  firefly_require GENIE_SPACE_ID || return 2>/dev/null || exit 1
   cd "$REPO_DIR/agent-build"
   # Phase 4's deployment may still be in flight. The Apps API rejects an overlapping
   # update with "Cannot update app ... as there is a pending deployment in progress",
@@ -721,6 +741,14 @@ if [ "$GENIE_MCP_MODE" = "space" ]; then
   databricks bundle run agent_openai_agents_sdk --profile "$DB_PROFILE" -t dev \
     --var "catalog=$UC_CATALOG" --var "schema=$UC_SCHEMA" \
     --var "genie_mcp_mode=space" --var "genie_space_id=$GENIE_SPACE_ID"
+  ok "app redeployed in Genie space mode against $GENIE_SPACE_ID"
+else
+  # Never silent. Staying on Genie One is a real outcome with a real cost — guest users
+  # cannot query it — so it has to be stated, not inferred from the absence of output.
+  warn "NOT redeploying in space mode: GENIE_MCP_MODE='${GENIE_MCP_MODE:-}' (want 'space')."
+  note "The app stays on Genie One, which guest users cannot use. If Phase 6c did create"
+  note "a space, this usually means the shell lost GENIE_MCP_MODE/GENIE_SPACE_ID — run"
+  note "firefly_restore_phase6_context \"\$DB_PROFILE\" and re-run this block."
 fi
 ```
 

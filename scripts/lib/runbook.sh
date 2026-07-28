@@ -359,6 +359,87 @@ for row in ((d.get("result") or {}).get("data_array") or []):
 '
 }
 
+# ─── Phase 6: restore the context a fresh shell dropped ───────────────────────
+# Phases 6, 6b and 6c read WAREHOUSE_ID, GUEST_SP_CLIENT_ID, SP_CLIENT_ID,
+# GENIE_MCP_MODE and GENIE_SPACE_ID straight out of the shell. Anyone who opened a new
+# terminal -- or any agent running the phases as separate commands -- lost them, and
+# every resulting error named something other than the empty variable:
+#
+#   WAREHOUSE_ID=""        -> PATCH /permissions/warehouses/  ->
+#                             "No API found for 'PATCH /permissions/warehouses/'"
+#                             which reads as a wrong API route
+#   GUEST_SP_CLIENT_ID=""  -> "Principal: ServicePrincipalName() does not exist"
+#                             which reads as a SCIM problem
+#   GENIE_MCP_MODE=""      -> `if [ "$GENIE_MCP_MODE" = "space" ]` SILENTLY skips and
+#                             the app never receives genie_space_id at all
+#
+# Rederive from state.env first, then from the workspace. Whatever cannot be recovered
+# is named, because "WAREHOUSE_ID is empty" is the one message that points at the fix.
+firefly_restore_phase6_context() {     # firefly_restore_phase6_context [profile]
+  local prof="${1:-${DB_PROFILE:-}}" v
+  [ -n "$prof" ] || { fail "firefly_restore_phase6_context: no profile"; return 1; }
+
+  if [ -z "${WAREHOUSE_ID:-}" ]; then
+    v="$(read_secret WAREHOUSE_ID 2>/dev/null || true)"
+    [ -n "$v" ] || v="$(databricks warehouses list -o json --profile "$prof" 2>/dev/null \
+      | python3 -c 'import sys,json
+try: d = json.load(sys.stdin) or []
+except Exception: d = []
+ws = d if isinstance(d, list) else (d.get("warehouses") or [])
+print(ws[0].get("id","") if ws else "")' 2>/dev/null || true)"
+    [ -n "$v" ] && { WAREHOUSE_ID="$v"; export WAREHOUSE_ID; note "restored WAREHOUSE_ID=$v"; }
+  fi
+
+  if [ -z "${GUEST_SP_CLIENT_ID:-}" ]; then
+    v="$(read_secret GUEST_SP_CLIENT_ID 2>/dev/null || true)"
+    [ -n "$v" ] || v="$(databricks service-principals list \
+      --filter 'displayName eq "firefly-guest-sp"' -o json --profile "$prof" 2>/dev/null \
+      | python3 -c 'import sys,json
+try: l = json.load(sys.stdin) or []
+except Exception: l = []
+m = [s for s in l if s.get("displayName") == "firefly-guest-sp"]
+print(m[0].get("applicationId","") if m else "")' 2>/dev/null || true)"
+    [ -n "$v" ] && { GUEST_SP_CLIENT_ID="$v"; export GUEST_SP_CLIENT_ID
+                     note "restored GUEST_SP_CLIENT_ID=$v"; }
+  fi
+
+  if [ -z "${SP_CLIENT_ID:-}" ] && [ -n "${AGENT_APP_NAME:-}" ]; then
+    v="$(databricks apps get "$AGENT_APP_NAME" -o json --profile "$prof" 2>/dev/null \
+      | python3 -c 'import sys,json
+try: print((json.load(sys.stdin) or {}).get("service_principal_client_id") or "")
+except Exception: print("")' 2>/dev/null || true)"
+    [ -n "$v" ] && { SP_CLIENT_ID="$v"; export SP_CLIENT_ID; note "restored SP_CLIENT_ID=$v"; }
+  fi
+
+  for v in GENIE_SPACE_ID GENIE_MCP_MODE; do
+    eval "[ -n \"\${$v:-}\" ]" && continue
+    eval "$v=\"\$(read_secret $v 2>/dev/null || true)\"; export $v"
+    eval "[ -n \"\${$v:-}\" ]" && note "restored $v=$(eval "printf '%s' \"\$$v\"")"
+  done
+  # A space id with no mode is the silent-skip case: say so rather than skipping.
+  if [ -n "${GENIE_SPACE_ID:-}" ] && [ -z "${GENIE_MCP_MODE:-}" ]; then
+    GENIE_MCP_MODE="space"; export GENIE_MCP_MODE
+    note "GENIE_SPACE_ID is set but GENIE_MCP_MODE was not - assuming space"
+  fi
+  return 0
+}
+
+# firefly_require <VAR>... — refuse to build a request out of an empty variable.
+# Without this the empty value reaches the API and the API complains about something
+# else entirely: an empty warehouse id becomes a missing route, an empty principal
+# becomes a non-existent service principal.
+firefly_require() {
+  local missing="" k
+  for k in "$@"; do
+    eval "[ -n \"\${$k:-}\" ]" || missing="$missing $k"
+  done
+  [ -z "$missing" ] && return 0
+  fail "these variables are empty:$missing"
+  note "Phase 6 needs them in the shell. Restore them with:"
+  note "  firefly_restore_phase6_context \"\$DB_PROFILE\""
+  return 1
+}
+
 # ─── Apps: let one deployment finish before starting the next ─────────────────
 # Phase 6c redeploys the app with genie_mcp_mode=space immediately after Phase 4
 # deployed it, and the Apps API refuses that with

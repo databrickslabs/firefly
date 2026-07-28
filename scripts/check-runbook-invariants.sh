@@ -893,16 +893,21 @@ fi
 # shipped that defect once (progress folded into its key=value output), and
 # read_secret nearly shipped it again with a duplicate-key warning.
 STDOUT_BAD=""
+# REPO_DIR, not FIREFLY_STATE_DIR: init_state_dir derives STATE_FILE from
+# ${1:-${REPO_DIR:-$PWD}} and overwrites it unconditionally, so the first version of
+# this check wrote its K=first/K=second probe lines straight into the repo's real
+# .firefly-bootstrap/state.env -- every invocation of this suite mutating the operator's
+# own state. A test must not write where the thing it tests writes.
 _out="$(bash -c "
-  export FIREFLY_STATE_DIR=\$(mktemp -d)
+  export REPO_DIR=\$(mktemp -d)
   cd '$PWD'
   source scripts/lib/corp-network.sh >/dev/null 2>&1
   source scripts/lib/runbook.sh      >/dev/null 2>&1
-  init_state_dir >/dev/null 2>&1
+  init_state_dir \"\$REPO_DIR\" >/dev/null 2>&1
   # Two assignments: whatever the helper wants to say about that must go to stderr.
   printf 'export K=first\nexport K=second\n' >> \"\$STATE_FILE\"
   read_secret K 2>/dev/null
-  rm -rf \"\$FIREFLY_STATE_DIR\"
+  rm -rf \"\$REPO_DIR\"
 " 2>/dev/null)"
 case "$_out" in
   second) ;;
@@ -975,6 +980,68 @@ if [[ -z "$SPACE_READ_BAD" ]]; then
   pass "a Genie space survives a transient read failure instead of falling back to Genie One."
 else
   bad "Phase 6c can discard a space it just created:$SPACE_READ_BAD"
+fi
+
+# ── 36. Phase 6 must not depend on a shell that may be gone ────────────────────
+# Phases 6, 6b and 6c read WAREHOUSE_ID, SP_CLIENT_ID, GUEST_SP_CLIENT_ID,
+# GENIE_MCP_MODE and GENIE_SPACE_ID straight from the shell. A second pass in a fresh
+# terminal lost them, and not one resulting error named the empty variable:
+#   WAREHOUSE_ID=""       -> "No API found for 'PATCH /permissions/warehouses/'"
+#   GUEST_SP_CLIENT_ID="" -> "Principal: ServicePrincipalName() does not exist"
+#   GENIE_MCP_MODE=""     -> the space-mode gate silently skipped, and the app never
+#                            received genie_space_id at all
+# The silent skip is the worst of the three: nothing failed, so nothing was investigated.
+PHASE6_BAD=""
+grep -q 'firefly_restore_phase6_context()' scripts/lib/runbook.sh \
+  || PHASE6_BAD="$PHASE6_BAD no-restore-helper"
+grep -q 'firefly_require()' scripts/lib/runbook.sh \
+  || PHASE6_BAD="$PHASE6_BAD no-require-helper"
+# Presence is not enough: BOOTSTRAP.md has several call sites, so requiring merely one
+# passed even with a phase boundary left unguarded. Each place that CONSUMES the vars
+# must have a restore ahead of it -- the same positional requirement as invariant 32.
+PHASE6_POS="$(python3 - <<'PYCHK'
+import re
+t = open('BOOTSTRAP.md').read()
+bad = []
+consumers = [
+    ('warehouse-patch', r'/api/2\.0/permissions/warehouses/\$WAREHOUSE_ID'),
+    ('space-mode-gate', r'if \[ "\$GENIE_MCP_MODE" = "space" \]'),
+]
+for label, pat in consumers:
+    m = re.search(pat, t)
+    if not m:
+        bad.append(label + '(absent)')
+        continue
+    if 'firefly_restore_phase6_context' not in t[max(0, m.start() - 1500):m.start()]:
+        bad.append(label + '(no-restore-before)')
+print(' '.join(bad))
+PYCHK
+)"
+[[ -n "$PHASE6_POS" ]] && PHASE6_BAD="$PHASE6_BAD $PHASE6_POS"
+grep -q 'firefly_restore_phase6_context' scripts/bootstrap.sh \
+  || PHASE6_BAD="$PHASE6_BAD bootstrap.sh(no-restore)"
+grep -q 'firefly_require WAREHOUSE_ID' BOOTSTRAP.md \
+  || PHASE6_BAD="$PHASE6_BAD BOOTSTRAP.md(no-assert)"
+# The space-mode gate must have an else that SAYS something.
+python3 - <<'PYCHK' || PHASE6_BAD="$PHASE6_BAD space-gate-silent"
+import re, sys
+for path in ('BOOTSTRAP.md', 'scripts/bootstrap.sh'):
+    t = open(path).read()
+    i = t.find('GENIE_MCP_MODE') 
+    while i != -1:
+        seg = t[i:i + 2000]
+        if re.search(r'=\s*.?space.?\s*\]', seg) or '== "space"' in seg:
+            # Within this gate, an else branch must warn or note.
+            if not re.search(r'\belse\b[\s\S]{0,600}?(warn|note)\s', seg):
+                sys.exit(1)
+            break
+        i = t.find('GENIE_MCP_MODE', i + 1)
+sys.exit(0)
+PYCHK
+if [[ -z "$PHASE6_BAD" ]]; then
+  pass "Phase 6 restores its context, asserts before use, and never skips in silence."
+else
+  bad "Phase 6 breaks when the shell is fresh:$PHASE6_BAD"
 fi
 
 echo
