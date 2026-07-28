@@ -1240,6 +1240,54 @@ else
   bad "\"Genie One\" is used as a current product name:$GENIE_NAME_BAD"
 fi
 
+# ── 42. Nothing may pin the bootstrap branch, because it outlives itself ────────
+# genie-agent carries this runbook; the default branch does not. So today a clone must
+# ask for genie-agent, and the day it merges and is deleted that same clone fails with
+# "Remote branch genie-agent not found in upstream origin" -- at Phase 2, the first step
+# a new reader takes. Dropping the branch breaks the opposite state. Neither fixed choice
+# survives the transition, so every clone resolves the branch and falls back.
+#
+# This also covers the README's "Open in Cursor" deeplink, which cannot run shell: its
+# prompt has to TELL the agent to check, since a URL cannot.
+BRANCH_PIN_BAD=""
+# A clone that names the branch literally rather than through the variable.
+#
+# Capture and test for emptiness rather than piping into `grep -q`: grep -q exits on its
+# first match, SIGPIPEs the greps upstream, and under `set -o pipefail` that turns the
+# whole pipeline non-zero -- so an `&& set the flag` after it never fired, and this arm
+# was dead code that passed against a deliberately re-pinned clone.
+#
+# Also exclude this file: it must contain the pattern in order to search for it.
+PIN_HITS="$(grep -rn -- '--branch genie-agent' --include='*.md' --include='*.sh' . 2>/dev/null \
+  | grep -v node_modules \
+  | grep -v 'check-runbook-invariants.sh' \
+  | grep -vE ':[[:space:]]*#' || true)"
+[[ -n "$PIN_HITS" ]] && BRANCH_PIN_BAD="$BRANCH_PIN_BAD literal-clone-pin($(printf '%s' "$PIN_HITS" | head -1 | cut -d: -f1-2))"
+# Both clone paths must resolve rather than assume.
+grep -q 'ls-remote --exit-code --heads' BOOTSTRAP.md \
+  || BRANCH_PIN_BAD="$BRANCH_PIN_BAD runbook-does-not-resolve"
+grep -q 'firefly_resolve_branch()' scripts/bootstrap.sh \
+  || BRANCH_PIN_BAD="$BRANCH_PIN_BAD runner-does-not-resolve"
+# And the clone must be proved right: assert the runbook is actually in the checkout.
+grep -q 'BOOTSTRAP.md is not in this checkout' BOOTSTRAP.md \
+  || BRANCH_PIN_BAD="$BRANCH_PIN_BAD no-post-clone-assert"
+# The deeplink prompt must name the fallback, not just the branch.
+python3 - <<'PYCHK' || BRANCH_PIN_BAD="$BRANCH_PIN_BAD deeplink-pins-branch"
+import re, sys, urllib.parse
+s = open('README.md').read()
+m = re.search(r'\]\((https://cursor\.com/link/prompt\?text=[^)]+)\)', s)
+if not m:
+    sys.exit(0)                       # no deeplink to guard
+txt = urllib.parse.parse_qs(urllib.parse.urlparse(m.group(1)).query).get('text', [''])[0]
+# Naming genie-agent is fine; naming it with no fallback is the defect.
+sys.exit(0 if ('genie-agent' not in txt or 'default branch' in txt) else 1)
+PYCHK
+if [[ -z "$BRANCH_PIN_BAD" ]]; then
+  pass "no clone or deeplink pins the bootstrap branch without a fallback."
+else
+  bad "this breaks the day genie-agent merges and is deleted:$BRANCH_PIN_BAD"
+fi
+
 echo
 if [[ "$FAILED" -eq 0 ]]; then
   echo "All runbook invariants hold."

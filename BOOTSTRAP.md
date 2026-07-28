@@ -267,9 +267,33 @@ if [[ -d "$REPO_DIR/.git" ]]; then
 elif [[ -e "$REPO_DIR" && -n "$(ls -A "$REPO_DIR" 2>/dev/null)" ]]; then
   echo "ERROR: $REPO_DIR is non-empty and not a git repo — pick a new REPO_DIR." >&2; exit 1
 else
-  git clone --branch genie-agent https://github.com/databrickslabs/firefly.git "$REPO_DIR"
+  # Branch-TOLERANT clone, because this runbook outlives its own branch.
+  #
+  # `--branch genie-agent` is correct today and breaks the day the branch merges and is
+  # deleted: git fails with "Remote branch genie-agent not found in upstream origin" at
+  # the first step a new reader takes. Dropping the branch instead breaks TODAY, because
+  # the default branch does not carry BOOTSTRAP.md yet. Neither fixed choice is right in
+  # both states, so resolve it: prefer the bootstrap branch while it exists, and fall
+  # back to the default branch once it has absorbed this runbook.
+  FIREFLY_REPO="${FIREFLY_REPO:-https://github.com/databrickslabs/firefly.git}"
+  FIREFLY_BRANCH="${FIREFLY_BRANCH:-genie-agent}"
+  if git ls-remote --exit-code --heads "$FIREFLY_REPO" "$FIREFLY_BRANCH" >/dev/null 2>&1; then
+    git clone --branch "$FIREFLY_BRANCH" "$FIREFLY_REPO" "$REPO_DIR"
+  else
+    echo "branch '$FIREFLY_BRANCH' is gone — cloning the default branch, which should"
+    echo "now carry this runbook."
+    git clone "$FIREFLY_REPO" "$REPO_DIR"
+  fi
 fi
 cd "$REPO_DIR"
+
+# Assert the runbook actually arrived. Without this the first symptom of cloning the
+# wrong branch is a missing file several phases later, which reads as a broken repo.
+if [[ ! -f BOOTSTRAP.md ]]; then
+  echo "ERROR: BOOTSTRAP.md is not in this checkout ($(git rev-parse --abbrev-ref HEAD))." >&2
+  echo "  Set FIREFLY_BRANCH to the branch that carries it and re-run Phase 2." >&2
+  exit 1
+fi
 
 # NOTE: no GitHub fork push. Phase 8 deploys with the `vercel deploy` CLI (uploads the local
 # build; no Vercel Git integration), so a user-owned GitHub repo is unnecessary. To enable
@@ -1298,7 +1322,7 @@ you draft it, they confirm, you submit.
 4. **File it** — write the body to a temp file, then create the issue from `$REPO_DIR`
    (or this repo root) with `gh` authenticated:
 
-**Title:** `bootstrap(genie-agent): <short summary>`
+**Title:** `bootstrap(<branch>): <short summary>` — substitute the branch you are on
 
 **Body template:**
 
@@ -1316,7 +1340,9 @@ you draft it, they confirm, you submit.
     <stderr / API response, redacted>
 
 ## Environment
-- Bootstrap branch: genie-agent
+- Bootstrap branch: `<output of: git rev-parse --abbrev-ref HEAD>` (do NOT hardcode a
+  branch name — after genie-agent merges, readers will be on the default branch and an
+  issue that claims otherwise points maintainers at code the reporter never ran)
 - DATABRICKS_HOST: <host>
 - UC_CATALOG / UC_SCHEMA: <values>
 - AGENT_APP_NAME: <value>
@@ -1341,7 +1367,7 @@ EOF
 
 gh issue create \
   --repo databrickslabs/firefly \
-  --title "bootstrap(genie-agent): <short summary>" \
+  --title "bootstrap($(git rev-parse --abbrev-ref HEAD)): <short summary>" \
   --body-file "$ISSUE_BODY"
 
 rm -f "$ISSUE_BODY"

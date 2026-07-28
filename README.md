@@ -1,6 +1,6 @@
 # FireFly Analytics - Databricks Custom Frontend
 
-[![Open in Cursor](https://img.shields.io/badge/Open%20in-Cursor-black?logo=cursor)](https://cursor.com/link/prompt?text=Clone%20https%3A%2F%2Fgithub.com%2Fdatabrickslabs%2Ffirefly%20on%20branch%20genie-agent%2C%20open%20the%20repository%20in%20this%20workspace%2C%20and%20work%20through%20BOOTSTRAP.md%20top%20to%20bottom.%20Run%20the%20Phase%200a%20corporate-network%20setup%20commands%20before%20any%20Phase%201%20command.)
+[![Open in Cursor](https://img.shields.io/badge/Open%20in-Cursor-black?logo=cursor)](https://cursor.com/link/prompt?text=Clone%20https%3A%2F%2Fgithub.com%2Fdatabrickslabs%2Ffirefly.%20Use%20branch%20genie-agent%20if%20it%20still%20exists%20on%20the%20remote%3B%20if%20it%20has%20been%20merged%20and%20deleted%2C%20use%20the%20default%20branch%20instead%20%E2%80%94%20BOOTSTRAP.md%20lives%20on%20whichever%20branch%20has%20it%2C%20so%20check%20before%20cloning.%20Open%20the%20repository%20in%20this%20workspace%20and%20work%20through%20BOOTSTRAP.md%20top%20to%20bottom.%20Run%20the%20Phase%200a%20corporate-network%20setup%20commands%20before%20any%20Phase%201%20command.)
 
 A Next.js application that provides a customized frontend for Databricks with multiple authentication strategies and embedded Databricks apps.
 

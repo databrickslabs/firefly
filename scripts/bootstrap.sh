@@ -23,7 +23,22 @@ CHECK_PYPI_PROXY=false
 TRUST_PROXY_CA=false
 [[ "${FIREFLY_TRUST_PROXY_CA:-}" == "1" ]] && TRUST_PROXY_CA=true
 # Branch of databrickslabs/firefly to clone in Phase 2 (app code).
+#
+# This default outlives itself: once genie-agent merges and is deleted, a pinned
+# `--branch genie-agent` clone fails with "Remote branch not found in upstream origin".
+# firefly_resolve_branch prefers it while it exists and falls back to the default branch
+# afterwards, so the same script works either side of the merge.
+FIREFLY_REPO="${FIREFLY_REPO:-https://github.com/databrickslabs/firefly.git}"
 FIREFLY_BRANCH="${FIREFLY_BRANCH:-genie-agent}"
+
+# Echoes the `--branch X` argument to use, or nothing when the branch is gone.
+firefly_resolve_branch() {
+  if git ls-remote --exit-code --heads "$FIREFLY_REPO" "$FIREFLY_BRANCH" >/dev/null 2>&1; then
+    printf -- '--branch %s' "$FIREFLY_BRANCH"
+  else
+    note "branch '$FIREFLY_BRANCH' not on the remote — cloning the default branch" >&2
+  fi
+}
 
 for arg in "$@"; do
   case $arg in
@@ -545,7 +560,7 @@ if run_phase "2"; then
 
 step "Clone the app repo (idempotent — safe to re-run)"
 if [[ "$DRY_RUN" == "true" ]]; then
-  run "git clone --branch '$FIREFLY_BRANCH' https://github.com/databrickslabs/firefly.git '$REPO_DIR'"
+  run "git clone $(firefly_resolve_branch) '$FIREFLY_REPO' '$REPO_DIR'"
 elif [[ -d "$REPO_DIR/.git" ]]; then
   ok "Repo already present at $REPO_DIR — reusing it (skipping clone)."
 elif [[ -e "$REPO_DIR" && -n "$(ls -A "$REPO_DIR" 2>/dev/null)" ]]; then
@@ -553,7 +568,7 @@ elif [[ -e "$REPO_DIR" && -n "$(ls -A "$REPO_DIR" 2>/dev/null)" ]]; then
   note "Pick a new REPO_DIR (re-run and decline reuse), or remove that directory, then re-run."
   exit 1
 else
-  run "git clone --branch '$FIREFLY_BRANCH' https://github.com/databrickslabs/firefly.git '$REPO_DIR'"
+  run "git clone $(firefly_resolve_branch) '$FIREFLY_REPO' '$REPO_DIR'"
 fi
 run "cd '$REPO_DIR'"
 
