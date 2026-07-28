@@ -996,7 +996,13 @@ vercel project protection disable "$VERCEL_PROJECT" --sso --scope "$VERCEL_TEAM"
 # another Vercel account, and the alias call hard-fails with "already in use".
 vercel deploy --prod --scope "$VERCEL_TEAM"
 
+# APP_ORIGIN comes from Phase 8b, so a fresh shell arrives without it and this used to
+# store PREVIEW_URL="" — after which Phase 9's guest-login curls returned HTTP 000 with
+# nothing to explain why. Recover it from state.env before trusting the shell.
+: "${APP_ORIGIN:=$(read_secret APP_ORIGIN 2>/dev/null || true)}"
+firefly_require APP_ORIGIN || return 2>/dev/null || exit 1
 PREVIEW_URL="$APP_ORIGIN"   # Phase 9 guest-entry URL (historical var name)
+store_secret APP_ORIGIN  "$APP_ORIGIN"
 store_secret PREVIEW_URL "$PREVIEW_URL"
 store_secret GUEST_API_SECRET "$GUEST_API_SECRET"
 ```
@@ -1015,7 +1021,15 @@ firefly_vercel_context "$REPO_DIR"
 SERVING=$(curl -sf -H "Authorization: Bearer $V_TOKEN" \
   "https://api.vercel.com/v9/projects/$V_PROJ?teamId=$V_ORG" \
   | python3 -c 'import json,sys; t=(json.load(sys.stdin).get("targets") or {}).get("production") or {}; print("\n".join(t.get("alias") or []))')
-grep -qxF "${APP_ORIGIN#https://}" <<<"$SERVING" || { echo "Production does not serve $APP_ORIGIN"; exit 1; }
+if [ -z "${APP_ORIGIN:-}" ]; then
+  # "Production does not serve " with no hostname reads as a domain mismatch when the
+  # deployment is in fact correct and aliased. The cause is a lost variable, so say that.
+  echo "APP_ORIGIN is empty, so this check cannot run — it is NOT a domain mismatch."
+  echo "  Recover it with: APP_ORIGIN=\$(read_secret APP_ORIGIN) and re-run this block."
+  return 2>/dev/null || exit 1
+fi
+grep -qxF "${APP_ORIGIN#https://}" <<<"$SERVING" \
+  || { echo "Production does not serve $APP_ORIGIN"; exit 1; }
 ```
 
 ---

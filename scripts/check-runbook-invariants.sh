@@ -1073,6 +1073,44 @@ else
   bad "the guest-grant ask does not match what happens:$GUEST_GRANT_BAD"
 fi
 
+# ── 38. State must not depend on cwd, and an empty write must not erase a value ─
+# Two failures with one shape, both costing real time on a live run:
+#   * init_state_dir fell back to $PWD, so a phase run from anywhere but the repo read a
+#     DIFFERENT state.env. Phase 9 concluded GUEST_API_SECRET was "0 chars" and spent
+#     three minutes reminting and redeploying a secret that was already stored.
+#   * Phase 8d does store_secret PREVIEW_URL "$APP_ORIGIN"; in a fresh shell APP_ORIGIN
+#     was unset, so a good value was overwritten with "" and Phase 9's curls returned
+#     HTTP 000 with nothing to explain it.
+STATE_BAD=""
+# REPO_DIR must be recovered from inputs.env before any $PWD fallback.
+python3 - <<'PYCHK' || STATE_BAD="$STATE_BAD cwd-dependent-state"
+import re, sys
+t = open('scripts/lib/runbook.sh').read()
+m = re.search(r'init_state_dir\(\)\s*\{(.*?)\n\}', t, re.S)
+if not m:
+    sys.exit(1)
+# Strip comments before looking: the explanatory comment above this function mentions
+# $PWD, and matching that made the check fail against correct code. Twice now a check
+# here has been satisfied or broken by prose rather than by what executes.
+body = '\n'.join(re.sub(r'#.*$', '', ln) for ln in m.group(1).split('\n'))
+# The recovery has to come before the PWD fallback, or it never runs.
+i_rec = body.find('inputs.env')
+i_pwd = body.find('$PWD')
+sys.exit(0 if (i_rec != -1 and i_pwd != -1 and i_rec < i_pwd) else 1)
+PYCHK
+sed -n '/^store_secret()/,/^}/p' scripts/lib/runbook.sh | grep -q 'refusing to overwrite' \
+  || STATE_BAD="$STATE_BAD empty-write-erases"
+# And the phase that hit it must recover rather than trust the shell.
+grep -q 'APP_ORIGIN:=$(read_secret APP_ORIGIN' BOOTSTRAP.md \
+  || STATE_BAD="$STATE_BAD phase8d-trusts-shell"
+grep -q 'is NOT a domain mismatch' BOOTSTRAP.md \
+  || STATE_BAD="$STATE_BAD phase8e-blames-domain"
+if [[ -z "$STATE_BAD" ]]; then
+  pass "state resolves independently of cwd, and an empty write cannot erase a value."
+else
+  bad "a lost shell variable can still destroy or misreport state:$STATE_BAD"
+fi
+
 echo
 if [[ "$FAILED" -eq 0 ]]; then
   echo "All runbook invariants hold."

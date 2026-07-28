@@ -1186,7 +1186,9 @@ step "8d. Deploy (single pass — production env already points at the real orig
 if [[ "$DRY_RUN" == "false" ]]; then
   DEPLOY_URL=$(vercel deploy --prod --scope "$VERCEL_TEAM" 2>&1 | grep -oE 'https://[^ ]*\.vercel\.app' | tail -1)
   ok "Deployed: ${DEPLOY_URL:-<none parsed>}"
+  : "${APP_ORIGIN:=$(read_secret APP_ORIGIN 2>/dev/null || true)}"
   PREVIEW_URL="$APP_ORIGIN"   # Phase 9 guest-entry URL (historical var name)
+  store_secret APP_ORIGIN  "$APP_ORIGIN"
   store_secret PREVIEW_URL "$PREVIEW_URL"
   store_secret GUEST_API_SECRET "$GUEST_API_SECRET"
 else

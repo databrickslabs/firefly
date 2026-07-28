@@ -53,7 +53,18 @@ _ff_is_func fail || fail() { echo "  ✗ $*"; }
 : "${STATE_FILE:=}"
 
 init_state_dir() {
-  local base="${1:-${REPO_DIR:-$PWD}}"
+  local base="${1:-${REPO_DIR:-}}"
+  # Falling back to $PWD made the state file depend on the caller's directory, so a
+  # phase run from anywhere but the repo silently read a DIFFERENT (usually absent)
+  # state.env: Phase 9 decided GUEST_API_SECRET was "0 chars" and spent three minutes
+  # reminting and redeploying a secret that was already stored correctly. Recover
+  # REPO_DIR from inputs.env first -- it is written there by firefly_store_inputs -- so
+  # the location is a property of the bootstrap rather than of the shell's cwd.
+  if [ -z "$base" ]; then
+    local inputs="${INPUTS_DIR:-$HOME/.firefly-bootstrap}/inputs.env"
+    [ -f "$inputs" ] && base="$(sed -nE 's/^REPO_DIR=(.*)$/\1/p' "$inputs" | tail -1)"
+  fi
+  [ -n "$base" ] || base="$PWD"
   STATE_DIR="${base}/.firefly-bootstrap"
   STATE_FILE="${STATE_DIR}/state.env"
   mkdir -p "$STATE_DIR"; chmod 700 "$STATE_DIR"
@@ -62,6 +73,21 @@ init_state_dir() {
 store_secret() {                        # store_secret KEY VALUE
   local key="$1" val="$2"
   init_state_dir
+  # Storing an empty value over a good one is how PREVIEW_URL became "": Phase 8d does
+  # store_secret PREVIEW_URL "$APP_ORIGIN", and in a fresh shell APP_ORIGIN was unset,
+  # so the key was overwritten with nothing. Phase 9's curls then returned HTTP 000 with
+  # no message to explain it. An empty write is almost always a lost variable, so say so
+  # and keep what is already there.
+  if [ -z "$val" ]; then
+    local existing
+    existing="$(grep -E "^[[:space:]]*(export[[:space:]]+)?${key}=" "$STATE_FILE" 2>/dev/null | tail -1)"
+    if [ -n "$existing" ]; then
+      warn "refusing to overwrite $key with an empty value - keeping what is stored."
+      warn "  the variable you passed was unset in this shell; nothing was lost."
+      return 0
+    fi
+    warn "$key stored EMPTY (the value passed in was unset in this shell)."
+  fi
   local tmp="${STATE_FILE}.tmp"
   touch "$STATE_FILE"
   # Drop EVERY prior form of this key, not just `^export KEY=`. A line written as
