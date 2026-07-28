@@ -1,6 +1,6 @@
 # FireFly Analytics - Databricks Custom Frontend
 
-[![Start here: BOOTSTRAP.md](https://img.shields.io/badge/Start%20here-BOOTSTRAP.md-black?logo=markdown)](./BOOTSTRAP.md)
+[![Open in Cursor](https://img.shields.io/badge/Open%20in-Cursor-black?logo=cursor)](https://cursor.com/link/prompt?text=Clone%20https%3A%2F%2Fgithub.com%2Fdatabrickslabs%2Ffirefly%20and%20open%20it%20in%20this%20workspace.%20Work%20through%20BOOTSTRAP.md%20top%20to%20bottom%2C%20running%20the%20Phase%200a%20corporate-network%20setup%20commands%20before%20any%20Phase%201%20command.%20If%20BOOTSTRAP.md%20is%20not%20present%20on%20the%20default%20branch%2C%20check%20out%20the%20genie-agent%20branch%2C%20which%20has%20it.) [![Start here: BOOTSTRAP.md](https://img.shields.io/badge/Start%20here-BOOTSTRAP.md-black?logo=markdown)](./BOOTSTRAP.md)
 
 A Next.js application that provides a customized frontend for Databricks with multiple authentication strategies and embedded Databricks apps.
 
