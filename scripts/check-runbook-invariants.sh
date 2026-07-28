@@ -1138,6 +1138,37 @@ else
   bad "these re-stores pass an empty variable after a shell boundary:$RESTORE_BAD"
 fi
 
+# ── 40. The shareable summary must not hand the recipient operator commands ─────
+# The deployment summary is the one table an operator forwards to whoever will use the
+# app. It carried `Expired or already used? | bash scripts/new-guest-link.sh --open`,
+# which that person cannot run: the script needs a clone of this repo and reads
+# PREVIEW_URL, GUEST_API_SECRET, GUEST_SP_CLIENT_ID and GUEST_SP_SECRET from
+# .firefly-bootstrap/state.env, exiting if any is absent. So the row was useless to its
+# reader, and the only way to make it work would be to hand over credentials.
+SUMMARY_BAD="$(python3 - <<'PYCHK'
+import re
+t = open('BOOTSTRAP.md').read()
+i = t.find('### Deployment summary')
+if i == -1:
+    print('summary-section-missing'); raise SystemExit
+# The table is the block of pipe-rows following the heading.
+rows = [l for l in t[i:i + 3000].split('\n') if l.startswith('|')]
+bad = []
+for r in rows:
+    # Anything the recipient would have to run locally, or any secret name.
+    if re.search(r'\b(bash|sh|databricks|vercel|neonctl|npm|pnpm|uv)\s+\S', r) \
+       or re.search(r'scripts/\S+\.sh', r) \
+       or re.search(r'GUEST_API_SECRET|GUEST_SP_SECRET|BETTER_AUTH_SECRET|ENCRYPTION_KEY', r):
+        bad.append(r.strip()[:60])
+print(' | '.join(bad))
+PYCHK
+)"
+if [[ -z "$SUMMARY_BAD" ]]; then
+  pass "the shareable summary asks nothing of its reader that needs the repo or a secret."
+else
+  bad "the summary table hands the recipient something only the operator can do:$SUMMARY_BAD"
+fi
+
 echo
 if [[ "$FAILED" -eq 0 ]]; then
   echo "All runbook invariants hold."

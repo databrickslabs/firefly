@@ -1168,10 +1168,18 @@ and clickable, never buried below the resource rows. The login link is **one-tim
 **Render every URL as a clickable markdown link** — `[<url>](<url>)` — so the user can click
 straight from the summary (substitute the real value into *both* the label and the target):
 
+The row below the link used to read ``Expired or already used? | `bash scripts/new-guest-link.sh --open` ``,
+which is an **operator** command sitting in the one table an operator forwards to the person
+who will actually use the app. That person has no clone of this repo, no
+`.firefly-bootstrap/state.env`, and no business holding `GUEST_API_SECRET` or the guest
+SP's client id and secret — all of which the script requires and refuses to run without.
+So the instruction could not work for them, and the only way to make it work would be to
+hand over credentials. Tell the recipient the one thing they can act on: ask you.
+
 | Resource | Value |
 |---|---|
 | **▶ Guest login URL** (one-time, ~10 min) | **[`<loginUrl>`](<loginUrl>)** |
-| Expired or already used? | `bash scripts/new-guest-link.sh --open` |
+| Expired or already used? | Ask whoever sent you this link for a fresh one — it takes them a few seconds |
 | Frontend (preview) | [`<PREVIEW_URL>`](<PREVIEW_URL>) |
 | Agent app | `<AGENT_APP_NAME>` — RUNNING · [`<app URL>`](<app URL>) |
 | Lakebase | `<LAKEBASE_NAME>` |
@@ -1179,11 +1187,17 @@ straight from the summary (substitute the real value into *both* the label and t
 | UC memory store | `<UC_CATALOG>.<UC_SCHEMA>.firefly_managed_memory` |
 | Agent SP / Guest SP | `<ids>` |
 
-If the link is expired or already used, mint a fresh one with:
+**For you, the operator — not for the table above.** When the recipient tells you the link
+is expired or already used, mint a fresh one and send it:
 
 ```bash
 bash scripts/new-guest-link.sh --open
 ```
+
+This has to run from your `$REPO_DIR`, because it reads `PREVIEW_URL`,
+`GUEST_API_SECRET`, `GUEST_SP_CLIENT_ID` and `GUEST_SP_SECRET` out of
+`$REPO_DIR/.firefly-bootstrap/state.env` and exits naming whichever one is missing.
+Those are credentials: keep them on your machine and send the recipient only the URL.
 
 It replays only the three "Guest login" POSTs above, reading `PREVIEW_URL` /
 `GUEST_API_SECRET` / guest-SP creds from `$REPO_DIR/.firefly-bootstrap/state.env`, and
