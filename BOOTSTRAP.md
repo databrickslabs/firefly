@@ -216,10 +216,14 @@ if command -v vercel &>/dev/null; then
 else
   npm install -g "vercel@${VERCEL_CLI_VERSION}"     # install BEFORE login
 fi
-# Best-effort suppression of the CLI's background update/telemetry check, which
-# reaches for PUBLIC npm and fails behind a corp proxy. UNVERIFIED: the failure
-# only reproduces on a proxied network, so whether this silences it is not
-# something we have confirmed — the note below is the part you can rely on.
+# Suppresses the CLI's background update/telemetry check, which reaches for PUBLIC
+# npm and fails behind a corp proxy.
+#
+# It does NOT silence "Error: Failed to fetch dist-tags from npm". That was marked
+# UNVERIFIED here until a proxied run tested it: every vercel command still printed
+# that Error line first and then succeeded. Set it anyway — it does cut outbound
+# chatter — but expect the dist-tags line regardless. The note below is the part
+# that matters, because that line reads like an auth or install failure and is not.
 export VERCEL_TELEMETRY_DISABLED=1
 
 if ! vercel whoami &>/dev/null; then vercel login; fi
