@@ -607,6 +607,9 @@ store_secret GUEST_SP_CLIENT_ID "$GUEST_SP_CLIENT_ID"
 # unset variable. Assert here, where the name is still the obvious cause.
 firefly_restore_phase6_context "$DB_PROFILE"
 firefly_require GUEST_SP_CLIENT_ID WAREHOUSE_ID || return 2>/dev/null || exit 1
+# Minted in an earlier phase, so a fresh shell arrives without it: recover before
+# storing, or this line is a save that saves nothing.
+: "${GUEST_SP_SECRET:=$(read_secret GUEST_SP_SECRET 2>/dev/null || true)}"
 store_secret GUEST_SP_SECRET    "$GUEST_SP_SECRET"
 
 # 4. Grant the guest SP data access. Executed, not described: see the note in
@@ -688,6 +691,9 @@ eval "$(bash scripts/genie-data-setup.sh \
   --agent-sp "$SP_CLIENT_ID")"
 
 echo "seed=$SEED_STATUS tables=$SEED_TABLE_COUNT mode=$GENIE_MCP_MODE space=$GENIE_SPACE_ID"
+# Minted in an earlier phase, so a fresh shell arrives without it: recover before
+# storing, or this line is a save that saves nothing.
+: "${GENIE_SPACE_ID:=$(read_secret GENIE_SPACE_ID 2>/dev/null || true)}"
 store_secret GENIE_SPACE_ID "$GENIE_SPACE_ID"
 ```
 
@@ -1004,6 +1010,9 @@ firefly_require APP_ORIGIN || return 2>/dev/null || exit 1
 PREVIEW_URL="$APP_ORIGIN"   # Phase 9 guest-entry URL (historical var name)
 store_secret APP_ORIGIN  "$APP_ORIGIN"
 store_secret PREVIEW_URL "$PREVIEW_URL"
+# Minted in an earlier phase, so a fresh shell arrives without it: recover before
+# storing, or this line is a save that saves nothing.
+: "${GUEST_API_SECRET:=$(read_secret GUEST_API_SECRET 2>/dev/null || true)}"
 store_secret GUEST_API_SECRET "$GUEST_API_SECRET"
 ```
 

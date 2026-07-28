@@ -1111,6 +1111,33 @@ else
   bad "a lost shell variable can still destroy or misreport state:$STATE_BAD"
 fi
 
+# ── 39. A re-store must recover the value first, or it saves nothing ───────────
+# Phase 8d ends with store_secret GUEST_API_SECRET "$GUEST_API_SECRET", re-storing a
+# value minted back in 8b. After a shell boundary the variable is empty, so the line
+# passes nothing. The empty-write guard (invariant 38) keeps the stored value, so no data
+# is lost -- but the call is then a save that saves nothing, and APP_ORIGIN two lines
+# above already recovered itself first. The asymmetry was the defect, and three keys had
+# it. A store right after a mint is fine; only a RE-store needs the recovery.
+RESTORE_BAD="$(python3 - <<'PYCHK'
+import re
+t = open('BOOTSTRAP.md').read()
+bad = []
+for m in re.finditer(r'store_secret\s+([A-Z_][A-Z0-9_]*)\s+"\$\{?\1\}?"', t):
+    key = m.group(1)
+    window = t[max(0, m.start() - 700):m.start()]
+    minted = re.search(r'\b' + key + r'=(?!=)', window)
+    recovered = re.search(r':\s*"\$\{' + key + r':=\$\(read_secret', window)
+    if not minted and not recovered:
+        bad.append(key)
+print(' '.join(sorted(set(bad))))
+PYCHK
+)"
+if [[ -z "$RESTORE_BAD" ]]; then
+  pass "every re-store of a secret recovers the value before storing it."
+else
+  bad "these re-stores pass an empty variable after a shell boundary:$RESTORE_BAD"
+fi
+
 echo
 if [[ "$FAILED" -eq 0 ]]; then
   echo "All runbook invariants hold."
