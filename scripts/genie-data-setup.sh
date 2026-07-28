@@ -396,12 +396,34 @@ for sid in $RESOLVED_IDS; do
   [ -n "$AGENT_SP" ] && grant_space_run "$sid" "$AGENT_SP"
 done
 
-if [ "$GRANT_GUEST" = "yes" ] && [ -n "$GUEST_SP" ]; then
+# Whose space is it? That decides whether the guest grant needs asking about.
+#
+# GRANT_GUEST_SPACE_ACCESS is only asked when the operator SUPPLIES space ids, and it
+# defaults to "no" — so on the common path, where bootstrap creates the space itself,
+# the guest SP got nothing. The app was pointed at a curated space, the AGENT SP could
+# query it, and guest users — the entire purpose of the guest login flow — could not.
+# Verified as guest.space_can_run='no' on a run where everything else was green.
+#
+# Modifying permissions on a space someone else owns is a real decision, so that still
+# requires the answer. Configuring the space we just created for this app is not.
+GUEST_GRANT_WANTED="$GRANT_GUEST"
+case "$GENIE_SPACE_SOURCE" in
+  created|reused-ours)
+    if [ "$GRANT_GUEST" != "yes" ]; then
+      note "granting the guest SP on our own Genie space regardless of --grant-guest:"
+      note "  guests cannot query the space otherwise, which defeats the guest flow."
+    fi
+    GUEST_GRANT_WANTED="yes" ;;
+esac
+
+if [ "$GUEST_GRANT_WANTED" = "yes" ] && [ -n "$GUEST_SP" ]; then
   for sid in $RESOLVED_IDS; do grant_space_run "$sid" "$GUEST_SP"; done
   # shellcheck disable=SC2086
   grant_table_select "$GUEST_SP" $RESOLVED_IDS
-elif [ "$GRANT_GUEST" = "yes" ]; then
-  warn "--grant-guest yes but no --guest-sp given — skipping guest grants"
+elif [ "$GUEST_GRANT_WANTED" = "yes" ]; then
+  warn "no --guest-sp given, so the guest SP has NO access to the Genie space."
+  warn "Guest users will not be able to ask data questions. Re-run Phase 6c after"
+  warn "Phase 6b has created the guest SP, passing --guest-sp \$GUEST_SP_CLIENT_ID."
 fi
 
 # ─── 4. decide the app's Genie mode ───────────────────────────────────────────

@@ -1044,6 +1044,38 @@ else
   bad "Phase 6 breaks when the shell is fresh:$PHASE6_BAD"
 fi
 
+# ── 37. Our own Genie space must grant the guest SP without being asked ────────
+# GRANT_GUEST_SPACE_ACCESS is only asked when the operator SUPPLIES space ids, and it
+# defaults to "no". On the common path -- bootstrap creates the space itself -- the guest
+# SP therefore got nothing: the app was pointed at a curated space, the AGENT SP could
+# query it, and guest users, the entire purpose of the guest login flow, could not. It
+# showed up as guest.space_can_run='no' on a run where every other check was green.
+# Touching permissions on someone else's space still needs the answer; configuring the
+# space we just created for this app does not.
+GUEST_GRANT_BAD=""
+grep -q 'GUEST_GRANT_WANTED' scripts/genie-data-setup.sh \
+  || GUEST_GRANT_BAD="$GUEST_GRANT_BAD no-source-aware-gate"
+# created/reused-ours must force the grant; user-supplied must NOT be forced.
+python3 - <<'PYCHK' || GUEST_GRANT_BAD="$GUEST_GRANT_BAD gate-does-not-force-for-ours"
+import re, sys
+t = open('scripts/genie-data-setup.sh').read()
+m = re.search(r'GUEST_GRANT_WANTED="\$GRANT_GUEST"(.{0,600}?)\nif ', t, re.S)
+if not m:
+    sys.exit(1)
+seg = m.group(1)
+forced = re.search(r'created\|reused-ours\)(.{0,400}?)GUEST_GRANT_WANTED="yes"', seg, re.S)
+sys.exit(0 if forced and 'user-supplied' not in (forced.group(1) or '') else 1)
+PYCHK
+# And when no guest SP was passed, say the guest flow is broken rather than nothing.
+sed -n '/GUEST_GRANT_WANTED" = "yes" \] && \[ -n/,/^fi$/p' scripts/genie-data-setup.sh \
+  | grep -q 'ask data questions' \
+  || GUEST_GRANT_BAD="$GUEST_GRANT_BAD missing-sp-not-explained"
+if [[ -z "$GUEST_GRANT_BAD" ]]; then
+  pass "a Genie space we created grants the guest SP without needing an extra answer."
+else
+  bad "guest users may not be able to query our own Genie space:$GUEST_GRANT_BAD"
+fi
+
 echo
 if [[ "$FAILED" -eq 0 ]]; then
   echo "All runbook invariants hold."
