@@ -1,4 +1,4 @@
-.PHONY: help db-generate db-push db-migrate db-studio db-drop db-check db-up db-pull auth-generate auth-migrate
+.PHONY: help check db-generate db-push db-migrate db-studio db-drop db-check db-up db-pull auth-generate auth-migrate
 
 # Load environment variables from .env.local
 -include .env.local
@@ -39,3 +39,14 @@ auth-generate: ## Generate Better Auth schema (output to auth-schema.ts for refe
 auth-setup: ## Setup auth tables (uses Drizzle push)
 	@echo "Pushing Better Auth schema to database using Drizzle..."
 	pnpm drizzle-kit push
+
+# GitHub Actions is disabled on this repository ({"enabled": false} on
+# /actions/permissions), so the runbook invariants and the TypeScript build are enforced by
+# nothing automatic -- they hold only when somebody runs them. Repo-local git hooks cannot
+# help either: core.hooksPath points at ~/.databricks/githooks globally, and that directory
+# is not ours to edit. So the least-bad option is to make the check trivial to invoke and
+# name it in the contributing path. Run this before pushing anything that touches
+# BOOTSTRAP.md, scripts/, or src/.
+check: ## Run the runbook invariants and typecheck (CI is disabled; this is the only gate)
+	@bash scripts/check-runbook-invariants.sh
+	@npx --yes tsc --noEmit -p tsconfig.json && echo "typecheck: clean"

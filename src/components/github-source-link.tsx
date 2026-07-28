@@ -60,14 +60,16 @@ function ChatGPTIcon({ className }: { className?: string }) {
   );
 }
 
-// UNVERIFIED: whether this should still be stikkireddy/firefly-analytics-monorepo rather
-// than databrickslabs/firefly. This component renders in top-nav, sso-spn-top-nav and the
-// sso-spn-admin sidebar, so every page with that nav sends users here to "view source".
-// Left exactly as it was, because changing which repository users are sent to is a product
-// decision, not a refactor. Only the URL construction changed.
+// VERIFIED 2026-07-28: this pointed at stikkireddy/firefly-analytics-monorepo, which
+// returns 404 from the GitHub API, from github.com, and from raw.githubusercontent.com.
+// databrickslabs/firefly is not a fork of it (fork=false, no parent), so it was not a
+// rename either -- the reference was simply dead. This component renders in top-nav,
+// sso-spn-top-nav and the sso-spn-admin sidebar, so every page with that nav was offering
+// users a "view source" link that 404s. Repointed at the repository this code actually
+// lives in, with both blob and raw URLs confirmed 200 on main and genie-agent.
 const SOURCE_REPO: RepoRef = {
-  owner: "stikkireddy",
-  repo: "firefly-analytics-monorepo",
+  owner: "databrickslabs",
+  repo: "firefly",
   branch: "main",
 };
 
@@ -105,7 +107,7 @@ export function GitHubSourceLink() {
 
   const githubUrl = buildBlobUrl(SOURCE_REPO, sourcePath);
   const rawUrl = buildRawUrl(SOURCE_REPO, sourcePath);
-  const chatPrompt = `Read and analyze this file from the firefly-analytics-monorepo: ${githubUrl}`;
+  const chatPrompt = `Read and analyze this file from databrickslabs/firefly: ${githubUrl}`;
   const cursorUrl = `https://cursor.com/link/prompt?text=${encodeURIComponent(chatPrompt)}`;
   const claudeUrl = `https://claude.ai/new?q=${encodeURIComponent(chatPrompt)}`;
   const chatgptUrl = `https://chatgpt.com/?prompt=${encodeURIComponent(chatPrompt)}`;
