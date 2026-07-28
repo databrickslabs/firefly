@@ -29,6 +29,18 @@ The file is `0600` and gitignored; never print its contents.
 
 **Input persistence + resume:** non-secret answers persist to
 `~/.firefly-bootstrap/inputs.env`, so a re-run offers to reuse them without
+
+Working through the phases **by hand or headlessly**, persist the answers yourself once
+Phase 0a has sourced the helpers:
+
+```bash
+firefly_store_inputs                 # every [ASK] key below, from the current shell
+firefly_store_inputs UC_CATALOG UC_SCHEMA   # ...or just the ones you changed
+```
+
+Do **not** reach for `for k in ...; do firefly_store_input "$k" "${!k}"; done`. `${!k}`
+is bash-only indirect expansion and raises `bad substitution` under zsh, which is the
+default shell on macOS. `firefly_store_inputs` does the same job in either shell.
 re-prompting. The runner tracks completed phases (`COMPLETED_PHASES`) and supports
 **skip-forward resume**: on a re-run, an already-completed phase prompts
 `Re-execute Phase N? [y/N]` and pressing Enter **skips** it and advances; a

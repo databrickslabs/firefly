@@ -904,6 +904,40 @@ else
   bad "a diagnostic is being captured as part of the value:$STDOUT_BAD"
 fi
 
+# ── 34. firefly_store_inputs must cover every [ASK] key, and dodge ${!k} ───────
+# The runbook only ever said bootstrap.sh saves answers to inputs.env and showed a
+# reader nothing, so an agent invented the loop -- reaching for `${!k}`, bash-only
+# indirect expansion, which is `bad substitution` under zsh, macOS's default shell.
+# The same hazard was already documented on read_secret, so leaving the safe form
+# unwritten is what let it recur. Two things must hold: the helper's default list
+# covers every [ASK] row, and nothing here teaches ${!k}.
+ASK_DRIFT="$(python3 - <<'PYCHK'
+import re
+doc = open('BOOTSTRAP.md').read()
+lib = open('scripts/lib/runbook.sh').read()
+asked = re.findall(r'\*\*\[ASK[^\]]*\]\*\* `([A-Z_][A-Z0-9_]*)`', doc)
+m = re.search(r'firefly_store_inputs\(\)\s*\{(.*?)\n\}', lib, re.S)
+covered = set(re.findall(r'\b([A-Z_][A-Z0-9_]{2,})\b', m.group(1))) if m else set()
+print(' '.join(sorted(set(asked) - covered)))
+PYCHK
+)"
+INDIRECT_TAUGHT=""
+# A ${!k} that is not immediately called out as the thing NOT to do.
+python3 - <<'PYCHK' || INDIRECT_TAUGHT="BOOTSTRAP.md(teaches-\${!k})"
+import re, sys
+t = open('BOOTSTRAP.md').read()
+for m in re.finditer(r'\$\{!\w+\}', t):
+    window = t[m.start():m.start() + 400]
+    if not re.search(r'bash-only|Do \*\*not\*\*|bad substitution', window):
+        sys.exit(1)
+sys.exit(0)
+PYCHK
+if [[ -z "$ASK_DRIFT$INDIRECT_TAUGHT" ]]; then
+  pass "firefly_store_inputs covers every [ASK] key and no phase teaches \${!k}."
+else
+  bad "headless Phase 0 persistence is incomplete:${ASK_DRIFT:+ uncovered:$ASK_DRIFT}$INDIRECT_TAUGHT"
+fi
+
 echo
 if [[ "$FAILED" -eq 0 ]]; then
   echo "All runbook invariants hold."

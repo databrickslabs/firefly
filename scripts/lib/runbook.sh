@@ -501,6 +501,37 @@ firefly_reconcile_lakebase() {            # firefly_reconcile_lakebase [agent_bu
 # bootstrap.sh has its own store_input; this is the library equivalent so the
 # runbook and anything sourcing this lib can persist too, instead of the value
 # living only in one shell.
+# firefly_store_inputs [KEY...] — persist the Phase 0 answers, defaulting to every
+# [ASK] row in BOOTSTRAP.md. Guarded by invariant 34 so the list cannot drift.
+#
+# This exists because the runbook only ever said that bootstrap.sh saves answers to
+# ~/.firefly-bootstrap/inputs.env, and showed nothing for anyone working through the
+# phases by hand. A reader therefore had to invent the loop, and what they reached for
+# was `for k in ...; do firefly_store_input "$k" "${!k}"; done` -- bash-only indirect
+# expansion, which raises `bad substitution` under zsh, the macOS default shell. That
+# same hazard had already been documented on read_secret, so leaving the safe form
+# unwritten is what let it recur somewhere new. Offer the loop rather than the trap.
+firefly_store_inputs() {
+  local k
+  # Positional parameters, not `for k in $keys`. zsh does NOT word-split an unquoted
+  # parameter, so that loop ran exactly once with the entire list as a single key name
+  # and stored nothing -- the first version of this helper had that bug, in the very
+  # function written to spare the reader a shell portability trap. `set --` with literal
+  # words and `for k in "$@"` behave identically in bash and zsh.
+  if [ "$#" -eq 0 ]; then
+    set -- DATABRICKS_HOST DB_PROFILE UC_CATALOG UC_SCHEMA \
+           SEED_SAMPLE_DATA GENIE_SPACE_IDS CREATE_GENIE_SPACE GRANT_GUEST_SPACE_ACCESS \
+           AGENT_APP_NAME DATABRICKS_ACCOUNT_ID LAKEBASE_NAME NEON_PROJECT_NAME \
+           VERCEL_TEAM VERCEL_PROJECT REPO_DIR
+  fi
+  for k in "$@"; do
+    # `eval` deliberately, NOT ${!k}: portable to bash and zsh alike. Unset keys store
+    # as empty rather than erroring, so a partially answered Phase 0 still persists.
+    eval "firefly_store_input \"\$k\" \"\${$k-}\""
+  done
+  ok "Phase 0 answers → ${INPUTS_DIR:-$HOME/.firefly-bootstrap}/inputs.env"
+}
+
 firefly_store_input() {                  # firefly_store_input KEY VALUE
   local key="$1" val="$2" dir file
   [ -n "$key" ] || return 1
