@@ -480,7 +480,7 @@ def \${node.id.replace('-', '_')}():
             >
               <h4 className="font-semibold mb-1">Agent Panel</h4>
               <p className="text-sm text-muted-foreground">
-                Genie One chat assistant for pipeline and catalog questions
+                Genie Agent chat assistant for pipeline and catalog questions
               </p>
             </Link>
 

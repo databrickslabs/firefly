@@ -46,7 +46,7 @@ const FEATURE_TABS = [
     description:
       "A slide-out assistant that answers natural-language questions over workspace data and remembers context across sessions.",
     features: [
-      "Genie One queries with source attribution",
+      "Genie Agent queries with source attribution",
       "Managed long-term memory per user",
       "Embedded via Vercel-native SPN proxy",
       "Guest and BYOD users supported",
@@ -55,7 +55,7 @@ const FEATURE_TABS = [
     docsHref: "/docs/solutions/agent",
     visual: {
       title: "Agent Panel",
-      items: ["Genie One", "Managed Memory", "Chat UI", "SPN Proxy"],
+      items: ["Genie Agent", "Managed Memory", "Chat UI", "SPN Proxy"],
     },
   },
   {

@@ -409,7 +409,7 @@ function WarehouseSelector({ onSelect }) {
             >
               <h4 className="font-semibold mb-1">Agent Panel</h4>
               <p className="text-sm text-muted-foreground">
-                Ask questions over workspace data with Genie One
+                Ask questions over workspace data with Genie Agent
               </p>
             </Link>
 

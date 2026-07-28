@@ -326,7 +326,7 @@ fi
 # ── 12. Genie mode and space id must never move independently (#83). ─────────
 # agent.py raises ValueError("GENIE_MCP_MODE=space requires GENIE_SPACE_ID"), so
 # a bundle that can set the mode without the id fails the app boot rather than
-# degrading to Genie One. Both must exist as variables, and every command that
+# degrading to workspace-wide Genie. Both must exist as variables, and every command that
 # passes one must pass the other.
 GENIE_COUPLING_BAD=""
 for v in genie_mcp_mode genie_space_id; do
@@ -337,7 +337,7 @@ grep -qE 'GENIE_SPACE_ID' agent/databricks.yml || GENIE_COUPLING_BAD="$GENIE_COU
 # The genie_space_id default must NOT be empty. An empty value makes the bundle
 # render `{"name": "GENIE_SPACE_ID"}` with no `value` key, and the Apps API
 # refuses the whole deploy: "Must specify environment variable source using
-# either value or valueFrom". That broke Phase 4 on the DEFAULT Genie One path
+# either value or valueFrom". That broke Phase 4 on the DEFAULT Genie Agent path
 # in six of nine E2E runs; each one still looked clean because the agent
 # diagnosed it and worked around it, and the app ended up RUNNING either way.
 GSID_DEFAULT="$(awk '
@@ -498,7 +498,7 @@ fi
 
 # ── 21. No workspace attribution link in the guest panel. ───────────────────
 # The panel's audience is GUEST users, who have no Databricks workspace access,
-# so a workspace link is dead for every one of them. It also named "Genie One"
+# so a workspace link is dead for every one of them. It also named "Genie Agent"
 # while GENIE_MCP_MODE defaults to a space — the wrong backend. Attribution is
 # plain text; the link must not come back, and neither must the env var that fed
 # it.
@@ -955,8 +955,8 @@ fi
 
 # ── 35. A Genie space must not be abandoned on one failed read ─────────────────
 # Phase 6c created a space, round-tripped 16 tables through it and granted CAN_RUN --
-# then a single GET failed, printed "not readable - staying on Genie One", cleared
-# GENIE_SPACE_ID and shipped the app on Genie One, which guest users cannot use. The
+# then a single GET failed, printed "not readable - staying on workspace-wide Genie", cleared
+# GENIE_SPACE_ID and shipped the app on Genie Agent, which guest users cannot use. The
 # same GET succeeded minutes later. Reads after a create are eventually consistent, so
 # one failure means "not yet", not "not there", and `2>/dev/null` meant the only thing
 # it could ever report was "not readable" whatever actually went wrong.
@@ -972,12 +972,12 @@ sed -n '/^space_readable()/,/^}/p' scripts/genie-data-setup.sh | grep -q 'while'
   || SPACE_READ_BAD="$SPACE_READ_BAD helper-does-not-retry"
 sed -n '/^space_readable()/,/^}/p' scripts/genie-data-setup.sh | grep -q '2>&1' \
   || SPACE_READ_BAD="$SPACE_READ_BAD helper-discards-stderr"
-# Falling back to Genie One costs the guest experience, so it must name the space and
+# Falling back to workspace-wide Genie costs the guest experience, so it must name the space and
 # where it came from -- not just say "not readable".
 grep -q 'abandoning space' scripts/genie-data-setup.sh \
   || SPACE_READ_BAD="$SPACE_READ_BAD fallback-not-explained"
 if [[ -z "$SPACE_READ_BAD" ]]; then
-  pass "a Genie space survives a transient read failure instead of falling back to Genie One."
+  pass "a Genie space survives a transient read failure instead of falling back to workspace-wide Genie."
 else
   bad "Phase 6c can discard a space it just created:$SPACE_READ_BAD"
 fi
@@ -1001,19 +1001,50 @@ grep -q 'firefly_require()' scripts/lib/runbook.sh \
 # must have a restore ahead of it -- the same positional requirement as invariant 32.
 PHASE6_POS="$(python3 - <<'PYCHK'
 import re
+
+# Derive the consumers rather than listing them. The first version named two -- the
+# warehouse PATCH and the space-mode gate -- and Phase 6's FIRST command is neither: it
+# is the catalog PATCH, which read an empty $SP_CLIENT_ID and got back "UpdatePermissions
+# Missing required field: principal". A hand-picked list of consumers has exactly the
+# blind spot of whichever one nobody thought of, which is the bug it was meant to catch.
+VARS = ('SP_CLIENT_ID', 'WAREHOUSE_ID', 'GUEST_SP_CLIENT_ID',
+        'GENIE_MCP_MODE', 'GENIE_SPACE_ID')
+
 t = open('BOOTSTRAP.md').read()
+# Phase 6 onward; earlier phases legitimately establish these values.
+start = t.find('## Phase 6')
+body = t[start:] if start != -1 else t
+
 bad = []
-consumers = [
-    ('warehouse-patch', r'/api/2\.0/permissions/warehouses/\$WAREHOUSE_ID'),
-    ('space-mode-gate', r'if \[ "\$GENIE_MCP_MODE" = "space" \]'),
-]
-for label, pat in consumers:
-    m = re.search(pat, t)
-    if not m:
-        bad.append(label + '(absent)')
-        continue
-    if 'firefly_restore_phase6_context' not in t[max(0, m.start() - 1500):m.start()]:
-        bad.append(label + '(no-restore-before)')
+for var in VARS:
+    for m in re.finditer(r'\$\{?' + var + r'\b', body):
+        line_start = body.rfind('\n', 0, m.start()) + 1
+        line = body[line_start:body.find('\n', m.start())]
+        # Skip comments, the helper's own definition/mention, and assignments.
+        if re.match(r'\s*#', line) or 'restore_phase6_context' in line or 'firefly_require' in line:
+            continue
+        if re.search(r'\b' + var + r'=(?!=)', line) or ':=' in line:
+            continue
+        # Only calls that actually leave the machine can misattribute the cause -- but
+        # judge the LOGICAL command, not the physical line. $SP_CLIENT_ID appears on the
+        # `--json` continuation of a multi-line `databricks api patch`, so a per-line
+        # filter skipped the very call that shipped this bug.
+        cmd_start = line_start
+        while cmd_start > 0:
+            prev_end = body.rfind('\n', 0, cmd_start - 1)
+            prev = body[prev_end + 1:cmd_start - 1]
+            if prev.rstrip().endswith('\\'):
+                cmd_start = prev_end + 1
+            else:
+                break
+        logical = body[cmd_start:body.find('\n', m.start())]
+        if not re.search(r'databricks |curl |firefly_sql', logical):
+            continue
+        before = body[:m.start()]
+        if 'firefly_restore_phase6_context' not in before:
+            ln = t[:start + m.start()].count('\n') + 1
+            bad.append(f'{var}@{ln}')
+            break
 print(' '.join(bad))
 PYCHK
 )"
@@ -1167,6 +1198,46 @@ if [[ -z "$SUMMARY_BAD" ]]; then
   pass "the shareable summary asks nothing of its reader that needs the repo or a secret."
 else
   bad "the summary table hands the recipient something only the operator can do:$SUMMARY_BAD"
+fi
+
+# ── 41. "Genie One" must not return as a current product name ───────────────────
+# The product is Genie Agent -- the app's own attribution component has returned
+# 'Genie Agent' for a while, and the docs lagged it in 49 places. Three references
+# survive on purpose, and only those three: passages explaining why a link LABELLED
+# "Genie One" was removed. Renaming a quoted historical label makes its own explanation
+# self-contradictory, so they are quoted and allowed.
+#
+# Note what this check does NOT touch: the mode VALUE is `one`, an identifier, and
+# renaming it would be a breaking change to bundle variables for no reader's benefit.
+# Where "Genie One" was doing the work of saying "workspace-wide", the fix was to say
+# workspace-wide -- both modes are the Genie Agent, so swapping the name alone would have
+# left `one` and `space` reading identically.
+GENIE_NAME_BAD="$(python3 - <<'PYCHK'
+import re, subprocess
+files = subprocess.run(
+    ['grep','-rl','Genie One','--include=*.md','--include=*.tsx','--include=*.ts',
+     '--include=*.py','--include=*.sh','--include=*.yml','.'],
+    capture_output=True, text=True).stdout.split()
+bad = []
+# Exclude this script: it must name the old label to explain and to search for it, and a
+# check that flags its own definition is the third time a guard here has been decided by
+# its own prose rather than by what it is checking.
+SELF = 'check-runbook-invariants.sh'
+for f in (x for x in files if 'node_modules' not in x and SELF not in x):
+    for i, line in enumerate(open(f, errors='replace'), 1):
+        if 'Genie One' not in line:
+            continue
+        # Allowed only as a quoted label being discussed, e.g. a "Genie One" link.
+        if re.search(r'["\u201c]Genie One["\u201d]', line):
+            continue
+        bad.append(f'{f}:{i}')
+print(' '.join(bad))
+PYCHK
+)"
+if [[ -z "$GENIE_NAME_BAD" ]]; then
+  pass "\"Genie One\" appears only as a quoted historical label, never as the current name."
+else
+  bad "\"Genie One\" is used as a current product name:$GENIE_NAME_BAD"
 fi
 
 echo

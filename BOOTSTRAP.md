@@ -519,6 +519,17 @@ rm -f "$MEM_LOG"
 The agent answers Genie queries as its service principal. Grant it:
 
 ```bash
+# Restore FIRST — before the very first command that reads one of these variables.
+#
+# The restore used to sit further down, ahead of the warehouse PATCH, which left THIS
+# call (the first in the phase) still reading an empty $SP_CLIENT_ID in a fresh shell.
+# The API answered "UpdatePermissions Missing required field: principal", which reads as
+# a request-schema bug rather than an unset variable. Placement is the whole point of
+# this helper, so it goes above the first consumer, not above the one that happened to
+# be noticed first.
+firefly_restore_phase6_context "$DB_PROFILE"
+firefly_require SP_CLIENT_ID UC_CATALOG || return 2>/dev/null || exit 1
+
 # 1. Unity Catalog — USE CATALOG
 databricks api patch "/api/2.1/unity-catalog/permissions/catalog/$UC_CATALOG" \
   --profile "$DB_PROFILE" \
@@ -642,7 +653,7 @@ databricks api patch \
 ## Phase 6c — Give Genie data, and a space, to work with
 
 Phases 6 and 6b grant catalog, schema, and warehouse access. On a **fresh
-workspace**, Genie One can still return empty or useless answers when the
+workspace**, Genie Agent can still return empty or useless answers when the
 granted schema has **no tables** — the agent and MCP plumbing work, but there
 is nothing to query.
 
@@ -749,10 +760,10 @@ if [ "$GENIE_MCP_MODE" = "space" ]; then
     --var "genie_mcp_mode=space" --var "genie_space_id=$GENIE_SPACE_ID"
   ok "app redeployed in Genie space mode against $GENIE_SPACE_ID"
 else
-  # Never silent. Staying on Genie One is a real outcome with a real cost — guest users
+  # Never silent. Staying on Genie Agent is a real outcome with a real cost — guest users
   # cannot query it — so it has to be stated, not inferred from the absence of output.
   warn "NOT redeploying in space mode: GENIE_MCP_MODE='${GENIE_MCP_MODE:-}' (want 'space')."
-  note "The app stays on Genie One, which guest users cannot use. If Phase 6c did create"
+  note "The app stays on Genie Agent, which guest users cannot use. If Phase 6c did create"
   note "a space, this usually means the shell lost GENIE_MCP_MODE/GENIE_SPACE_ID — run"
   note "firefly_restore_phase6_context \"\$DB_PROFILE\" and re-run this block."
 fi

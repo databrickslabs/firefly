@@ -266,7 +266,7 @@ service principal.
 
 Two backends are supported, chosen by `GENIE_MCP_MODE`:
 
-- **`one` (default)** — **Genie One**, the workspace-wide unified Genie. Not
+- **`one` (default)** — the **workspace-wide unified Genie**. Not
   scoped to any space; it discovers whatever the agent SP can read. Works on any
   workspace with no extra setup.
 - **`space`** — a single Genie space named by `GENIE_SPACE_ID`. Answers are scoped
@@ -279,15 +279,15 @@ frontend `.env.local`):
 
 | Env var | Purpose |
 | --- | --- |
-| `GENIE_MCP_MODE` | `one` for Genie One (workspace-wide), `space` for a single space. Bundle variable `genie_mcp_mode`, default `one` |
+| `GENIE_MCP_MODE` | `one` for workspace-wide Genie, `space` for a single curated space. Bundle variable `genie_mcp_mode`, default `one` |
 | `GENIE_SPACE_ID` | Required when `GENIE_MCP_MODE=space`, empty otherwise. Bundle variable `genie_space_id`, default empty. **Move it with the mode**: `agent.py` raises `ValueError` on `space` + empty id and the app fails to boot |
 | `DATABRICKS_HOST`, `DATABRICKS_WORKSPACE_ID` | **Auto-injected** by the Databricks Apps runtime — never set in the bundle. Used to identify the workspace; **no attribution link is built from them** (see below) |
 
 The panel shows plain-text "Powered by Genie" attribution with **no link**. There
-was one, pointing at Genie One, and it was wrong in two ways at once: the audience
+was one, pointing at workspace-wide Genie, and it was wrong in two ways at once: the audience
 for this panel is guest users who have no Databricks workspace access, so the link
 led somewhere they could not open; and once `GENIE_MCP_MODE` defaults to a space,
-"Genie One" named a backend that never saw the question. `GENIE_ONE_URL` no longer
+its "Genie One" label named a backend that never saw the question. `GENIE_ONE_URL` no longer
 exists.
 
 Switching an existing deployment to a space means passing **both** variables:
@@ -308,7 +308,7 @@ tables, catalogs, dashboards, or "my data".
 
 ### Grant the agent's service principal access to your data
 
-The agent queries Genie One as the **agent App's service principal** (see above), not
+The agent queries Genie Agent as the **agent App's service principal** (see above), not
 the signed-in user. Genie only returns Unity Catalog data that this service principal can
 access, so on a workspace where the SP has no grants, data questions come back empty even
 though the agent and Genie are otherwise working. Grant the app's service principal access
@@ -326,7 +326,7 @@ to the catalogs/schemas you want it to answer over:
 > warehouse the Agent panel looks broken even though the agent, Genie, and memory
 > are all working.
 
-<!-- UNVERIFIED: the exact minimal privilege set — and whether Genie One requires an
+<!-- UNVERIFIED: the exact minimal privilege set — and whether Genie Agent requires an
 explicit SQL-warehouse grant for the service principal — has not yet been confirmed on a
 clean workspace. -->
 

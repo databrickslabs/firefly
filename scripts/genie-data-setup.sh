@@ -19,7 +19,7 @@
 #   * Never emit GENIE_MCP_MODE=space without a non-empty GENIE_SPACE_ID:
 #     agent.py raises ValueError on that combination and the app fails to boot.
 #   * Only switch to space mode after confirming the agent SP can actually run
-#     the space. A working agent on Genie One beats a scoped-but-broken one.
+#     the space. A working agent on Genie Agent beats a scoped-but-broken one.
 #
 # Output: `KEY=value` lines on stdout for the caller to capture. Everything
 # human-facing goes to stderr, so `eval "$(genie-data-setup.sh ...)"` is safe.
@@ -233,8 +233,8 @@ get_space() { dbx api get "/api/2.0/genie/spaces/$1?include_serialized_space=tru
 
 # A space is readable, or we retried long enough to mean it. A single GET here abandoned
 # a space this script had just created, round-tripped 16 tables through, and granted
-# CAN_RUN on: one transient failure printed "not readable - staying on Genie One",
-# cleared GENIE_SPACE_ID, and shipped the app on Genie One. The same GET succeeded
+# CAN_RUN on: one transient failure printed "not readable - staying on workspace-wide Genie",
+# cleared GENIE_SPACE_ID, and shipped the app on Genie Agent. The same GET succeeded
 # minutes later. Reads after a create are eventually consistent, so treat one failure as
 # "not yet" rather than "not there", and keep stderr so a real error can be named --
 # the discarded-stderr version could only ever say "not readable", whatever went wrong.
@@ -274,7 +274,7 @@ if [ -n "$SPACE_IDS" ]; then
     GENIE_SPACE_SOURCE="user-supplied"
     ok "using user-supplied Genie space(s): $RESOLVED_IDS"
   else
-    warn "none of the supplied space ids were usable — falling back to Genie One"
+    warn "none of the supplied space ids were usable — falling back to workspace-wide Genie"
   fi
 elif [ "$CREATE_SPACE" = "yes" ]; then
   WANT_TITLE="$(space_title_for "$CATALOG" "$SCHEMA")"
@@ -328,13 +328,13 @@ ss = json.loads(ss) if isinstance(ss, str) else ss
 print(len((ss.get("data_sources") or {}).get("tables") or []))' 2>/dev/null)"
         note "round-trip: space reports ${got:-0} table(s)"
       else
-        warn "Genie space creation failed — staying on Genie One"
+        warn "Genie space creation failed — staying on workspace-wide Genie"
         printf '%s\n' "$NEW" | head -3 >&2
       fi
     fi
   fi
 else
-  note "Genie space creation declined at Phase 0 — staying on Genie One"
+  note "Genie space creation declined at Phase 0 — staying on workspace-wide Genie"
 fi
 
 [ -n "$RESOLVED_IDS" ] || RESOLVED_IDS="$GENIE_SPACE_ID"
@@ -435,9 +435,9 @@ if [ -n "$GENIE_SPACE_ID" ]; then
     GENIE_MCP_MODE="space"
   else
     # Falling back is a real cost: the app loses the curated space and lands on
-    # Genie One, which guest users cannot use. Say what was given up and why, so
+    # Genie Agent, which guest users cannot use. Say what was given up and why, so
     # this is never mistaken for "no space was wanted".
-    warn "abandoning space $GENIE_SPACE_ID (source: $GENIE_SPACE_SOURCE) — staying on Genie One"
+    warn "abandoning space $GENIE_SPACE_ID (source: $GENIE_SPACE_SOURCE) — staying on workspace-wide Genie"
     case "$GENIE_SPACE_SOURCE" in
       created|reused-ours)
         warn "  this space WAS created and granted successfully in this run, so an"

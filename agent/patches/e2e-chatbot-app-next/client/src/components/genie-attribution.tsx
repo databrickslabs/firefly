@@ -57,7 +57,7 @@ export function GenieAttribution({
           link here, and it was wrong twice over: the audience for this panel is
           guest users who have no Databricks workspace access, so the link led
           somewhere they cannot open; and once the agent defaults to a Genie
-          space, "Genie One" names a backend that never saw the question. A dead
+          space, that "Genie One" label named a backend that never saw the question. A dead
           link labelled with the wrong backend is worse than no link.
         */}
         <span className="inline-flex items-center gap-1.5 font-semibold text-foreground/90">

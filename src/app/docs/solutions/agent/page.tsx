@@ -35,7 +35,7 @@ export default async function AgentPage() {
           <PageTitle>Agent Panel</PageTitle>
           <p className="text-xl text-muted-foreground">
             A slide-out chat assistant that answers questions over your
-            workspace data with Genie One and remembers context across sessions
+            workspace data with Genie Agent and remembers context across sessions
             with managed memory &mdash; embedded without exposing Databricks SSO.
           </p>
         </header>
@@ -48,7 +48,7 @@ export default async function AgentPage() {
               <code className="text-sm">agent-openai-agents-sdk</code> template
               (vendored as a git submodule under{" "}
               <code className="text-sm">vendor/app-templates</code>). It pairs the
-              OpenAI Agents SDK with two capabilities: <strong>Genie One</strong>{" "}
+              OpenAI Agents SDK with two capabilities: <strong>Genie Agent</strong>{" "}
               for natural-language questions over Unity Catalog data, and{" "}
               <strong>managed memory</strong> for durable, per-user context.
             </p>
@@ -65,7 +65,7 @@ export default async function AgentPage() {
 
           <HighlightBox variant="info" title="Key Benefits">
             <ul className="list-disc pl-5 space-y-1">
-              <li>Genie One answers over workspace data, with source attribution</li>
+              <li>Genie Agent answers over workspace data, with source attribution</li>
               <li>Managed long-term memory (UC store) across conversations</li>
               <li>Guest / BYOD users work &mdash; the proxy mints their mapped SPN token</li>
               <li>Same-origin embedding; users never see a Databricks login</li>
@@ -95,11 +95,11 @@ export default async function AgentPage() {
           </Section>
         </Section>
 
-        {/* Genie One + Memory Section */}
-        <Section id="genie-and-memory" title="Genie One & Managed Memory">
+        {/* Genie Agent + Memory Section */}
+        <Section id="genie-and-memory" title="Genie Agent & Managed Memory">
           <ContentBlock>
             <p className="mb-4">
-              The agent answers data questions with <strong>Genie One</strong>,
+              The agent answers data questions with <strong>Genie Agent</strong>,
               the workspace-wide unified Genie, served over the Genie MCP endpoint
               (<code className="text-sm">/api/2.0/mcp/genie</code>). The{" "}
               <code className="text-sm">ask_genie_one</code> tool calls{" "}
@@ -118,7 +118,7 @@ export default async function AgentPage() {
             <ul className="list-disc pl-5 space-y-1 text-sm">
               <li><strong>Genie-first</strong>: data questions call <code>ask_genie_one</code> before asking the user to clarify</li>
               <li><strong>Concrete assets</strong>: broad prompts request catalogs, schemas, tables, key columns, and row counts</li>
-              <li><strong>Attribution</strong>: replies surface Genie asset links and a &ldquo;Powered by Genie &middot; Genie One&rdquo; link</li>
+              <li><strong>Attribution</strong>: replies surface Genie asset links and a &ldquo;Powered by Genie &middot; Genie Agent&rdquo; link</li>
               <li><strong>Memory</strong>: relevant context is read/written to the UC memory store per user</li>
             </ul>
           </HighlightBox>
@@ -186,7 +186,7 @@ export default async function AgentPage() {
                   <tr>
                     <td className="border border-gray-200 px-4 py-2"><code className="text-sm">GENIE_MCP_MODE</code></td>
                     <td className="border border-gray-200 px-4 py-2 text-sm">Agent App</td>
-                    <td className="border border-gray-200 px-4 py-2">Set to <code>one</code> to use Genie One (workspace-wide)</td>
+                    <td className="border border-gray-200 px-4 py-2">Set to <code>one</code> to use Genie Agent (workspace-wide)</td>
                   </tr>
                   <tr>
                     <td className="border border-gray-200 px-4 py-2"><code className="text-sm">DATABRICKS_MEMORY_STORE</code></td>

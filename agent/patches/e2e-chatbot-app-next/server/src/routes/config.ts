@@ -45,7 +45,7 @@ function workspaceHostFromEnv(): string {
 /**
  * No attribution URL is exposed. The panel's audience is guest users with no
  * Databricks workspace access, so any workspace link is dead for them — and once
- * GENIE_MCP_MODE defaults to a space, a "Genie One" link names a backend that
+ * GENIE_MCP_MODE defaults to a space, a "Genie Agent" link names a backend that
  * never answered the question. The UI shows plain-text attribution instead.
  */
 function genieConfigFromEnv() {

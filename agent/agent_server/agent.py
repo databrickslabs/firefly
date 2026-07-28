@@ -80,7 +80,7 @@ def _genie_mcp_path() -> str:
 
 
 def _genie_mcp_url(app_wc: WorkspaceClient) -> str:
-    """Genie One managed MCP when GENIE_MCP_MODE=one (default)."""
+    """Workspace-wide managed Genie MCP when GENIE_MCP_MODE=one (default)."""
     path_or_url = _genie_mcp_path()
     if path_or_url.startswith("http"):
         return path_or_url.rstrip("/")

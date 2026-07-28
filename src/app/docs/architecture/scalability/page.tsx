@@ -586,7 +586,7 @@ spec:
               >
                 <h4 className="font-semibold mb-2 text-violet-900">Agent Panel</h4>
                 <p className="text-sm text-violet-800">
-                  Genie One + managed-memory chat assistant embedded via the
+                  Genie Agent + managed-memory chat assistant embedded via the
                   Vercel-native <code className="text-xs">/api/agent-proxy</code> route.
                 </p>
               </Link>

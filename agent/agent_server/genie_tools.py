@@ -1,4 +1,4 @@
-"""Genie One MCP helpers — ask + poll until completed."""
+"""Genie Agent MCP helpers — ask + poll until completed."""
 
 import json
 import logging
@@ -85,7 +85,7 @@ def _augment_broad_question(question: str) -> str:
 
 @function_tool
 def ask_genie_one(question: str) -> str:
-    """Query Genie One over workspace data. Use for any question about tables, catalogs, dashboards, or 'my data'. For broad questions, it automatically requests table- and column-level detail. Polls until Genie completes."""
+    """Query Genie Agent over workspace data. Use for any question about tables, catalogs, dashboards, or 'my data'. For broad questions, it automatically requests table- and column-level detail. Polls until Genie completes."""
     question = _augment_broad_question(question)
     ask = _mcp_tool_call("genie_ask", {"question": question})
     if ask.get("status") == "completed" and ask.get("final_answer"):

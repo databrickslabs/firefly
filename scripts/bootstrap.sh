@@ -923,7 +923,7 @@ if [[ "${GENIE_MCP_MODE:-one}" == "space" && -n "${GENIE_SPACE_ID:-}" ]]; then
   run "cd '$REPO_DIR/agent-build' && databricks bundle run agent_openai_agents_sdk --profile '$DB_PROFILE' -t dev $GENIE_VARS"
 else
   warn "NOT redeploying in space mode: GENIE_MCP_MODE='${GENIE_MCP_MODE:-}' GENIE_SPACE_ID='${GENIE_SPACE_ID:-}'."
-  note "The app stays on Genie One, which guest users cannot use. If a space was"
+  note "The app stays on Genie Agent, which guest users cannot use. If a space was"
   note "created, the shell most likely lost these vars - see firefly_restore_phase6_context."
 fi
 

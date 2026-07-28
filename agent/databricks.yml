@@ -20,7 +20,7 @@ variables:
   memory_store_name:
     description: Managed-memory store (Lakebase-backed) name.
     default: firefly_managed_memory
-  # Genie backend. Defaults reproduce Genie One (workspace-wide discovery), which
+  # Genie backend. Defaults to workspace-wide discovery, which
   # needs no space and works on any workspace. Phase 6c overrides BOTH together
   # when it has a usable space: `--var genie_mcp_mode=space --var genie_space_id=<id>`.
   #
@@ -28,14 +28,14 @@ variables:
   # ValueError("GENIE_MCP_MODE=space requires GENIE_SPACE_ID") when the mode is
   # `space` and the id is empty, and the app fails to boot rather than degrading.
   genie_mcp_mode:
-    description: "`one` for Genie One (workspace-wide), or `space` for a single Genie space."
+    description: "`one` for workspace-wide Genie, or `space` for a single curated Genie space."
     default: one
   genie_space_id:
     description: Genie space id — required when genie_mcp_mode=space, `none` otherwise.
     # NOT empty. An empty value makes the bundle render this env entry as
     # `{"name": "GENIE_SPACE_ID"}` with no `value` key, and the Apps API refuses
     # the deploy: "Must specify environment variable source using either value
-    # or valueFrom". That broke Phase 4 on the DEFAULT (Genie One) path, which is
+    # or valueFrom". That broke Phase 4 on the DEFAULT (Genie Agent) path, which is
     # the path most deployments take. agent.py treats `none` as unset, so the
     # mode=space guard still raises rather than querying a bogus space.
     default: "none"

@@ -46,7 +46,7 @@ export const SOLUTION_DOCS: SolutionDoc[] = [
     title: "Agent Panel",
     href: "/docs/solutions/agent",
     description:
-      "Genie One + managed-memory chat assistant, embedded via a Vercel-native SPN proxy.",
+      "Genie Agent + managed-memory chat assistant, embedded via a Vercel-native SPN proxy.",
     embeddingType: "vercel-proxy",
     embeddingLabel: "Vercel-native proxy iframe",
   },
