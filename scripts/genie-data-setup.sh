@@ -231,6 +231,31 @@ space_tables() { existing_tables | sed "s/^/${CATALOG}.${SCHEMA}./" | LC_ALL=C s
 
 get_space() { dbx api get "/api/2.0/genie/spaces/$1?include_serialized_space=true" 2>/dev/null; }
 
+# A space is readable, or we retried long enough to mean it. A single GET here abandoned
+# a space this script had just created, round-tripped 16 tables through, and granted
+# CAN_RUN on: one transient failure printed "not readable - staying on Genie One",
+# cleared GENIE_SPACE_ID, and shipped the app on Genie One. The same GET succeeded
+# minutes later. Reads after a create are eventually consistent, so treat one failure as
+# "not yet" rather than "not there", and keep stderr so a real error can be named --
+# the discarded-stderr version could only ever say "not readable", whatever went wrong.
+space_readable() {                     # space_readable <space_id> [budget_s]
+  local sid="$1" budget="${2:-90}" waited=0 raw err=""
+  while :; do
+    raw="$(dbx api get "/api/2.0/genie/spaces/$sid?include_serialized_space=true" 2>&1 || true)"
+    case "$raw" in
+      *'"space_id"'*) return 0 ;;
+    esac
+    err="$(printf '%s' "$raw" | tr '\n' ' ' | cut -c1-160)"
+    [ "$waited" -ge "$budget" ] && break
+    [ "$waited" -eq 0 ] && note "space $sid not readable yet; retrying for up to ${budget}s"
+    sleep 10
+    waited=$((waited + 10))
+  done
+  warn "space $sid still unreadable after ${budget}s. The API said:"
+  warn "  ${err:-(no output)}"
+  return 1
+}
+
 GENIE_SPACE_ID="" GENIE_SPACE_SOURCE="none" GENIE_MCP_MODE="one"
 RESOLVED_IDS=""
 
@@ -238,10 +263,10 @@ if [ -n "$SPACE_IDS" ]; then
   # User-supplied ids: verify each is real and readable, then use them verbatim.
   # These are the only spaces this script is permitted to touch.
   for sid in $(printf '%s' "$SPACE_IDS" | tr ', ' '\n' | sed '/^$/d'); do
-    if get_space "$sid" | grep -q '"space_id"'; then
+    if space_readable "$sid" 30; then
       RESOLVED_IDS="${RESOLVED_IDS}${RESOLVED_IDS:+ }$sid"
     else
-      warn "Genie space $sid is not readable with this profile — skipping it"
+      warn "skipping Genie space $sid — see the API message above"
     fi
   done
   if [ -n "$RESOLVED_IDS" ]; then
@@ -383,10 +408,20 @@ fi
 # Only claim space mode if the space is really there. agent.py raises ValueError
 # when GENIE_MCP_MODE=space and GENIE_SPACE_ID is empty, which fails the app boot.
 if [ -n "$GENIE_SPACE_ID" ]; then
-  if get_space "$GENIE_SPACE_ID" | grep -q '"space_id"'; then
+  if space_readable "$GENIE_SPACE_ID" 90; then
     GENIE_MCP_MODE="space"
   else
-    warn "space $GENIE_SPACE_ID is not readable — staying on Genie One"
+    # Falling back is a real cost: the app loses the curated space and lands on
+    # Genie One, which guest users cannot use. Say what was given up and why, so
+    # this is never mistaken for "no space was wanted".
+    warn "abandoning space $GENIE_SPACE_ID (source: $GENIE_SPACE_SOURCE) — staying on Genie One"
+    case "$GENIE_SPACE_SOURCE" in
+      created|reused-ours)
+        warn "  this space WAS created and granted successfully in this run, so an"
+        warn "  unreadable GET is more likely a transient API failure than a missing"
+        warn "  space. Re-run Phase 6c: it reuses the space by title instead of"
+        warn "  creating a second one, and the app then redeploys in space mode." ;;
+    esac
     GENIE_SPACE_ID=""; GENIE_MCP_MODE="one"
   fi
 fi

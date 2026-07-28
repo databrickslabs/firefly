@@ -553,6 +553,12 @@ firefly_warn_existing_app_wins() {        # firefly_warn_existing_app_wins <app>
     warn "app '$app' already exists, so ITS Lakebase binding will win here."
     note "--lakebase-create-new will not provision '${LAKEBASE_NAME:-}'; the name is"
     note "reconciled after quickstart and the summary will show what was bound."
+    # quickstart prints its `bundle deployment bind` suggestion on BOTH paths, and the
+    # first version of this pre-empt only defused the app-absent one -- so on the
+    # app-exists path it still read as an actionable next step. Phase 4's plain deploy
+    # and run work without binding either way.
+    note "quickstart will also suggest \`databricks bundle deployment bind\`. Ignore it:"
+    note "Phase 4's plain \`bundle deploy\` / \`bundle run\` is the documented path."
   else
     # The opposite case needs pre-empting too. quickstart.py answers --app-name for
     # an app that does not exist with

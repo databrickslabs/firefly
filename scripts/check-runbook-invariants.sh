@@ -796,6 +796,16 @@ grep -q 'does not exist or is deleted' BOOTSTRAP.md \
 # The pre-empt is worthless if it only fires when the app EXISTS.
 sed -n '/^firefly_warn_existing_app_wins()/,/^}/p' scripts/lib/runbook.sh | grep -q 'else' \
   || FIRSTRUN_BAD="$FIRSTRUN_BAD warn_existing_app_wins(no-absent-branch)"
+# quickstart prints the bind suggestion on BOTH paths. Defusing only one of them leaves
+# it reading as an actionable next step on the other, which is what a run reported after
+# the absent-case fix shipped. Require both halves of the function to mention it.
+BIND_HALVES="$(sed -n '/^firefly_warn_existing_app_wins()/,/^}/p' scripts/lib/runbook.sh \
+  | awk 'BEGIN{half=0}
+         /^[[:space:]]*#/ {next}                      # a comment defuses nothing
+         /else/{half=1}
+         /deployment bind/ && /note|warn|echo/ {print half}' | sort -u | tr -d '\n')"
+[[ "$BIND_HALVES" == "01" ]] \
+  || FIRSTRUN_BAD="$FIRSTRUN_BAD warn_existing_app_wins(bind-not-defused-on-both-paths)"
 if [[ -z "$FIRSTRUN_BAD" ]]; then
   pass "quickstart's first-run 'does not exist or is deleted' noise is pre-empted."
 else
@@ -936,6 +946,35 @@ if [[ -z "$ASK_DRIFT$INDIRECT_TAUGHT" ]]; then
   pass "firefly_store_inputs covers every [ASK] key and no phase teaches \${!k}."
 else
   bad "headless Phase 0 persistence is incomplete:${ASK_DRIFT:+ uncovered:$ASK_DRIFT}$INDIRECT_TAUGHT"
+fi
+
+# ── 35. A Genie space must not be abandoned on one failed read ─────────────────
+# Phase 6c created a space, round-tripped 16 tables through it and granted CAN_RUN --
+# then a single GET failed, printed "not readable - staying on Genie One", cleared
+# GENIE_SPACE_ID and shipped the app on Genie One, which guest users cannot use. The
+# same GET succeeded minutes later. Reads after a create are eventually consistent, so
+# one failure means "not yet", not "not there", and `2>/dev/null` meant the only thing
+# it could ever report was "not readable" whatever actually went wrong.
+SPACE_READ_BAD=""
+grep -q 'space_readable()' scripts/genie-data-setup.sh \
+  || SPACE_READ_BAD="$SPACE_READ_BAD no-retry-helper"
+# The decision points must use it rather than a bare single GET.
+if grep -nE 'if get_space "\$[A-Za-z_]+" \| grep -q' scripts/genie-data-setup.sh >/dev/null 2>&1; then
+  SPACE_READ_BAD="$SPACE_READ_BAD single-GET-decides"
+fi
+# It has to actually loop, and it has to keep stderr, or it is the old check renamed.
+sed -n '/^space_readable()/,/^}/p' scripts/genie-data-setup.sh | grep -q 'while' \
+  || SPACE_READ_BAD="$SPACE_READ_BAD helper-does-not-retry"
+sed -n '/^space_readable()/,/^}/p' scripts/genie-data-setup.sh | grep -q '2>&1' \
+  || SPACE_READ_BAD="$SPACE_READ_BAD helper-discards-stderr"
+# Falling back to Genie One costs the guest experience, so it must name the space and
+# where it came from -- not just say "not readable".
+grep -q 'abandoning space' scripts/genie-data-setup.sh \
+  || SPACE_READ_BAD="$SPACE_READ_BAD fallback-not-explained"
+if [[ -z "$SPACE_READ_BAD" ]]; then
+  pass "a Genie space survives a transient read failure instead of falling back to Genie One."
+else
+  bad "Phase 6c can discard a space it just created:$SPACE_READ_BAD"
 fi
 
 echo
