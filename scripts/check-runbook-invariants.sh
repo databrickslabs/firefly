@@ -802,6 +802,53 @@ else
   bad "a first run will chase quickstart's bind suggestion:$FIRSTRUN_BAD"
 fi
 
+# ── 31. Helpers must reach their own error reporting under `set -e` ────────────
+# firefly_ip_allowlist_status did `raw="$(databricks api get ...)"`. On a tier without
+# the IP-allowlist feature the CLI exits 1, and an assignment from a failing command
+# substitution ABORTS the shell under errexit in both bash and zsh. So the branch
+# written to handle that tier gracefully instead killed Phase 1b and Phase 9 on exactly
+# the workspaces that reach it -- worse than the wrong "ok" it replaced. firefly_sql had
+# the same shape, with an `rc=$?` check immediately after that errexit never reached.
+#
+# Assert the DIAGNOSTIC, not merely that the shell survived: calling the helper as
+# `fn || true` suppresses errexit for the whole function body, so a survival check
+# passes even when the helper is broken. That was the first version of this invariant
+# and it could never fail. What matters is that the helper still SPEAKS when its own
+# CLI fails, so require the words it promises to emit.
+ERREXIT_BAD=""
+for _sh in bash zsh; do
+  # firefly_ip_allowlist_status must classify, not die.
+  _out="$("$_sh" -c "
+    set -e
+    cd '$PWD'
+    source scripts/lib/runbook.sh >/dev/null 2>&1
+    databricks() { echo 'Error: IP access list is not available in the pricing tier' >&2; return 1; }
+    firefly_ip_allowlist_status myprof
+  " 2>/dev/null)"
+  case "$_out" in
+    unavailable:*|unknown:*|none|enabled:*) ;;
+    *) ERREXIT_BAD="$ERREXIT_BAD $_sh:firefly_ip_allowlist_status(silent)" ;;
+  esac
+
+  # firefly_sql must print its submit-failed diagnostic, not vanish.
+  _out="$("$_sh" -c "
+    set -e
+    cd '$PWD'
+    source scripts/lib/runbook.sh >/dev/null 2>&1
+    databricks() { echo 'Error: warehouse not found' >&2; return 1; }
+    firefly_sql 'SELECT 1' myprof mywh
+  " 2>&1 || true)"
+  case "$_out" in
+    *"statement submit failed"*) ;;
+    *) ERREXIT_BAD="$ERREXIT_BAD $_sh:firefly_sql(silent)" ;;
+  esac
+done
+if [[ -z "$ERREXIT_BAD" ]]; then
+  pass "helpers still report their own CLI failure under set -e (bash and zsh)."
+else
+  bad "these helpers die before reporting, under set -e:$ERREXIT_BAD"
+fi
+
 echo
 if [[ "$FAILED" -eq 0 ]]; then
   echo "All runbook invariants hold."

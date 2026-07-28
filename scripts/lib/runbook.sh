@@ -288,8 +288,12 @@ sys.stdout.write(json.dumps({
     "on_wait_timeout": "CONTINUE",
 }))' > "$req" || { rm -f "$req"; fail "firefly_sql: could not build request"; return 2; }
 
-  local out rc
-  out="$(databricks api post /api/2.0/sql/statements --json "@$req" --profile "$prof" 2>&1)"; rc=$?
+  local out rc=0
+  # `|| rc=$?` rather than a bare assignment followed by `rc=$?`: under `set -e` the
+  # assignment aborts the shell the moment the CLI exits non-zero, so the rc check
+  # below -- and the diagnostic it prints -- were unreachable in exactly the case they
+  # exist for. The `||` makes it a compound command, which errexit tolerates.
+  out="$(databricks api post /api/2.0/sql/statements --json "@$req" --profile "$prof" 2>&1)" || rc=$?
   rm -f "$req"
   if [ "$rc" -ne 0 ]; then
     fail "firefly_sql: statement submit failed"
@@ -359,7 +363,13 @@ for row in ((d.get("result") or {}).get("data_array") or []):
 firefly_ip_allowlist_status() {           # firefly_ip_allowlist_status [profile]
   local prof="${1:-${DB_PROFILE:-}}" raw
   [ -n "$prof" ] || { echo "unknown:no profile given"; return 0; }
-  raw="$(databricks api get /api/2.0/ip-access-lists --profile "$prof" 2>&1)"
+  # `|| true` is load-bearing. On a tier without the feature the CLI exits 1, and an
+  # assignment from a failing command substitution aborts the shell under `set -e` in
+  # BOTH bash and zsh. The first version of this helper omitted it, so the branch
+  # written to handle the pricing tier gracefully instead killed Phase 1b and Phase 9
+  # on exactly the workspaces that hit it -- a worse failure than the wrong "ok" it
+  # replaced, and one that only appears when the caller enables errexit.
+  raw="$(databricks api get /api/2.0/ip-access-lists --profile "$prof" 2>&1 || true)"
   FF_RAW="$raw" python3 -c '
 import json, os, re, sys
 raw = (os.environ.get("FF_RAW") or "").strip()

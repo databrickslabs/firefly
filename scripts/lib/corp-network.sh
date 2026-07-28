@@ -92,8 +92,8 @@ derive_proxy_ca_bundle() {
     cat "$f" >> "$capem"; added=$((added+1)); lastca="$f"
   done
   if [[ "$added" -eq 0 || -z "$lastca" ]]; then rm -f "$capem"; rm -rf "$tmpd"; return 1; fi
-  PROXY_CA_ROOT_CN=$(openssl x509 -in "$lastca" -noout -subject 2>/dev/null | sed -E 's/.*CN ?= ?//; s#.*/CN=##')
-  PROXY_CA_ROOT_FP=$(openssl x509 -in "$lastca" -noout -fingerprint -sha256 2>/dev/null | sed 's/.*=//')
+  PROXY_CA_ROOT_CN=$(openssl x509 -in "$lastca" -noout -subject 2>/dev/null || true | sed -E 's/.*CN ?= ?//; s#.*/CN=##')
+  PROXY_CA_ROOT_FP=$(openssl x509 -in "$lastca" -noout -fingerprint -sha256 2>/dev/null || true | sed 's/.*=//')
   rm -rf "$tmpd"
   chmod 600 "$capem" 2>/dev/null || true
   PROXY_CA_BUNDLE="$capem"; PROXY_CA_ADDED="$added"
@@ -108,7 +108,7 @@ derive_proxy_ca_bundle() {
 detect_pip_index() {
   local v f
   if command -v python3 >/dev/null 2>&1; then
-    v=$(python3 -m pip config get global.index-url 2>/dev/null | tr -d '[:space:]')
+    v=$(python3 -m pip config get global.index-url 2>/dev/null | tr -d '[:space:]' || true)
     [[ -n "$v" && "$v" != "None" ]] && { echo "$v"; return; }
   fi
   for f in "${PIP_CONFIG_FILE:-}" "$HOME/.config/pip/pip.conf" "$HOME/.pip/pip.conf" /etc/pip.conf; do
@@ -271,7 +271,7 @@ check_pypi_proxy_state() {
 detect_npm_registry() {
   local v f
   if command -v npm >/dev/null 2>&1; then
-    v=$(npm config get registry 2>/dev/null | tr -d '[:space:]')
+    v=$(npm config get registry 2>/dev/null | tr -d '[:space:]' || true)
     [[ -n "$v" && "$v" != "undefined" ]] && { echo "$v"; return; }
   fi
   for f in "$HOME/.npmrc" "${PREFIX:-/usr/local}/etc/npmrc" /etc/npmrc; do
