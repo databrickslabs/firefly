@@ -64,7 +64,11 @@ store_secret() {                        # store_secret KEY VALUE
   init_state_dir
   local tmp="${STATE_FILE}.tmp"
   touch "$STATE_FILE"
-  grep -v "^export ${key}=" "$STATE_FILE" > "$tmp" 2>/dev/null || true
+  # Drop EVERY prior form of this key, not just `^export KEY=`. A line written as
+  # `KEY=...` or with leading whitespace used to survive the filter, so state.env
+  # ended up holding two assignments; sourcing takes the last one, and Phase 9's
+  # summary printed a stale GENIE_SPACE_ID while the deployment used the right one.
+  grep -vE "^[[:space:]]*(export[[:space:]]+)?${key}=" "$STATE_FILE" > "$tmp" 2>/dev/null || true
   printf 'export %s=%q\n' "$key" "$val" >> "$tmp"
   mv "$tmp" "$STATE_FILE"
   chmod 600 "$STATE_FILE"
@@ -89,6 +93,22 @@ read_secret() {
   local key="$1"
   init_state_dir
   [ -f "$STATE_FILE" ] || return 1
+  # Sourcing silently takes the LAST assignment, so a duplicate resolves to whichever
+  # writer happened to go second and the caller cannot tell. Phase 9 reported a stale
+  # GENIE_SPACE_ID this way while the deployment had used the correct one. Say it out
+  # loud rather than returning one of two answers as though it were the only one.
+  local dups
+  dups="$(grep -cE "^[[:space:]]*(export[[:space:]]+)?${key}=" "$STATE_FILE" 2>/dev/null || echo 0)"
+  if [ "${dups:-0}" -gt 1 ]; then
+    # Straight to stderr, NOT via warn(): warn() echoes to stdout, and every caller
+    # reads this function as VALUE="$(read_secret KEY)". Routing a diagnostic through
+    # it would fold the warning text into the value -- the same defect that made
+    # genie-data-setup.sh emit progress into its own key=value output.
+    printf '  ⚠ state.env has %s assignments of %s; using the last. Values seen:\n' \
+      "$dups" "$key" >&2
+    grep -E "^[[:space:]]*(export[[:space:]]+)?${key}=" "$STATE_FILE" 2>/dev/null \
+      | sed 's/^/      /' >&2 || true
+  fi
   # shellcheck disable=SC1090
   . "$STATE_FILE"
   local val
@@ -337,6 +357,42 @@ if st.get("state") != "SUCCEEDED":
 for row in ((d.get("result") or {}).get("data_array") or []):
     print("\t".join("" if c is None else str(c) for c in row))
 '
+}
+
+# ─── Apps: let one deployment finish before starting the next ─────────────────
+# Phase 6c redeploys the app with genie_mcp_mode=space immediately after Phase 4
+# deployed it, and the Apps API refuses that with
+#   400 Cannot update app ... as there is a pending deployment in progress for less
+#       than 20 minutes
+# The run recovered because `bundle run` waits, but the deploy error arrived next to
+# an unrelated "WAL recovery failed" and read as a hard failure in the middle of a
+# phase that had otherwise worked.
+#
+# Polls until the active deployment reaches a terminal state. Returns 0 when settled
+# and 0 on timeout too: the caller should attempt its deploy either way, because a
+# stuck poll must not be the thing that stops the phase. Every capture is `|| true`
+# for the reason invariant 31 exists.
+firefly_wait_app_deploy_settled() {   # <app> <profile> [timeout_s]
+  local app="$1" prof="$2" timeout="${3:-600}" waited=0 state
+  [ -n "$app" ] && [ -n "$prof" ] || return 0
+  while [ "$waited" -lt "$timeout" ]; do
+    state="$(databricks apps get "$app" -o json --profile "$prof" 2>/dev/null \
+      | python3 -c 'import sys,json
+try: d = json.load(sys.stdin) or {}
+except Exception: print(""); raise SystemExit
+print(((d.get("active_deployment") or {}).get("status") or {}).get("state") or "")' 2>/dev/null || true)"
+    case "$state" in
+      # No app or no deployment yet: nothing to wait behind.
+      "")                              return 0 ;;
+      SUCCEEDED|FAILED|CANCELLED)      return 0 ;;
+    esac
+    [ "$waited" -eq 0 ] && note "waiting for the in-flight deployment of '$app' to finish (state=$state)"
+    sleep 15
+    waited=$((waited + 15))
+  done
+  warn "deployment of '$app' still $state after ${timeout}s - attempting the deploy anyway."
+  warn "if it returns 'pending deployment in progress', re-run this phase; nothing is lost."
+  return 0
 }
 
 # ─── IP allowlist: three outcomes, never two ─────────────────────────────────

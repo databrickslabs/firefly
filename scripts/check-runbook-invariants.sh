@@ -849,6 +849,61 @@ else
   bad "these helpers die before reporting, under set -e:$ERREXIT_BAD"
 fi
 
+# ── 32. Phase 6c's redeploy must wait for Phase 4's deployment ─────────────────
+# Phase 4 deploys the app; Phase 6c redeploys it with genie_mcp_mode=space. When the
+# first is still in flight the Apps API answers
+#   400 Cannot update app ... as there is a pending deployment in progress
+# and the error lands mid-phase, next to an unrelated "WAL recovery failed", reading
+# as a hard failure in a phase that otherwise worked. Both the runbook and the runner
+# must wait, or the race returns for whichever one was missed.
+SETTLE_BAD=""
+grep -q 'firefly_wait_app_deploy_settled()' scripts/lib/runbook.sh \
+  || SETTLE_BAD="$SETTLE_BAD runbook.sh(no-helper)"
+for f in BOOTSTRAP.md scripts/bootstrap.sh; do
+  # The wait has to come BEFORE the space-mode deploy, not merely exist in the file.
+  python3 - "$f" <<'PYCHK' || SETTLE_BAD="$SETTLE_BAD $(basename "$f")(no-wait-before-deploy)"
+import re, sys
+t = open(sys.argv[1]).read()
+i = t.find('genie_mcp_mode=space')
+if i == -1:
+    sys.exit(0)                       # nothing to guard
+window = t[max(0, i - 1200):i]
+sys.exit(0 if 'firefly_wait_app_deploy_settled' in window else 1)
+PYCHK
+done
+if [[ -z "$SETTLE_BAD" ]]; then
+  pass "Phase 6c waits for an in-flight deployment before redeploying in space mode."
+else
+  bad "Phase 6c can race Phase 4's deployment:$SETTLE_BAD"
+fi
+
+# ── 33. Value-returning helpers must keep stdout clean ────────────────────────
+# Callers use these as VALUE="$(fn ...)". warn/note/ok all echo to STDOUT, so any
+# diagnostic emitted through them is captured INTO the value. genie-data-setup.sh
+# shipped that defect once (progress folded into its key=value output), and
+# read_secret nearly shipped it again with a duplicate-key warning.
+STDOUT_BAD=""
+_out="$(bash -c "
+  export FIREFLY_STATE_DIR=\$(mktemp -d)
+  cd '$PWD'
+  source scripts/lib/corp-network.sh >/dev/null 2>&1
+  source scripts/lib/runbook.sh      >/dev/null 2>&1
+  init_state_dir >/dev/null 2>&1
+  # Two assignments: whatever the helper wants to say about that must go to stderr.
+  printf 'export K=first\nexport K=second\n' >> \"\$STATE_FILE\"
+  read_secret K 2>/dev/null
+  rm -rf \"\$FIREFLY_STATE_DIR\"
+" 2>/dev/null)"
+case "$_out" in
+  second) ;;
+  *) STDOUT_BAD="$STDOUT_BAD read_secret(stdout=$(printf '%s' "$_out" | tr '\n' '/' | cut -c1-40))" ;;
+esac
+if [[ -z "$STDOUT_BAD" ]]; then
+  pass "value-returning helpers keep diagnostics off stdout."
+else
+  bad "a diagnostic is being captured as part of the value:$STDOUT_BAD"
+fi
+
 echo
 if [[ "$FAILED" -eq 0 ]]; then
   echo "All runbook invariants hold."

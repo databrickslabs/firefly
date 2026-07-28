@@ -913,6 +913,9 @@ fi
 # mode=space with an empty id, and the app then fails to boot.
 if [[ "${GENIE_MCP_MODE:-one}" == "space" && -n "${GENIE_SPACE_ID:-}" ]]; then
   step "Redeploy the agent app in Genie space mode"
+  # Phase 4's deployment may still be pending; the Apps API rejects an overlapping
+  # update with "Cannot update app ... as there is a pending deployment in progress".
+  firefly_wait_app_deploy_settled "$AGENT_APP_NAME" "$DB_PROFILE"
   GENIE_VARS="--var catalog=$UC_CATALOG --var schema=$UC_SCHEMA \
 --var genie_mcp_mode=space --var genie_space_id=$GENIE_SPACE_ID"
   run "cd '$REPO_DIR/agent-build' && databricks bundle deploy --profile '$DB_PROFILE' -t dev $GENIE_VARS"

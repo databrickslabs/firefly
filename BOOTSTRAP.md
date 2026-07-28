@@ -664,6 +664,11 @@ echo "seed=$SEED_STATUS tables=$SEED_TABLE_COUNT mode=$GENIE_MCP_MODE space=$GEN
 store_secret GENIE_SPACE_ID "$GENIE_SPACE_ID"
 ```
 
+`SEED_STATUS` tells you what happened, and each value is a deliberate outcome.
+A schema that is already PARTLY populated is normal and not an error: a fresh
+`workspace.default` can ship sample tables, and an interrupted earlier run leaves
+some behind. Phase 6c completes the difference and reports
+`completing a partial seed (N present, M missing)` rather than `seeded`.
 `SEED_STATUS` tells you what happened, and each value is a deliberate outcome:
 
 | `SEED_STATUS` | Meaning |
@@ -694,6 +699,10 @@ the app does not yet know the space exists — the env var arrives with a redepl
 ```bash
 if [ "$GENIE_MCP_MODE" = "space" ]; then
   cd "$REPO_DIR/agent-build"
+  # Phase 4's deployment may still be in flight. The Apps API rejects an overlapping
+  # update with "Cannot update app ... as there is a pending deployment in progress",
+  # which lands mid-phase and reads as a hard failure. Wait it out first.
+  firefly_wait_app_deploy_settled "$AGENT_APP_NAME" "$DB_PROFILE"
   databricks bundle deploy --profile "$DB_PROFILE" -t dev \
     --var "catalog=$UC_CATALOG" --var "schema=$UC_SCHEMA" \
     --var "genie_mcp_mode=space" --var "genie_space_id=$GENIE_SPACE_ID"
