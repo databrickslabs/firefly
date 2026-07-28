@@ -1258,7 +1258,17 @@ BRANCH_PIN_BAD=""
 # was dead code that passed against a deliberately re-pinned clone.
 #
 # Also exclude this file: it must contain the pattern in order to search for it.
-PIN_HITS="$(grep -rn -- '--branch genie-agent' --include='*.md' --include='*.sh' . 2>/dev/null \
+# --exclude-dir=.git as well: a commit message that QUOTES the old pin (explaining why it
+# was removed) lives in .git/COMMIT_EDITMSG and is not source. Without this the check fails
+# on its own commit message the moment the fix is described accurately.
+# Filter paths explicitly rather than trusting grep's --include/--exclude-dir: on the BSD
+# grep macOS ships, --exclude-dir=.git did not exclude and --include='*.md' still matched
+# .git/COMMIT_EDITMSG, a file with no extension at all. So this check failed on its own
+# commit message -- the one describing the fix -- which is a guard broken by being
+# explained. Path filtering here is portable and does what it says.
+PIN_HITS="$(grep -rn -- '--branch genie-agent' . 2>/dev/null \
+  | grep -E '\.(md|sh):[0-9]+:' \
+  | grep -v '/\.git/' \
   | grep -v node_modules \
   | grep -v 'check-runbook-invariants.sh' \
   | grep -vE ':[[:space:]]*#' || true)"
@@ -1286,6 +1296,41 @@ if [[ -z "$BRANCH_PIN_BAD" ]]; then
   pass "no clone or deeplink pins the bootstrap branch without a fallback."
 else
   bad "this breaks the day genie-agent merges and is deleted:$BRANCH_PIN_BAD"
+fi
+
+# ── 43. Components must not hand-build GitHub URLs ─────────────────────────────
+# github-source-link.tsx derived its blob URL from a GITHUB_REPO constant and then built
+# its RAW url from a second, separately hardcoded copy of the same owner/repo. Changing the
+# constant would have moved one link and silently left the other pointing at the old
+# repository -- a half-applied edit that stays invisible until a user clicks. Both now come
+# from src/lib/repo-links.ts.
+#
+# This does NOT require the two components to share a repo or branch: the docs "edit" links
+# and the source-view links legitimately differ, and forcing them together would be a
+# behaviour change wearing a refactor's clothes. Only hand-rolled URL STRINGS are banned.
+URLGEN_BAD="$(python3 - <<'PYCHK'
+import os, re
+bad = []
+for root, dirs, files in os.walk('src'):
+    dirs[:] = [d for d in dirs if d != 'node_modules']
+    for fn in files:
+        if not fn.endswith(('.ts', '.tsx')):
+            continue
+        path = os.path.join(root, fn)
+        if path.endswith(os.path.join('lib', 'repo-links.ts')):
+            continue          # the one module allowed to know the URL shapes
+        for i, line in enumerate(open(path, errors='replace'), 1):
+            if re.match(r'\s*(//|\*)', line):
+                continue      # a comment naming a URL is documentation, not construction
+            if re.search(r'https://(github\.com|raw\.githubusercontent\.com)/\S*\$\{', line):
+                bad.append(f'{path}:{i}')
+print(' '.join(bad))
+PYCHK
+)"
+if [[ -z "$URLGEN_BAD" ]]; then
+  pass "GitHub URLs are built only in src/lib/repo-links.ts."
+else
+  bad "these hand-build a GitHub URL and can drift from their own constant:$URLGEN_BAD"
 fi
 
 echo

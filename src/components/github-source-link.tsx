@@ -11,6 +11,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  blobUrl as buildBlobUrl,
+  rawUrl as buildRawUrl,
+  type RepoRef,
+} from "@/lib/repo-links";
 
 function CursorIcon({ className }: { className?: string }) {
   return (
@@ -55,8 +60,16 @@ function ChatGPTIcon({ className }: { className?: string }) {
   );
 }
 
-const GITHUB_REPO = "https://github.com/stikkireddy/firefly-analytics-monorepo";
-const GITHUB_BRANCH = "main";
+// UNVERIFIED: whether this should still be stikkireddy/firefly-analytics-monorepo rather
+// than databrickslabs/firefly. This component renders in top-nav, sso-spn-top-nav and the
+// sso-spn-admin sidebar, so every page with that nav sends users here to "view source".
+// Left exactly as it was, because changing which repository users are sent to is a product
+// decision, not a refactor. Only the URL construction changed.
+const SOURCE_REPO: RepoRef = {
+  owner: "stikkireddy",
+  repo: "firefly-analytics-monorepo",
+  branch: "main",
+};
 
 function pathnameToSourcePath(pathname: string): string {
   const segments = pathname.split("/").filter(Boolean);
@@ -86,20 +99,12 @@ function pathnameToSourcePath(pathname: string): string {
   return `src/app/${appPath ? appPath + "/" : ""}page.tsx`;
 }
 
-function encodeSourcePath(sourcePath: string): string {
-  return sourcePath
-    .split("/")
-    .map((seg) => encodeURIComponent(seg))
-    .join("/");
-}
-
 export function GitHubSourceLink() {
   const pathname = usePathname();
   const sourcePath = pathnameToSourcePath(pathname);
-  const encodedPath = encodeSourcePath(sourcePath);
 
-  const githubUrl = `${GITHUB_REPO}/blob/${GITHUB_BRANCH}/${encodedPath}`;
-  const rawUrl = `https://raw.githubusercontent.com/stikkireddy/firefly-analytics-monorepo/refs/heads/${GITHUB_BRANCH}/${encodedPath}`;
+  const githubUrl = buildBlobUrl(SOURCE_REPO, sourcePath);
+  const rawUrl = buildRawUrl(SOURCE_REPO, sourcePath);
   const chatPrompt = `Read and analyze this file from the firefly-analytics-monorepo: ${githubUrl}`;
   const cursorUrl = `https://cursor.com/link/prompt?text=${encodeURIComponent(chatPrompt)}`;
   const claudeUrl = `https://claude.ai/new?q=${encodeURIComponent(chatPrompt)}`;
