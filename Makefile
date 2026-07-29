@@ -47,6 +47,10 @@ auth-setup: ## Setup auth tables (uses Drizzle push)
 # is not ours to edit. So the least-bad option is to make the check trivial to invoke and
 # name it in the contributing path. Run this before pushing anything that touches
 # BOOTSTRAP.md, scripts/, or src/.
-check: ## Run the runbook invariants and typecheck (CI is disabled; this is the only gate)
+check: ## Run the runbook invariants, agent unit tests, and typecheck (CI is disabled; this is the only gate)
 	@bash scripts/check-runbook-invariants.sh
+	@# The invariants read source; these EXERCISE it. Both are needed: static checks could not
+	@# see that the two Genie backends expose different tool names, which shipped a broken
+	@# default past nine green end-to-end runs.
+	@cd agent && python3 -m unittest discover -s tests -p 'test_*.py' -q && echo "agent tests: clean"
 	@npx --yes tsc --noEmit -p tsconfig.json && echo "typecheck: clean"

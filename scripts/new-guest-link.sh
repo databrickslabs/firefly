@@ -10,21 +10,27 @@
 #   bash scripts/new-guest-link.sh              # from $REPO_DIR
 #   bash scripts/new-guest-link.sh --open       # also open it in a browser
 #   bash scripts/new-guest-link.sh --state PATH # a different state.env
+#   bash scripts/new-guest-link.sh --host URL   # override the workspace URL
 #
 # Reads PREVIEW_URL, GUEST_API_SECRET, GUEST_SP_CLIENT_ID and GUEST_SP_SECRET
-# from $REPO_DIR/.firefly-bootstrap/state.env, all written during bootstrap.
+# from $REPO_DIR/.firefly-bootstrap/state.env, and DATABRICKS_HOST from
+# ~/.firefly-bootstrap/inputs.env — the host is a Phase 0 answer, not a secret,
+# so bootstrap never writes it to state.env.
 
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STATE="${FIREFLY_STATE_ENV:-$ROOT/.firefly-bootstrap/state.env}"
+INPUTS="${FIREFLY_INPUTS_ENV:-$HOME/.firefly-bootstrap/inputs.env}"
 OPEN_IT=0
 APP=""
+HOST=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --state) STATE="$2"; shift 2 ;;
     --app)   APP="$2"; shift 2 ;;
+    --host)  HOST="$2"; shift 2 ;;
     --open)  OPEN_IT=1; shift ;;
     -h|--help) sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown flag: $1" >&2; exit 2 ;;
@@ -36,11 +42,35 @@ if [[ ! -f "$STATE" ]]; then
   echo "       Run bootstrap first, or pass --state <path>." >&2
   exit 1
 fi
+# inputs.env first so state.env wins on any key both define.
+# shellcheck disable=SC1090
+[[ -f "$INPUTS" ]] && { set -a; source "$INPUTS"; set +a; }
 # shellcheck disable=SC1090
 set -a; source "$STATE"; set +a
 
 APP="${APP:-${PREVIEW_URL:-}}"
 [[ -n "$APP" ]] || { echo "ERROR: PREVIEW_URL not in $STATE (pass --app)" >&2; exit 1; }
+
+# The workspace URL is what the app builds its OAuth token endpoint from, and it
+# must never default to $APP. Doing so made the app POST client_credentials to
+# <app-origin>/oidc/v1/token, which answers with the app's own 404 HTML page —
+# surfacing in the browser as "Failed to obtain Databricks OAuth token" with a
+# page of HTML as the detail, pointing nowhere near the real cause.
+HOST="${HOST:-${DATABRICKS_HOST:-}}"
+HOST="${HOST%/}"
+if [[ -z "$HOST" ]]; then
+  echo "ERROR: DATABRICKS_HOST is not set." >&2
+  echo "       Looked in $INPUTS and $STATE." >&2
+  echo "       Pass it explicitly: --host https://<workspace>.cloud.databricks.com" >&2
+  exit 1
+fi
+if [[ "$HOST" == "${APP%/}" ]]; then
+  echo "ERROR: DATABRICKS_HOST equals the app origin ($APP)." >&2
+  echo "       That mints a guest record whose OAuth token endpoint is the app" >&2
+  echo "       itself, and every guest sign-in then fails with" >&2
+  echo "       \"Failed to obtain Databricks OAuth token\"." >&2
+  exit 1
+fi
 
 for v in GUEST_API_SECRET GUEST_SP_CLIENT_ID GUEST_SP_SECRET; do
   [[ -n "${!v:-}" ]] || { echo "ERROR: $v missing from $STATE" >&2; exit 1; }
@@ -64,7 +94,7 @@ post() { # path json
 die_with() { echo "ERROR: $1" >&2; [[ -n "${2:-}" ]] && echo "       response: ${2:0:300}" >&2; exit 1; }
 
 WS_RESP="$(post /api/guest/workspaces \
-  "{\"name\":\"Guest Access\",\"workspaceUrl\":\"${DATABRICKS_HOST:-$APP}\"}")"
+  "{\"name\":\"Guest Access\",\"workspaceUrl\":\"$HOST\"}")"
 WS_ID="$(printf '%s' "$WS_RESP" \
   | python3 -c "import sys,json;print(json.load(sys.stdin)['workspace']['id'])" 2>/dev/null)"
 [[ -n "$WS_ID" ]] || die_with "could not create a guest workspace record" "$WS_RESP"

@@ -1542,6 +1542,55 @@ else
   for b in "${GRANT_SILENT_BAD[@]}"; do bad "$b"; done
 fi
 
+# ---------------------------------------------------------------------------
+# invariant 47: the Genie tool NAMES must be resolved per backend, like the path already is.
+#
+# Invariant 12 and the shared resolver fixed the PATH: one place decides whether this
+# deployment talks to /api/2.0/mcp/genie or /api/2.0/mcp/genie/<space_id>. The tool names were
+# left hardcoded to the workspace-wide pair one layer down, and the two backends do not expose
+# the same tools:
+#
+#   /api/2.0/mcp/genie              genie_ask, genie_poll_response
+#   /api/2.0/mcp/genie/<space_id>   query_space_<id>, poll_response_<id>
+#
+# Space is the default, so a real bootstrap run POSTed genie_ask to a space endpoint, got
+# "-32602 BAD_REQUEST: Tool genie_ask does not exist", and the user saw "Genie ask failed: {}".
+# Fixing the path while leaving the names is the same defect with a smaller blast radius.
+GENIE_TOOLNAME_BAD=()
+GT=agent/agent_server/genie_tools.py
+GM=agent/agent_server/genie_mcp.py
+
+grep -q 'def genie_tool_names' "$GM" \
+  || GENIE_TOOLNAME_BAD+=("$GM: no genie_tool_names() - the tool names cannot be resolved per backend")
+
+# genie_tools.py must not name a workspace-wide tool in a CALL. Mentioning it in a comment
+# that explains the defect is fine and necessary.
+GT_CODE="$(sed -E 's/[[:space:]]*#.*$//' "$GT" | grep -v '^[[:space:]]*"""')"
+if grep -qE '_mcp_tool_call\([[:space:]]*"genie_(ask|poll_response)"' <<<"$GT_CODE"; then
+  GENIE_TOOLNAME_BAD+=("$GT: calls a hardcoded workspace-wide tool name; use genie_tool_names()")
+fi
+grep -q 'genie_tool_names' "$GT" \
+  || GENIE_TOOLNAME_BAD+=("$GT: never calls genie_tool_names(), so it cannot be talking to the space backend")
+
+# A JSON-RPC error must reach the caller. `return {}` is what made a precise server message
+# ("Tool genie_ask does not exist") surface as "Genie ask failed: {}".
+# Scoped to the branch, not the file. The first version grepped the whole file for
+# `return {"error"` and was satisfied by an unrelated one a few lines earlier, so replacing
+# the JSON-RPC return with `return {}` -- the original bug, verbatim -- still passed.
+if grep -qE 'raw\.get\("error"\)' "$GT"; then
+  ERR_BRANCH="$(awk '/raw\.get\("error"\)/{f=1} f{print; n++} n>8{exit}' "$GT")"
+  grep -qE 'return \{"error"' <<<"$ERR_BRANCH" \
+    || GENIE_TOOLNAME_BAD+=("$GT: detects a JSON-RPC error but does not return it - the cause is discarded")
+else
+  GENIE_TOOLNAME_BAD+=("$GT: does not check for a JSON-RPC error at all; a failed tool call reads as an empty result")
+fi
+
+if [[ "${#GENIE_TOOLNAME_BAD[@]}" -eq 0 ]]; then
+  pass "Genie tool names are resolved per backend, and MCP errors reach the caller."
+else
+  for b in "${GENIE_TOOLNAME_BAD[@]}"; do bad "$b"; done
+fi
+
 echo
 if [[ "$FAILED" -eq 0 ]]; then
   echo "All runbook invariants hold."

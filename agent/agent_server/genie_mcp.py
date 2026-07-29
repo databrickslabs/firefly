@@ -36,6 +36,46 @@ _SPACE_MODES = ("space", "agent")
 _logged_once = False
 
 
+def _space_id_or_raise(mode: str) -> str:
+    """The configured Genie space id, or a ValueError naming the fix.
+
+    "none" is the bundle's unset sentinel, not an id. An EMPTY default cannot be used:
+    the bundle renders {"name": "GENIE_SPACE_ID"} with no `value`, and the Apps API
+    rejects the deploy with "Must specify environment variable source using either
+    value or valueFrom". So the variable ships a placeholder and the emptiness check
+    lives here.
+    """
+    space_id = os.environ.get("GENIE_SPACE_ID", "").strip()
+    if space_id.lower() in ("", "none", "null"):
+        raise ValueError(
+            f"GENIE_MCP_MODE={mode} needs GENIE_SPACE_ID. Set it to a Genie space id, "
+            "or set GENIE_MCP_MODE=one to use workspace-wide Genie deliberately "
+            "(note: guest users cannot query workspace-wide Genie)."
+        )
+    return space_id
+
+
+def genie_tool_names() -> tuple[str, str]:
+    """The (ask, poll) MCP tool names for this deployment's backend.
+
+    The two backends do not expose the same tools, and resolving the path per mode
+    while leaving the tool names hardcoded to the workspace-wide pair is the same
+    defect as the one above, one layer down: a space-scoped deployment POSTed
+    `genie_ask` and got `-32602 BAD_REQUEST: Tool genie_ask does not exist`.
+
+      workspace-wide  ->  genie_ask, genie_poll_response
+      space-scoped    ->  query_space_<id>, poll_response_<id>
+
+    Their arguments and response fields differ too; genie_tools.py adapts both to one
+    shape. Verified against tools/list on a live workspace, not inferred from docs.
+    """
+    mode = os.environ.get("GENIE_MCP_MODE", "space").strip().lower()
+    if mode in _SPACE_MODES:
+        space_id = _space_id_or_raise(mode)
+        return f"query_space_{space_id}", f"poll_response_{space_id}"
+    return "genie_ask", "genie_poll_response"
+
+
 def genie_mcp_path() -> str:
     """The Genie MCP path this deployment must use. Same answer for every caller.
 
@@ -48,19 +88,7 @@ def genie_mcp_path() -> str:
     explicit = os.environ.get("GENIE_MCP_URL", "").strip()
 
     if mode in _SPACE_MODES:
-        space_id = os.environ.get("GENIE_SPACE_ID", "").strip()
-        # "none" is the bundle's unset sentinel, not an id. An EMPTY default cannot be
-        # used: the bundle renders {"name": "GENIE_SPACE_ID"} with no `value`, and the
-        # Apps API rejects the deploy with "Must specify environment variable source
-        # using either value or valueFrom". So the variable ships a placeholder and the
-        # emptiness check lives here.
-        if space_id.lower() in ("", "none", "null"):
-            raise ValueError(
-                f"GENIE_MCP_MODE={mode} needs GENIE_SPACE_ID. Set it to a Genie space id, "
-                "or set GENIE_MCP_MODE=one to use workspace-wide Genie deliberately "
-                "(note: guest users cannot query workspace-wide Genie)."
-            )
-        path = f"{GENIE_WORKSPACE_MCP_PATH}/{space_id}"
+        path = f"{GENIE_WORKSPACE_MCP_PATH}/{_space_id_or_raise(mode)}"
     elif explicit and not explicit.rstrip("/").endswith(GENIE_WORKSPACE_MCP_PATH):
         path = explicit if explicit.startswith("/") else f"/{explicit}"
     else:
