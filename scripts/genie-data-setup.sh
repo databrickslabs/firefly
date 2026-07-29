@@ -371,6 +371,25 @@ print(seen)' "$SPACES_ALL" 2>/dev/null)"
     warn "  a duplicate means an earlier run created one while this lookup could not see it."
   fi
 
+  # An EMPTY but SUCCESSFUL list is the case the exit-status check misses, and it is the one that
+  # actually happens: a run on a workspace holding several spaces printed "Genie spaces visible:
+  # 0" and created another. Zero-with-exit-0 is indistinguishable from a genuinely empty
+  # workspace unless you already know a space exists -- and bootstrap does, because it wrote the
+  # id down. If the list cannot see a space we recorded, the LIST is wrong, not the record.
+  PRIOR_SPACE_ID="$(read_secret GENIE_SPACE_ID 2>/dev/null || true)"
+  case "$(printf '%s' "$PRIOR_SPACE_ID" | tr 'A-Z' 'a-z')" in none|null) PRIOR_SPACE_ID="" ;; esac
+  if [ "$SPACES_OK" = "1" ] && [ -z "$MINE" ] && [ -n "$PRIOR_SPACE_ID" ]; then
+    if space_readable "$PRIOR_SPACE_ID"; then
+      warn "the spaces list did not include $PRIOR_SPACE_ID, but that space is readable."
+      warn "  The list is inconsistent, so this is NOT an empty workspace. Reusing the recorded"
+      warn "  space instead of creating another - an empty list is how duplicates accumulate."
+      MINE="$PRIOR_SPACE_ID"
+    else
+      note "a space id was recorded ($PRIOR_SPACE_ID) but it is no longer readable; it was"
+      note "  probably deleted, so creating a replacement is correct."
+    fi
+  fi
+
   if [ "$SPACES_OK" != "1" ]; then
     GENIE_SPACE_SOURCE="lookup-failed"
   elif [ -n "$MINE" ]; then
