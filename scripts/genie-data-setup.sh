@@ -336,8 +336,22 @@ print(d.get("next_page_token") or "")' "$SPACES_ALL" 2>/dev/null)"
   MINE=""
   DUPES=0
   if [ "$SPACES_OK" = "1" ]; then
-    _found="$(FF_TITLE="$WANT_TITLE" python3 -c 'import sys,json,os
+    # PREFIX match, not equality. The Genie API appends a creation timestamp to the title, so a
+    # space created as "Firefly Genie Agent — cat.default" comes back as
+    # "Firefly Genie Agent — cat.default 2026-07-29 18:15:23". Equality therefore never matches
+    # anything this script created, every run concluded no space existed, and one workspace
+    # accumulated five of them. space_title_for adds no timestamp; the server does.
+    _found="$(FF_TITLE="$WANT_TITLE" python3 -c 'import sys,json,os,re
 want = os.environ["FF_TITLE"]
+# The server-added suffix is a timestamp, so accept exactly that and nothing else -- a bare
+# prefix test would also swallow a DIFFERENT schema whose name extends ours.
+suffix = re.compile(r"^\s*\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}")
+def ours(title):
+    if title == want:
+        return True
+    if not title.startswith(want):
+        return False
+    return bool(suffix.match(title[len(want):]))
 ids, seen = [], 0
 for line in open(sys.argv[1]):
     line = line.strip()
@@ -347,7 +361,7 @@ for line in open(sys.argv[1]):
     except Exception: continue
     for s in d.get("spaces") or []:
         seen += 1
-        if (s.get("title") or "") == want:
+        if ours(s.get("title") or ""):
             ids.append(s.get("space_id") or "")
 ids = sorted(i for i in ids if i)
 print(len(ids))
