@@ -203,6 +203,12 @@ neonctl me                                           # smoke-test / show identit
 
 ### 1d. Vercel CLI OAuth (skip if already authed)
 
+> **`npm install -g vercel` prints nothing for ~40s.** It is not stalled. This matters for
+> the same reason Phase 3a's slow step does: a harness that backgrounds a command after ~30s
+> returns its own exit 0 while npm is still working, and the install looks like it hung
+> mid-command. Let it finish. A run reported this as a gap because Phase 3a carries the
+> warning and Phase 1d did not.
+
 ```bash
 # Pin to a Tart-tested floor — do not chase npm `latest` (CLI deploy semantics move).
 # Override with VERCEL_CLI_VERSION=x.y.z to bump deliberately.

@@ -485,6 +485,8 @@ if command -v vercel &>/dev/null; then
   fi
 fi
 if [[ "$vercel_needs_install" == "true" ]]; then
+  # ~40s with no output. Not stalled -- see the note in BOOTSTRAP.md Phase 1d.
+  note "installing the Vercel CLI: this prints nothing for ~40s and is not stalled"
   run "npm install -g vercel@${VERCEL_CLI_VERSION}"
 fi
 if [[ "$DRY_RUN" == "false" ]] && vercel whoami &>/dev/null; then
