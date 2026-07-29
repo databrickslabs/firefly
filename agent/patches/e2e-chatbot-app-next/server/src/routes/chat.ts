@@ -218,26 +218,29 @@ chatRouter.post('/', requireAuth, async (req: Request, res: Response) => {
               traceId: null,
             })),
           });
-
-          // Check if this is an MCP denial - if so, we're done (no need to call LLM)
-          // Denial is indicated by a dynamic-tool part with state 'output-denied'
-          // or with approval.approved === false
-          const hasMcpDenial = requestBody.previousMessages?.some(
-            (m: ChatMessage) =>
-              m.parts?.some(
-                (p) =>
-                  p.type === 'dynamic-tool' &&
-                  (p.state === 'output-denied' ||
-                    ('approval' in p && p.approval?.approved === false)),
-              ),
-          );
-
-          if (hasMcpDenial) {
-            // We don't need to call the LLM because the user has denied the tool call
-            res.end();
-            return;
-          }
         }
+      }
+
+      // Whether the user DENIED a tool call decides whether we call the model, which has
+      // nothing to do with persistence. This check used to sit inside the `dbAvailable`
+      // guard above (and inside its `assistantMessages.length > 0` guard), so in ephemeral
+      // mode -- a documented, supported configuration -- a continuation carrying a denial
+      // fell straight through to streamText and the model ran against a tool the user had
+      // just refused. Only saveMessages belongs behind the database check.
+      const hasMcpDenial = requestBody.previousMessages?.some(
+        (m: ChatMessage) =>
+          m.parts?.some(
+            (p) =>
+              p.type === 'dynamic-tool' &&
+              (p.state === 'output-denied' ||
+                ('approval' in p && p.approval?.approved === false)),
+          ),
+      );
+
+      if (hasMcpDenial) {
+        // The user denied the tool call, so there is nothing to ask the model.
+        res.end();
+        return;
       }
     }
 

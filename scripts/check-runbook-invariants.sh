@@ -1627,6 +1627,48 @@ else
   for b in "${LOOKUP_BAD[@]}"; do bad "$b"; done
 fi
 
+# ---------------------------------------------------------------------------
+# invariant 49: a decision about whether to CALL THE MODEL must not sit behind a persistence
+# guard.
+#
+# chat.ts short-circuits when the user has DENIED an MCP tool call: no denial, no model call.
+# That check was nested inside `if (dbAvailable && ...)` and inside its own
+# `assistantMessages.length > 0` branch, so in ephemeral mode -- a documented, supported
+# configuration where the database is disabled -- a continuation carrying a denial fell through
+# to streamText and the model ran against a tool the user had just refused. Raised by a reviewer.
+#
+# Persistence and permission are unrelated concerns. Only saveMessages belongs behind the
+# database check.
+CHAT_TS=agent/patches/e2e-chatbot-app-next/server/src/routes/chat.ts
+DENIAL_BAD=()
+if [[ ! -f "$CHAT_TS" ]]; then
+  DENIAL_BAD+=("$CHAT_TS is missing - this guard is measuring nothing")
+else
+  DENIAL_LINE="$(grep -n 'const hasMcpDenial' "$CHAT_TS" | head -1 | cut -d: -f1)"
+  DB_GUARD_LINE="$(grep -n 'if (dbAvailable && requestBody.previousMessages)' "$CHAT_TS" | head -1 | cut -d: -f1)"
+  if [[ -z "$DENIAL_LINE" ]]; then
+    DENIAL_BAD+=("$CHAT_TS: no hasMcpDenial check - a denied tool call would reach the model")
+  elif [[ -n "$DB_GUARD_LINE" ]]; then
+    # Closing brace of the dbAvailable block, found by brace depth from its opening line.
+    CLOSE_LINE="$(awk -v start="$DB_GUARD_LINE" '
+      NR < start { next }
+      { for (i = 1; i <= length($0); i++) {
+          c = substr($0, i, 1)
+          if (c == "{") d++
+          else if (c == "}") { d--; if (d == 0) { print NR; exit } }
+        } }' "$CHAT_TS")"
+    if [[ -n "$CLOSE_LINE" && "$DENIAL_LINE" -gt "$DB_GUARD_LINE" && "$DENIAL_LINE" -lt "$CLOSE_LINE" ]]; then
+      DENIAL_BAD+=("$CHAT_TS: the hasMcpDenial check (line $DENIAL_LINE) is inside the dbAvailable block (lines $DB_GUARD_LINE-$CLOSE_LINE), so a denial is ignored in ephemeral mode")
+    fi
+  fi
+fi
+
+if [[ "${#DENIAL_BAD[@]}" -eq 0 ]]; then
+  pass "a denied tool call stops the model call in both persistence modes."
+else
+  for b in "${DENIAL_BAD[@]}"; do bad "$b"; done
+fi
+
 echo
 if [[ "$FAILED" -eq 0 ]]; then
   echo "All runbook invariants hold."
