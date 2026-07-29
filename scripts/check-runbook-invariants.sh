@@ -1644,6 +1644,15 @@ DENIAL_BAD=()
 if [[ ! -f "$CHAT_TS" ]]; then
   DENIAL_BAD+=("$CHAT_TS is missing - this guard is measuring nothing")
 else
+  # A denied tool part stays in the client history forever, so judging "any denial anywhere"
+  # means the first denial stalls every later continuation: approving a subsequent tool silently
+  # drops it. Only the most recent tool interaction can decide this.
+  if grep -qE 'hasMcpDenial = requestBody\.previousMessages\?\.some' "$CHAT_TS"; then
+    DENIAL_BAD+=("$CHAT_TS: the denial check scans ALL previous messages, so one denial stalls every later continuation; judge the most recent tool part")
+  fi
+  grep -q 'lastToolPart' "$CHAT_TS" \
+    || DENIAL_BAD+=("$CHAT_TS: nothing identifies the most recent tool part, so the denial check cannot be scoped to it")
+
   DENIAL_LINE="$(grep -n 'const hasMcpDenial' "$CHAT_TS" | head -1 | cut -d: -f1)"
   DB_GUARD_LINE="$(grep -n 'if (dbAvailable && requestBody.previousMessages)' "$CHAT_TS" | head -1 | cut -d: -f1)"
   if [[ -z "$DENIAL_LINE" ]]; then

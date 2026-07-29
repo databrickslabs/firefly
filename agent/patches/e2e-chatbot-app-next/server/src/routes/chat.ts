@@ -227,18 +227,25 @@ chatRouter.post('/', requireAuth, async (req: Request, res: Response) => {
       // mode -- a documented, supported configuration -- a continuation carrying a denial
       // fell straight through to streamText and the model ran against a tool the user had
       // just refused. Only saveMessages belongs behind the database check.
-      const hasMcpDenial = requestBody.previousMessages?.some(
+      // Only the MOST RECENT tool interaction decides this. Scanning the whole history with
+      // .some() meant that once a user denied anything, every later continuation matched that
+      // stale part and returned early -- so approving a subsequent tool silently dropped the
+      // continuation and the conversation stalled with no way forward. A denied part stays in
+      // the client's message history forever, so "any denial anywhere" is never the question;
+      // "was the thing we are continuing FROM denied" is.
+      const toolParts = (requestBody.previousMessages ?? []).flatMap(
         (m: ChatMessage) =>
-          m.parts?.some(
-            (p) =>
-              p.type === 'dynamic-tool' &&
-              (p.state === 'output-denied' ||
-                ('approval' in p && p.approval?.approved === false)),
-          ),
+          (m.parts ?? []).filter((p) => p.type === 'dynamic-tool'),
       );
+      const lastToolPart = toolParts[toolParts.length - 1];
+      const hasMcpDenial =
+        !!lastToolPart &&
+        (lastToolPart.state === 'output-denied' ||
+          ('approval' in lastToolPart && lastToolPart.approval?.approved === false));
 
       if (hasMcpDenial) {
-        // The user denied the tool call, so there is nothing to ask the model.
+        // The user denied the tool call we would be continuing from, so there is nothing to
+        // ask the model.
         res.end();
         return;
       }
