@@ -639,13 +639,36 @@ firefly_store_inputs() {
   ok "Phase 0 answers → ${INPUTS_DIR:-$HOME/.firefly-bootstrap}/inputs.env"
 }
 
+# firefly_read_input KEY → prints the stored answer, or nothing when absent.
+#
+# The writer existed without a reader, which is why init_state_dir had to inline its own
+# sed to recover REPO_DIR. A phase that persists an answer and a later phase that needs it
+# back should not each invent the parsing.
+firefly_read_input() {                   # firefly_read_input KEY
+  local key="$1" file
+  [ -n "$key" ] || return 1
+  file="${INPUTS_DIR:-$HOME/.firefly-bootstrap}/inputs.env"
+  [ -f "$file" ] || return 1
+  # Last write wins, matching how store_input appends after filtering.
+  sed -nE "s/^${key}=(.*)\$/\\1/p" "$file" | tail -1
+}
+
 firefly_store_input() {                  # firefly_store_input KEY VALUE
   local key="$1" val="$2" dir file
   [ -n "$key" ] || return 1
   dir="${INPUTS_DIR:-$HOME/.firefly-bootstrap}"
   file="$dir/inputs.env"
   mkdir -p "$dir" 2>/dev/null || return 1
-  [ -f "$file" ] && grep -v "^${key}=" "$file" > "$file.tmp" 2>/dev/null && mv "$file.tmp" "$file"
+  # The dedupe must not hang off grep's exit status. `grep -v` exits 1 when it filters out
+  # EVERY line, which is exactly the case where the file holds only this key -- so the
+  # chained `&& mv` never ran, the original survived, and the append produced a second
+  # copy. Storing the same answer twice therefore duplicated it, and the file grew on every
+  # re-run. Readers that take the last match hid this; a reader taking the first would have
+  # returned a stale value.
+  if [ -f "$file" ]; then
+    grep -v "^${key}=" "$file" > "$file.tmp" 2>/dev/null || :
+    mv "$file.tmp" "$file" 2>/dev/null || :
+  fi
   printf '%s=%s\n' "$key" "$val" >> "$file"
 }
 
