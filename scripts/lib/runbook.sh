@@ -437,15 +437,24 @@ except Exception: print("")' 2>/dev/null || true)"
     [ -n "$v" ] && { SP_CLIENT_ID="$v"; export SP_CLIENT_ID; note "restored SP_CLIENT_ID=$v"; }
   fi
 
+  # Both stores are consulted, because the two values are not written to the same one:
+  # store_secret puts GENIE_SPACE_ID in state.env, while Phase 3f records GENIE_MCP_MODE with
+  # firefly_store_input, which writes inputs.env. Reading only state.env meant the mode was
+  # never found, and the "assuming space" line below announced a guess about a value Phase 3f
+  # had already written down. A run reported it: the message is accurate about what this
+  # function could see and wrong about what was known.
   for v in GENIE_SPACE_ID GENIE_MCP_MODE; do
     eval "[ -n \"\${$v:-}\" ]" && continue
     eval "$v=\"\$(read_secret $v 2>/dev/null || true)\"; export $v"
+    eval "[ -n \"\${$v:-}\" ]" || \
+      eval "$v=\"\$(firefly_read_input $v 2>/dev/null || true)\"; export $v"
     eval "[ -n \"\${$v:-}\" ]" && note "restored $v=$(eval "printf '%s' \"\$$v\"")"
   done
-  # A space id with no mode is the silent-skip case: say so rather than skipping.
+  # A space id with no mode anywhere is the silent-skip case: say so rather than skipping.
   if [ -n "${GENIE_SPACE_ID:-}" ] && [ -z "${GENIE_MCP_MODE:-}" ]; then
     GENIE_MCP_MODE="space"; export GENIE_MCP_MODE
-    note "GENIE_SPACE_ID is set but GENIE_MCP_MODE was not - assuming space"
+    note "GENIE_SPACE_ID is set but GENIE_MCP_MODE is in neither state.env nor inputs.env"
+    note "  - defaulting to space, which matches a space id being present"
   fi
   return 0
 }

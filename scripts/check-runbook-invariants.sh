@@ -1481,6 +1481,37 @@ else
   for b in "${GRANT_DEFER_BAD[@]}"; do bad "$b"; done
 fi
 
+# ---------------------------------------------------------------------------
+# invariant 45: a restore must look in every store a value is written to.
+#
+# store_secret writes state.env; firefly_store_input writes inputs.env. Phase 3f records
+# GENIE_MCP_MODE with the latter, and firefly_restore_phase6_context read only the former --
+# so it never found the mode and announced "assuming space" about a value Phase 3f had already
+# written down. Accurate about what the function could see, wrong about what was known, and a
+# run reported it as a gap.
+RESTORE_BAD=()
+RESTORE_BODY="$(awk '/^firefly_restore_phase6_context\(\)/{f=1} f{print} f&&/^}/{exit}' scripts/lib/runbook.sh)"
+if [[ -z "$RESTORE_BODY" ]]; then
+  RESTORE_BAD+=("scripts/lib/runbook.sh: firefly_restore_phase6_context not found - this guard is measuring nothing")
+else
+  grep -q 'read_secret' <<<"$RESTORE_BODY" \
+    || RESTORE_BAD+=("firefly_restore_phase6_context never reads state.env")
+  grep -q 'firefly_read_input' <<<"$RESTORE_BODY" \
+    || RESTORE_BAD+=("firefly_restore_phase6_context never reads inputs.env, so any value written by firefly_store_input is invisible to it and gets 'assumed' instead")
+  # Comments are stripped first. The initial version matched the comment that EXPLAINS the old
+  # message and reported the fixed code as broken -- twice, because the awk range matched twice.
+  RESTORE_CODE="$(sed -E 's/[[:space:]]*#.*$//' <<<"$RESTORE_BODY")"
+  if grep -qE 'assuming space' <<<"$RESTORE_CODE"; then
+    RESTORE_BAD+=("firefly_restore_phase6_context still says 'assuming space' - name the stores it actually checked instead")
+  fi
+fi
+
+if [[ "${#RESTORE_BAD[@]}" -eq 0 ]]; then
+  pass "a restore reads every store its values are written to before assuming one is unset."
+else
+  for b in "${RESTORE_BAD[@]}"; do bad "$b"; done
+fi
+
 echo
 if [[ "$FAILED" -eq 0 ]]; then
   echo "All runbook invariants hold."
