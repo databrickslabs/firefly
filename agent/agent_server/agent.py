@@ -23,6 +23,7 @@ from agent_server.utils import (
     get_session_id,
     process_agent_stream_events,
 )
+from agent_server.genie_mcp import genie_mcp_path
 from agent_server.genie_tools import GENIE_INSTRUCTIONS, GENIE_TOOLS
 from agent_server.utils_memory import (
     MEMORY_INSTRUCTIONS,
@@ -55,33 +56,11 @@ def _app_workspace_client() -> WorkspaceClient:
     return WorkspaceClient()
 
 
-GENIE_ONE_MCP_PATH = "/api/2.0/mcp/genie"
-
-
-def _genie_mcp_path() -> str:
-    mode = os.environ.get("GENIE_MCP_MODE", "one").strip().lower()
-    explicit = os.environ.get("GENIE_MCP_URL", "").strip()
-
-    if mode == "space":
-        space_id = os.environ.get("GENIE_SPACE_ID", "").strip()
-        # "none" is the bundle's unset sentinel, not an id. An EMPTY default
-        # cannot be used: the bundle renders `{"name": "GENIE_SPACE_ID"}` with no
-        # `value`, and the Apps API rejects the whole deploy with "Must specify
-        # environment variable source using either value or valueFrom". So the
-        # variable ships a non-empty placeholder and the emptiness check lives
-        # here instead.
-        if space_id.lower() in ("", "none", "null"):
-            raise ValueError("GENIE_MCP_MODE=space requires GENIE_SPACE_ID")
-        return f"/api/2.0/mcp/genie/{space_id}"
-
-    if explicit and not explicit.rstrip("/").endswith("/api/2.0/mcp/genie"):
-        return explicit if explicit.startswith("/") else f"/{explicit}"
-    return GENIE_ONE_MCP_PATH
 
 
 def _genie_mcp_url(app_wc: WorkspaceClient) -> str:
-    """Workspace-wide managed Genie MCP when GENIE_MCP_MODE=one (default)."""
-    path_or_url = _genie_mcp_path()
+    """Full URL for whichever Genie backend genie_mcp_path() resolved."""
+    path_or_url = genie_mcp_path()
     if path_or_url.startswith("http"):
         return path_or_url.rstrip("/")
     if not path_or_url.startswith("/"):

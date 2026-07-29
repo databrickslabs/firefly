@@ -20,18 +20,30 @@ variables:
   memory_store_name:
     description: Managed-memory store (Lakebase-backed) name.
     default: firefly_managed_memory
-  # Genie backend. Defaults to workspace-wide discovery, which
-  # needs no space and works on any workspace. Phase 6c overrides BOTH together
-  # when it has a usable space: `--var genie_mcp_mode=space --var genie_space_id=<id>`.
+  # Genie backend. The Genie Agent IS a curated Genie space, so `space` is the default and
+  # the space id is supplied by the phase that creates the space BEFORE this bundle is
+  # first deployed. The app is therefore never even briefly workspace-wide.
   #
-  # These two must never move independently. agent.py raises
-  # ValueError("GENIE_MCP_MODE=space requires GENIE_SPACE_ID") when the mode is
-  # `space` and the id is empty, and the app fails to boot rather than degrading.
+  # The VALUE stays `space` deliberately. The product is called Genie Agent and the value
+  # will likely follow, but renaming it now would ripple through the runbook, the harness
+  # probes and the regression matrix at the same time as the reordering below -- two
+  # changes at once, each able to mask the other. genie_mcp.py already accepts `agent` as
+  # an alias, so that rename is a later one-line change.
+  #
+  # `one` is workspace-wide unified Genie and is an explicit OPT-OUT, not a fallback: it
+  # discovers whatever the calling SP can read, scoped to nothing, and GUEST USERS CANNOT
+  # QUERY IT AT ALL, having no workspace access. Reaching it by accident is precisely what
+  # this default prevents -- genie_tools.py used to hardcode workspace-wide, so a
+  # space-scoped deployment answered from the wrong backend while every configuration
+  # probe still reported the space.
+  #
+  # These two never move independently. genie_mcp.py raises when the mode wants a space
+  # and the id is empty, so the app fails to boot instead of degrading silently.
   genie_mcp_mode:
-    description: "`one` for workspace-wide Genie, or `space` for a single curated Genie space."
-    default: one
+    description: "`space` (default) for a curated Genie space, or `one` to opt into workspace-wide Genie. `agent` is accepted as an alias for `space`."
+    default: space
   genie_space_id:
-    description: Genie space id — required when genie_mcp_mode=space, `none` otherwise.
+    description: Genie space id — required when genie_mcp_mode=space (the default), `none` only when opting into `one`.
     # NOT empty. An empty value makes the bundle render this env entry as
     # `{"name": "GENIE_SPACE_ID"}` with no `value` key, and the Apps API refuses
     # the deploy: "Must specify environment variable source using either value

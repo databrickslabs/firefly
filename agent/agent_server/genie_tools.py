@@ -7,9 +7,10 @@ import time
 from agents import function_tool
 from databricks.sdk import WorkspaceClient
 
+from agent_server.genie_mcp import genie_mcp_path
+
 logger = logging.getLogger(__name__)
 
-GENIE_MCP_PATH = "/api/2.0/mcp/genie"
 MAX_POLLS = 45
 POLL_INTERVAL_SEC = 2.0
 
@@ -25,8 +26,11 @@ def _mcp_tool_call(name: str, arguments: dict) -> dict:
         "method": "tools/call",
         "params": {"name": name, "arguments": arguments},
     }
+    # Resolved per call from GENIE_MCP_MODE, not a module constant. The constant that
+    # used to live here hardcoded workspace-wide Genie, so a space-scoped deployment
+    # answered from the wrong backend while every config probe still said mode=space.
     raw = _app_workspace_client().api_client.do(
-        "POST", GENIE_MCP_PATH, body=body
+        "POST", genie_mcp_path(), body=body
     )
     if not isinstance(raw, dict):
         return {}
@@ -84,7 +88,7 @@ def _augment_broad_question(question: str) -> str:
 
 
 @function_tool
-def ask_genie_one(question: str) -> str:
+def ask_genie(question: str) -> str:
     """Query Genie Agent over workspace data. Use for any question about tables, catalogs, dashboards, or 'my data'. For broad questions, it automatically requests table- and column-level detail. Polls until Genie completes."""
     question = _augment_broad_question(question)
     ask = _mcp_tool_call("genie_ask", {"question": question})
@@ -100,10 +104,10 @@ def ask_genie_one(question: str) -> str:
     return json.dumps(result)[:2000]
 
 
-GENIE_TOOLS = [ask_genie_one]
+GENIE_TOOLS = [ask_genie]
 
 # Composed onto MEMORY_INSTRUCTIONS in agent.py so utils_memory.py stays a pristine,
 # regenerable copy of the managed-memory skill (this is the local Genie deviation).
-GENIE_INSTRUCTIONS = """For any question about workspace data, tables, catalogs, dashboards, metrics, or phrases like "my data", you MUST call ask_genie_one first with the user's question — do not ask the user to clarify catalog/schema first. When the user's question is broad (e.g. "tell me about my data"), phrase the ask_genie_one question to request concrete data assets: the catalogs, schemas, and tables available, plus each table's purpose, key columns, and row counts where possible (for example: "What catalogs, schemas, and tables do I have? For each table, give its purpose, key columns, and approximate row count."). If the first Genie answer stays high-level (only dashboards or Genie spaces, no tables/columns), call ask_genie_one again asking specifically for the tables and their columns in the catalogs that were returned. Use get_current_time for the current date and time.
+GENIE_INSTRUCTIONS = """For any question about workspace data, tables, catalogs, dashboards, metrics, or phrases like "my data", you MUST call ask_genie first with the user's question — do not ask the user to clarify catalog/schema first. When the user's question is broad (e.g. "tell me about my data"), phrase the ask_genie question to request concrete data assets: the catalogs, schemas, and tables available, plus each table's purpose, key columns, and row counts where possible (for example: "What catalogs, schemas, and tables do I have? For each table, give its purpose, key columns, and approximate row count."). If the first Genie answer stays high-level (only dashboards or Genie spaces, no tables/columns), call ask_genie again asking specifically for the tables and their columns in the catalogs that were returned. Use get_current_time for the current date and time.
 
-After ask_genie_one or memory tools return, answer in clear markdown prose (headings, bullets, tables). When Genie returns dashboard or asset links, include them as markdown links. Prefer surfacing concrete tables and their key columns over a list of dashboards. Never paste raw tool JSON in the final reply."""
+After ask_genie or memory tools return, answer in clear markdown prose (headings, bullets, tables). When Genie returns dashboard or asset links, include them as markdown links. Prefer surfacing concrete tables and their key columns over a list of dashboards. Never paste raw tool JSON in the final reply."""

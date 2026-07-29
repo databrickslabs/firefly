@@ -102,7 +102,7 @@ export default async function AgentPage() {
               The agent answers data questions with <strong>Genie Agent</strong>,
               the workspace-wide unified Genie, served over the Genie MCP endpoint
               (<code className="text-sm">/api/2.0/mcp/genie</code>). The{" "}
-              <code className="text-sm">ask_genie_one</code> tool calls{" "}
+              <code className="text-sm">ask_genie</code> tool calls{" "}
               <code className="text-sm">genie_ask</code> and polls{" "}
               <code className="text-sm">genie_poll_response</code> until complete,
               authenticating with the agent App&apos;s service principal. It is not
@@ -116,7 +116,7 @@ export default async function AgentPage() {
 
           <HighlightBox variant="success" title="Agent behavior">
             <ul className="list-disc pl-5 space-y-1 text-sm">
-              <li><strong>Genie-first</strong>: data questions call <code>ask_genie_one</code> before asking the user to clarify</li>
+              <li><strong>Genie-first</strong>: data questions call <code>ask_genie</code> before asking the user to clarify</li>
               <li><strong>Concrete assets</strong>: broad prompts request catalogs, schemas, tables, key columns, and row counts</li>
               <li><strong>Attribution</strong>: replies surface Genie asset links and a &ldquo;Powered by Genie &middot; Genie Agent&rdquo; link</li>
               <li><strong>Memory</strong>: relevant context is read/written to the UC memory store per user</li>
