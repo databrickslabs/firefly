@@ -447,6 +447,59 @@ Three rules — all three must hold simultaneously:
 
 ---
 
+## Phase 3f — Seed the data and create the Genie space (BEFORE the app deploys)
+
+This runs before Phase 4 on purpose, and the ordering is the point.
+
+The app used to deploy first and be *corrected* afterwards: Phase 4 shipped it with
+workspace-wide Genie because no space existed yet, then Phase 6c created a space and
+redeployed. Any failure between those two points left the app answering from workspace-wide
+Genie — which **guest users cannot query at all**, since they have no workspace access —
+and nothing said so, because the deploy really had passed the variable it was given.
+
+Creating the space first removes that window entirely: the app is born scoped to its space
+and never needs the redeploy. Nothing here depends on the app existing. Creating a space
+needs a warehouse and tables; only *granting* a service principal `CAN_RUN` on the space
+needs the app, and that happens in Phase 6 once the SP exists.
+
+```bash
+cd "$REPO_DIR"
+
+# The warehouse is resolved HERE rather than in Phase 6, because seeding and space
+# creation both need it and both now precede the deploy. Phase 6 recovers it from
+# inputs.env rather than resolving it a second time.
+WAREHOUSE_ID=$(databricks warehouses list -o json --profile "$DB_PROFILE" \
+  | python3 -c "import sys,json; ws=json.load(sys.stdin); \
+    print(ws[0]['id'] if ws else '')")
+firefly_store_input WAREHOUSE_ID "$WAREHOUSE_ID"
+firefly_require WAREHOUSE_ID || return 2>/dev/null || exit 1
+
+# Seed + create the space. NO --agent-sp / --guest-sp / --grant-guest here: those service
+# principals do not exist yet. Phase 6 and 6b grant on the space once they do, which is
+# why this call and that one are separate rather than one step that half-works.
+eval "$(bash scripts/genie-data-setup.sh \
+  --catalog "$UC_CATALOG" --schema "$UC_SCHEMA" --profile "$DB_PROFILE" \
+  --warehouse-id "$WAREHOUSE_ID" \
+  --seed "${SEED_SAMPLE_DATA:-yes}" \
+  --space-ids "${GENIE_SPACE_IDS:-None}" \
+  --create-space "${CREATE_GENIE_SPACE:-yes}")"
+
+echo "seed=$SEED_STATUS tables=$SEED_TABLE_COUNT mode=$GENIE_MCP_MODE space=$GENIE_SPACE_ID"
+store_secret GENIE_SPACE_ID "$GENIE_SPACE_ID"
+firefly_store_input GENIE_MCP_MODE "$GENIE_MCP_MODE"
+```
+
+`GENIE_MCP_MODE` comes back `space` when a usable space was resolved or created, and `one`
+only when none could be — no tables to build one over, or you declined at Phase 0. Phase 4
+passes whichever it is straight through, so the app's first deploy is already correct.
+
+> **`one` is an opt-out, not a soft landing.** If this phase reports `mode=one`, guest users
+> will reach the app and be unable to ask data questions at all. That is a legitimate
+> outcome when there is genuinely no space to build, and a silent one is what this
+> reordering exists to prevent — so it is stated here, at the point it is decided.
+
+---
+
 ## Phase 4 — Deploy the agent app
 
 ```bash
@@ -459,7 +512,22 @@ assert_bundle_quickstart_ran databricks.yml || return 2>/dev/null || exit 1
 
 # Deploy bundle (do NOT re-run assemble_agent.sh here — it wipes quickstart's .env)
 # Apply catalog/schema via --var (Phase 3b) — no databricks.yml edits.
-BUNDLE_VARS=(--var "catalog=$UC_CATALOG" --var "schema=$UC_SCHEMA")
+# The Genie vars ship with the FIRST deploy. Phase 3f already created the space, so there
+# is no window in which the app answers from workspace-wide Genie and no redeploy to
+# correct it. Recover them from a fresh shell rather than assuming Phase 3f's shell
+# survived; they move together, because genie_mcp.py refuses to boot on space-mode with an
+# empty id.
+: "${GENIE_SPACE_ID:=$(read_secret GENIE_SPACE_ID 2>/dev/null || true)}"
+: "${GENIE_MCP_MODE:=$(firefly_read_input GENIE_MCP_MODE 2>/dev/null || echo one)}"
+BUNDLE_VARS=(--var "catalog=$UC_CATALOG" --var "schema=$UC_SCHEMA"
+             --var "genie_mcp_mode=$GENIE_MCP_MODE"
+             --var "genie_space_id=${GENIE_SPACE_ID:-none}")
+if [ "$GENIE_MCP_MODE" = "space" ] && [ -z "${GENIE_SPACE_ID:-}" ]; then
+  echo "ERROR: mode=space with no GENIE_SPACE_ID — Phase 3f did not leave one." >&2
+  echo "  Re-run Phase 3f, or set GENIE_MCP_MODE=one to deploy workspace-wide" >&2
+  echo "  (guest users cannot query workspace-wide Genie)." >&2
+  return 2>/dev/null || exit 1
+fi
 databricks bundle deploy --profile "$DB_PROFILE" -t dev "${BUNDLE_VARS[@]}"
 databricks bundle run agent_openai_agents_sdk --profile "$DB_PROFILE" -t dev "${BUNDLE_VARS[@]}"
 
@@ -678,133 +746,56 @@ databricks api patch \
 
 ---
 
-## Phase 6c — Give Genie data, and a space, to work with
+## Phase 6c — Grant the service principals on the Genie space
 
-Phases 6 and 6b grant catalog, schema, and warehouse access. On a **fresh
-workspace**, Genie Agent can still return empty or useless answers when the
-granted schema has **no tables** — the agent and MCP plumbing work, but there
-is nothing to query.
+Phase 3f already seeded the data and created the space, before the app was ever deployed.
+What is left is the half that genuinely needs the service principals to exist: granting the
+agent SP and the guest SP `CAN_RUN` on that space, and `SELECT` on the tables it references.
 
-This phase acts on the four Phase 0 answers: `SEED_SAMPLE_DATA`,
-`GENIE_SPACE_IDS`, `CREATE_GENIE_SPACE`, and `GRANT_GUEST_SPACE_ACCESS`. It runs
-here, after Phase 6, because a Genie space needs the `WAREHOUSE_ID` that Phase 6
-resolves.
-
-### Check
-
-```bash
-# Tables in the schema you granted in Phase 6?
-databricks tables list "$UC_CATALOG" "$UC_SCHEMA" --profile "$DB_PROFILE"
-```
-
-Or, in a SQL warehouse session:
-
-```sql
-SHOW TABLES IN $UC_CATALOG.$UC_SCHEMA;
-```
-
-### Seed data and resolve a Genie space
-
-One script does all of it, and `scripts/bootstrap.sh` calls it identically, so the
-runbook and the automated runner cannot drift. It is safe to re-run: it never
-overwrites an existing table and never creates a second space.
+Splitting it this way is deliberate. The two halves have different prerequisites — creating
+a space needs a warehouse and tables, granting on it needs an app — and running them as one
+step is what forced the app to deploy in the wrong mode and be corrected afterwards.
 
 ```bash
 cd "$REPO_DIR"
 
-# $SP_CLIENT_ID is the agent App's service principal, captured in Phase 5. Re-read
-# it if this is a fresh shell — the app needs CAN_RUN on whatever space we use.
-: "${SP_CLIENT_ID:=$(databricks apps get "$AGENT_APP_NAME" -o json --profile "$DB_PROFILE" \
-  | python3 -c 'import sys,json; print(json.load(sys.stdin).get("service_principal_client_id") or "")')}"
-
-# Captures SEED_STATUS / GENIE_SPACE_ID / GENIE_MCP_MODE into this shell.
-# Progress goes to stderr, so `eval` only ever consumes KEY=value lines.
-eval "$(bash scripts/genie-data-setup.sh \
-  --catalog "$UC_CATALOG" --schema "$UC_SCHEMA" --profile "$DB_PROFILE" \
-  --warehouse-id "${WAREHOUSE_ID:-}" \
-  --seed "${SEED_SAMPLE_DATA:-yes}" \
-  --space-ids "${GENIE_SPACE_IDS:-None}" \
-  --create-space "${CREATE_GENIE_SPACE:-yes}" \
-  --grant-guest "${GRANT_GUEST_SPACE_ACCESS:-yes}" \
-  --guest-sp "${GUEST_SP_CLIENT_ID:-}" \
-  --agent-sp "$SP_CLIENT_ID")"
-
-echo "seed=$SEED_STATUS tables=$SEED_TABLE_COUNT mode=$GENIE_MCP_MODE space=$GENIE_SPACE_ID"
-# Minted in an earlier phase, so a fresh shell arrives without it: recover before
-# storing, or this line is a save that saves nothing.
-: "${GENIE_SPACE_ID:=$(read_secret GENIE_SPACE_ID 2>/dev/null || true)}"
-store_secret GENIE_SPACE_ID "$GENIE_SPACE_ID"
-```
-
-`SEED_STATUS` tells you what happened, and each value is a deliberate outcome.
-A schema that is already PARTLY populated is normal and not an error: a fresh
-`workspace.default` can ship sample tables, and an interrupted earlier run leaves
-some behind. Phase 6c completes the difference and reports
-`completing a partial seed (N present, M missing)` rather than `seeded`.
-`SEED_STATUS` tells you what happened, and each value is a deliberate outcome:
-
-| `SEED_STATUS` | Meaning |
-|---|---|
-| `seeded` | The schema was empty; sample tables were copied in |
-| `already-seeded` | Every sample table was already there — nothing was written |
-| `already-populated` | The schema holds **your** tables; bootstrap left them alone |
-| `declined` | You answered `no` at Phase 0 |
-| `source-not-ready` | `samples.wanderbricks` does not exist **yet**. Not a permissions problem — a new workspace provisions the samples catalog asynchronously, and this phase can win the race. Re-run it in a few minutes |
-| `source-empty` | The schema exists but reported no tables. Same remedy: re-run |
-| `source-denied` | A real permission block. Grant `SELECT` on the source, or answer `no` to `SEED_SAMPLE_DATA` |
-| `source-error` | Something else failed; the server's message is printed alongside |
-
-> **`source-not-ready` is the common one on a fresh workspace, and it is not
-> fatal.** Phase 6c waits up to 180 seconds (`FIREFLY_SEED_SOURCE_WAIT`) for the
-> samples catalog to appear, because a new workspace provisions it asynchronously
-> and this phase can arrive first. If it still gives up, the data is late rather
-> than missing — confirm with
-> `databricks tables list samples wanderbricks --profile "$DB_PROFILE"`, then
-> re-run this phase. Do not go looking for entitlements: a genuine permission
-> problem reports `source-denied`.
-
-### Point the app at the space
-
-Only when `GENIE_MCP_MODE=space`. Phase 4 deployed the app before this phase, so
-the app does not yet know the space exists — the env var arrives with a redeploy.
-
-```bash
-# GENIE_MCP_MODE and GENIE_SPACE_ID live only in this shell, so a fresh one made this
-# gate fall through in silence: no redeploy, no warning, and an app that never learned
-# the space exists. Restore them, then say plainly which branch was taken.
+# Both SPs and the space id come from earlier phases, so recover them rather than assuming
+# one shell has spanned all of Phase 3f through 6b.
 firefly_restore_phase6_context "$DB_PROFILE"
-if [ "$GENIE_MCP_MODE" = "space" ]; then
-  firefly_require GENIE_SPACE_ID || return 2>/dev/null || exit 1
-  cd "$REPO_DIR/agent-build"
-  # Phase 4's deployment may still be in flight. The Apps API rejects an overlapping
-  # update with "Cannot update app ... as there is a pending deployment in progress",
-  # which lands mid-phase and reads as a hard failure. Wait it out first.
-  firefly_wait_app_deploy_settled "$AGENT_APP_NAME" "$DB_PROFILE"
-  databricks bundle deploy --profile "$DB_PROFILE" -t dev \
-    --var "catalog=$UC_CATALOG" --var "schema=$UC_SCHEMA" \
-    --var "genie_mcp_mode=space" --var "genie_space_id=$GENIE_SPACE_ID"
-  databricks bundle run agent_openai_agents_sdk --profile "$DB_PROFILE" -t dev \
-    --var "catalog=$UC_CATALOG" --var "schema=$UC_SCHEMA" \
-    --var "genie_mcp_mode=space" --var "genie_space_id=$GENIE_SPACE_ID"
-  ok "app redeployed in Genie space mode against $GENIE_SPACE_ID"
+: "${GENIE_SPACE_ID:=$(read_secret GENIE_SPACE_ID 2>/dev/null || true)}"
+: "${GENIE_MCP_MODE:=$(firefly_read_input GENIE_MCP_MODE 2>/dev/null || echo one)}"
+
+if [ "$GENIE_MCP_MODE" != "space" ] || [ -z "${GENIE_SPACE_ID:-}" ]; then
+  # Nothing to grant on. Say what that costs rather than skipping in silence, which is the
+  # failure this reordering was written to remove.
+  warn "no Genie space to grant on (mode=${GENIE_MCP_MODE:-unset})."
+  warn "  Guest users will reach the app and be unable to ask data questions."
+  warn "  Re-run Phase 3f if you expected a space to exist."
 else
-  # Never silent. Staying on Genie Agent is a real outcome with a real cost — guest users
-  # cannot query it — so it has to be stated, not inferred from the absence of output.
-  warn "NOT redeploying in space mode: GENIE_MCP_MODE='${GENIE_MCP_MODE:-}' (want 'space')."
-  note "The app stays on Genie Agent, which guest users cannot use. If Phase 6c did create"
-  note "a space, this usually means the shell lost GENIE_MCP_MODE/GENIE_SPACE_ID — run"
-  note "firefly_restore_phase6_context \"\$DB_PROFILE\" and re-run this block."
+  firefly_require SP_CLIENT_ID WAREHOUSE_ID || return 2>/dev/null || exit 1
+
+  # Grants only: --seed no and --create-space no, because Phase 3f did both. Passing the
+  # space id explicitly means this cannot accidentally create a second one.
+  eval "$(bash scripts/genie-data-setup.sh \
+    --catalog "$UC_CATALOG" --schema "$UC_SCHEMA" --profile "$DB_PROFILE" \
+    --warehouse-id "$WAREHOUSE_ID" \
+    --seed no --create-space no \
+    --space-ids "$GENIE_SPACE_ID" \
+    --grant-guest "${GRANT_GUEST_SPACE_ACCESS:-yes}" \
+    --guest-sp "${GUEST_SP_CLIENT_ID:-}" \
+    --agent-sp "$SP_CLIENT_ID")"
+
+  ok "granted on Genie space $GENIE_SPACE_ID (agent SP, and guest SP when asked for)"
 fi
 ```
 
-> **Pass both `--var`s or neither.** `agent.py` raises
-> `ValueError: GENIE_MCP_MODE=space requires GENIE_SPACE_ID` when the mode is
-> `space` and the id is empty, and the app fails to boot instead of falling back.
-> The bundle defaults (`one` / empty) are the safe pair, which is why a run that
-> resolved no space simply skips this block.
+There is **no redeploy here**. The app received `genie_mcp_mode` and `genie_space_id` on its
+first deploy in Phase 4, so it has been scoped to this space since it started. Grants change
+what the space can read, not which space the app talks to.
 
-If the schema is still empty after this phase, continue through Phases 7–9 (infra
-and guest login can still verify) and then follow **Next steps — no UC data**.
+> **If you are resuming an older run** whose app was deployed before Phase 3f existed, it
+> may still be in `one` mode. Check with `databricks apps get "$AGENT_APP_NAME" -o json` and
+> re-run Phase 4 if `GENIE_MCP_MODE` is not `space`; Phase 4 is idempotent.
 
 ---
 

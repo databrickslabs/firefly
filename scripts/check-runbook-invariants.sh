@@ -859,32 +859,54 @@ else
   bad "these helpers die before reporting, under set -e:$ERREXIT_BAD"
 fi
 
-# ── 32. Phase 6c's redeploy must wait for Phase 4's deployment ─────────────────
-# Phase 4 deploys the app; Phase 6c redeploys it with genie_mcp_mode=space. When the
-# first is still in flight the Apps API answers
-#   400 Cannot update app ... as there is a pending deployment in progress
-# and the error lands mid-phase, next to an unrelated "WAL recovery failed", reading
-# as a hard failure in a phase that otherwise worked. Both the runbook and the runner
-# must wait, or the race returns for whichever one was missed.
-SETTLE_BAD=""
-grep -q 'firefly_wait_app_deploy_settled()' scripts/lib/runbook.sh \
-  || SETTLE_BAD="$SETTLE_BAD runbook.sh(no-helper)"
+# ── 32. The app must be DEPLOYED in its final Genie mode, not corrected afterwards ──
+# This used to assert that Phase 6c's redeploy waited for Phase 4's deployment to settle,
+# because the app was deployed workspace-wide (no space existed yet) and redeployed into
+# space mode later. That race is gone -- along with the redeploy -- now that Phase 3f
+# creates the space BEFORE Phase 4. Retiring the old check rather than leaving it in place
+# matters: it searched for the literal `genie_mcp_mode=space`, which no longer appears, so
+# it had started passing vacuously. A check that cannot fail still reports success.
+#
+# What must hold now: the first deploy carries both Genie vars, and nothing redeploys to
+# fix the mode afterwards.
+DEPLOY_MODE_BAD=""
 for f in BOOTSTRAP.md scripts/bootstrap.sh; do
-  # The wait has to come BEFORE the space-mode deploy, not merely exist in the file.
-  python3 - "$f" <<'PYCHK' || SETTLE_BAD="$SETTLE_BAD $(basename "$f")(no-wait-before-deploy)"
+  # The deploy that Phase 4 performs must pass both vars together.
+  python3 - "$f" <<'PYCHK' || DEPLOY_MODE_BAD="$DEPLOY_MODE_BAD $(basename "$f")(deploy-lacks-genie-vars)"
 import re, sys
 t = open(sys.argv[1]).read()
-i = t.find('genie_mcp_mode=space')
-if i == -1:
-    sys.exit(0)                       # nothing to guard
-window = t[max(0, i - 1200):i]
-sys.exit(0 if 'firefly_wait_app_deploy_settled' in window else 1)
+# Any bundle deploy line, plus the ~600 chars before it (where BUNDLE_VARS is built).
+for m in re.finditer(r'bundle deploy', t):
+    seg = t[max(0, m.start() - 800):m.end() + 200]
+    if 'genie_mcp_mode' in seg and 'genie_space_id' in seg:
+        sys.exit(0)
+sys.exit(1)
+PYCHK
+  # And no bundle deploy may appear at or after Phase 6 -- that late deploy IS the
+  # correction this reordering removed. Matching the WORD "redeploy" flagged prose that
+  # denies one ("There is no redeploy here"), which is the third time a check here has been
+  # decided by documentation instead of by what executes.
+  python3 - "$f" <<'PYCHK' || DEPLOY_MODE_BAD="$DEPLOY_MODE_BAD $(basename "$f")(late-deploy-corrects-mode)"
+import re, sys
+t = open(sys.argv[1]).read()
+m = re.search(r'(##|header ")\s*"?Phase 6', t)
+if not m:
+    sys.exit(0)
+tail = t[m.start():]
+# A deploy command, not the word. Comment/prose lines are excluded.
+for line in tail.split('\n'):
+    stripped = line.strip()
+    if stripped.startswith('#') or stripped.startswith('>'):
+        continue
+    if 'bundle deploy' in stripped:
+        sys.exit(1)
+sys.exit(0)
 PYCHK
 done
-if [[ -z "$SETTLE_BAD" ]]; then
-  pass "Phase 6c waits for an in-flight deployment before redeploying in space mode."
+if [[ -z "$DEPLOY_MODE_BAD" ]]; then
+  pass "the app is deployed in its final Genie mode; nothing redeploys to correct it."
 else
-  bad "Phase 6c can race Phase 4's deployment:$SETTLE_BAD"
+  bad "the app can still be born in the wrong Genie mode:$DEPLOY_MODE_BAD"
 fi
 
 # ── 33. Value-returning helpers must keep stdout clean ────────────────────────
@@ -1058,15 +1080,23 @@ python3 - <<'PYCHK' || PHASE6_BAD="$PHASE6_BAD space-gate-silent"
 import re, sys
 for path in ('BOOTSTRAP.md', 'scripts/bootstrap.sh'):
     t = open(path).read()
-    i = t.find('GENIE_MCP_MODE') 
-    while i != -1:
-        seg = t[i:i + 2000]
-        if re.search(r'=\s*.?space.?\s*\]', seg) or '== "space"' in seg:
-            # Within this gate, an else branch must warn or note.
-            if not re.search(r'\belse\b[\s\S]{0,600}?(warn|note)\s', seg):
-                sys.exit(1)
-            break
-        i = t.find('GENIE_MCP_MODE', i + 1)
+    # Anchor on the GATE, not on the first mention of the variable.
+    #
+    # The previous version searched from the first occurrence of GENIE_MCP_MODE, asked
+    # whether a gate appeared within 2000 chars, then looked for speech within 900 -- two
+    # spans that need not overlap. It duly landed on Phase 3f's firefly_store_input, found
+    # Phase 4's gate far downstream, and judged Phase 3f's neighbourhood for speech. Correct
+    # code failed. Find each gate and inspect that gate's own body.
+    gates = list(re.finditer(r'(?:if|elif)[^\n]*GENIE_MCP_MODE[^\n]*(?:=|!=)\s*.?space.?', t))
+    if not gates:
+        sys.exit(0)                    # nothing gating on the mode here
+    # EVERY gate must speak, not merely one of them. Requiring "some gate speaks" let a
+    # silenced gate hide behind a talkative one -- verified by silencing Phase 6c's and
+    # watching this pass because Phase 4's was still loud.
+    for g in gates:
+        body = t[g.end():g.end() + 800]
+        if not re.search(r'(warn|note|echo|fail)\s', body):
+            sys.exit(1)
 sys.exit(0)
 PYCHK
 if [[ -z "$PHASE6_BAD" ]]; then
@@ -1156,7 +1186,12 @@ bad = []
 for m in re.finditer(r'store_secret\s+([A-Z_][A-Z0-9_]*)\s+"\$\{?\1\}?"', t):
     key = m.group(1)
     window = t[max(0, m.start() - 700):m.start()]
-    minted = re.search(r'\b' + key + r'=(?!=)', window)
+    # `eval "$(...)"` mints variables without the text `KEY=` appearing, so a purely
+    # textual "was it assigned nearby" test cannot see it. Phase 3f captures GENIE_SPACE_ID
+    # exactly that way and then stores it -- a mint-then-store, not a re-store -- and the
+    # first version of this check flagged it.
+    minted = (re.search(r'\b' + key + r'=(?!=)', window)
+              or re.search(r'eval "\$\(', window))
     recovered = re.search(r':\s*"\$\{' + key + r':=\$\(read_secret', window)
     if not minted and not recovered:
         bad.append(key)
