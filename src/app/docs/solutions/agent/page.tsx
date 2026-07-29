@@ -99,14 +99,17 @@ export default async function AgentPage() {
         <Section id="genie-and-memory" title="Genie Agent & Managed Memory">
           <ContentBlock>
             <p className="mb-4">
-              The agent answers data questions with <strong>Genie Agent</strong>,
-              the workspace-wide unified Genie, served over the Genie MCP endpoint
-              (<code className="text-sm">/api/2.0/mcp/genie</code>). The{" "}
-              <code className="text-sm">ask_genie</code> tool calls{" "}
-              <code className="text-sm">genie_ask</code> and polls{" "}
-              <code className="text-sm">genie_poll_response</code> until complete,
-              authenticating with the agent App&apos;s service principal. It is not
-              scoped to a single Genie space (<code className="text-sm">GENIE_MCP_MODE=one</code>).
+                The agent answers data questions with <strong>Genie Agent</strong> — a
+                curated <strong>Genie space</strong> — served over the Genie MCP endpoint
+                (<code className="text-sm">/api/2.0/mcp/genie/&lt;space_id&gt;</code>). The{" "}
+                <code className="text-sm">ask_genie</code> tool calls{" "}
+                <code className="text-sm">genie_ask</code> and polls{" "}
+                <code className="text-sm">genie_poll_response</code> until complete,
+                authenticating with the agent App&apos;s service principal. Answers are
+                scoped to that space&apos;s curated tables, joins, and instructions, and a
+                space is the only object a guest service principal can be granted{" "}
+                <code className="text-sm">CAN_RUN</code> on — which is what makes the
+                guest flow work at all.
             </p>
             <p className="mb-4">
               Managed memory persists per-user context in a Unity Catalog store, so
@@ -118,7 +121,7 @@ export default async function AgentPage() {
             <ul className="list-disc pl-5 space-y-1 text-sm">
               <li><strong>Genie-first</strong>: data questions call <code>ask_genie</code> before asking the user to clarify</li>
               <li><strong>Concrete assets</strong>: broad prompts request catalogs, schemas, tables, key columns, and row counts</li>
-              <li><strong>Attribution</strong>: replies surface Genie asset links and a &ldquo;Powered by Genie &middot; Genie Agent&rdquo; link</li>
+              <li><strong>Attribution</strong>: replies surface Genie asset links, and the panel shows plain-text &ldquo;Powered by Genie&rdquo; — deliberately not a link, since guests have no workspace access to follow it</li>
               <li><strong>Memory</strong>: relevant context is read/written to the UC memory store per user</li>
             </ul>
           </HighlightBox>
@@ -186,7 +189,12 @@ export default async function AgentPage() {
                   <tr>
                     <td className="border border-gray-200 px-4 py-2"><code className="text-sm">GENIE_MCP_MODE</code></td>
                     <td className="border border-gray-200 px-4 py-2 text-sm">Agent App</td>
-                    <td className="border border-gray-200 px-4 py-2">Set to <code>one</code> to use Genie Agent (workspace-wide)</td>
+                    <td className="border border-gray-200 px-4 py-2"><code>space</code> — the default, and the supported configuration</td>
+                  </tr>
+                  <tr>
+                    <td className="border border-gray-200 px-4 py-2"><code className="text-sm">GENIE_SPACE_ID</code></td>
+                    <td className="border border-gray-200 px-4 py-2 text-sm">Agent App</td>
+                    <td className="border border-gray-200 px-4 py-2">Genie space the agent answers from. Required — the app refuses to start without it rather than answering from a different backend</td>
                   </tr>
                   <tr>
                     <td className="border border-gray-200 px-4 py-2"><code className="text-sm">DATABRICKS_MEMORY_STORE</code></td>

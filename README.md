@@ -21,9 +21,9 @@ bash scripts/bootstrap.sh --dry-run
 bash scripts/bootstrap.sh
 ```
 
-The runbook covers all nine phases end-to-end: Databricks provisioning, Neon DB,
-Vercel deploy, guest service principal, and end-to-end verification. Manual setup
-instructions follow below.
+The runbook covers Phases 0–9 end-to-end (with sub-phases 3f, 6b and 6c): Databricks
+provisioning, sample-data seeding and Genie space creation, Neon DB, Vercel deploy, guest
+service principal, and end-to-end verification. Manual setup instructions follow below.
 
 ---
 
@@ -258,53 +258,51 @@ built from the [`databricks/app-templates`](https://github.com/databricks/app-te
 
 ### How the agent uses Genie
 
-The agent answers data questions over the **Genie MCP** endpoint
-(`/api/2.0/mcp/genie`). The `ask_genie_one` tool
-(`agent/agent_server/genie_tools.py`) calls `genie_ask` and polls
-`genie_poll_response` until completion, authenticating with the agent App's
-service principal.
+The agent answers data questions over **Genie MCP**, authenticating with the agent App's
+service principal. The `ask_genie` tool (`agent/agent_server/genie_tools.py`) calls
+`genie_ask` and polls `genie_poll_response` until completion.
 
-Two backends are supported, chosen by `GENIE_MCP_MODE`:
+**The endpoint is resolved in exactly one place** — `genie_mcp_path()` in
+`agent/agent_server/genie_mcp.py` — and both `agent.py` and `genie_tools.py` call it. They used
+to disagree: `genie_tools.py` held its own `GENIE_MCP_PATH` constant and POSTed to workspace-wide
+Genie while `agent.py` correctly connected the space-scoped server, so a deployment configured
+for a curated space answered from the wrong backend while every probe reported `mode=space`. Do
+not reintroduce a second path.
 
-- **`one` (default)** — the **workspace-wide unified Genie**. Not
-  scoped to any space; it discovers whatever the agent SP can read. Works on any
-  workspace with no extra setup.
-- **`space`** — a single Genie space named by `GENIE_SPACE_ID`. Answers are scoped
-  to that space's curated tables, joins, and instructions. BOOTSTRAP.md Phase 6c
-  sets this up when the user opts in, either creating a space over the agent's
-  schema or using space ids the user supplied at Phase 0.
+The agent is scoped to a **Genie space** named by `GENIE_SPACE_ID`, reached at
+`/api/2.0/mcp/genie/<space_id>`. Answers come from that space's curated tables, joins, and
+instructions. `BOOTSTRAP.md` **Phase 3f** creates the space (or adopts space ids you supplied at
+Phase 0) *before* Phase 4 deploys, so the app is born in its final mode; **Phase 6c** then grants
+the agent and guest service principals on it.
 
-Genie is configured at the **agent App layer** in `agent/databricks.yml` (not the
-frontend `.env.local`):
+A Genie space is also the only object a guest service principal can be granted `CAN_RUN` on, and
+guests have no workspace access — so the space is what makes the guest flow work at all.
+
+Genie is configured at the **agent App layer** in `agent/databricks.yml` (not the frontend
+`.env.local`):
 
 | Env var | Purpose |
 | --- | --- |
-| `GENIE_MCP_MODE` | `one` for workspace-wide Genie, `space` for a single curated space. Bundle variable `genie_mcp_mode`, default `one` |
-| `GENIE_SPACE_ID` | Required when `GENIE_MCP_MODE=space`, empty otherwise. Bundle variable `genie_space_id`, default empty. **Move it with the mode**: `agent.py` raises `ValueError` on `space` + empty id and the app fails to boot |
+| `GENIE_MCP_MODE` | `space` — the default, and the supported configuration. Bundle variable `genie_mcp_mode` |
+| `GENIE_SPACE_ID` | Required. Bundle variable `genie_space_id`, default **`none`** — a placeholder, not an id. It cannot default to empty: the bundle would render `{"name": "GENIE_SPACE_ID"}` with no `value` and the Apps API rejects the deploy ("Must specify environment variable source using either value or valueFrom"). `genie_mcp_path()` raises `ValueError` on an unset id rather than silently falling back to a different backend |
 | `DATABRICKS_HOST`, `DATABRICKS_WORKSPACE_ID` | **Auto-injected** by the Databricks Apps runtime — never set in the bundle. Used to identify the workspace; **no attribution link is built from them** (see below) |
 
-The panel shows plain-text "Powered by Genie" attribution with **no link**. There
-was one, pointing at workspace-wide Genie, and it was wrong in two ways at once: the audience
-for this panel is guest users who have no Databricks workspace access, so the link
-led somewhere they could not open; and once `GENIE_MCP_MODE` defaults to a space,
-its "Genie One" label named a backend that never saw the question. `GENIE_ONE_URL` no longer
-exists.
+The panel shows plain-text "Powered by Genie" attribution with **no link**. There was one, and it
+was wrong in two ways at once: the audience for this panel is guest users who have no Databricks
+workspace access, so the link led somewhere they could not open; and it named a backend that
+never saw the question. `GENIE_ONE_URL` no longer exists.
 
-Switching an existing deployment to a space means passing **both** variables:
+Pointing an existing deployment at a different space means passing the id:
 
 ```bash
 databricks bundle deploy -t dev --profile "$DB_PROFILE" \
   --var catalog="$UC_CATALOG" --var schema="$UC_SCHEMA" \
-  --var genie_mcp_mode=space --var genie_space_id=<space-id>
+  --var genie_space_id=<space-id>
 ```
 
 The `GENIE_INSTRUCTIONS` prompt (composed onto the agent's memory instructions in
-`agent/agent_server/agent.py`) forces Genie-first behavior for any question about
-tables, catalogs, dashboards, or "my data".
-
-> Note: the tool currently **hardcodes** the MCP path `/api/2.0/mcp/genie` rather
-> than reading `GENIE_MCP_URL`, so that env var only feeds the attribution-link
-> fallback today.
+`agent/agent_server/agent.py`) forces Genie-first behavior for any question about tables,
+catalogs, dashboards, or "my data".
 
 ### Grant the agent's service principal access to your data
 
@@ -318,17 +316,22 @@ to the catalogs/schemas you want it to answer over:
 - `SELECT` on the tables (or on the schema), and
 - access to a SQL warehouse Genie can execute against.
 
-> **A fresh workspace has no data and no running warehouse — Genie will answer
-> "empty" until you provide both.** This repo ships no dataset. Before the first
-> demo, start a (serverless) SQL warehouse and create at least one UC schema with a
-> few tables (copy a slice from the built-in `samples` catalog or generate synthetic
-> rows), then apply the grants above to the app's SP. Without seeded data + a
-> warehouse the Agent panel looks broken even though the agent, Genie, and memory
+> **A fresh workspace has no data and no running warehouse — Genie answers "empty" until both
+> exist.** If you bootstrap with `BOOTSTRAP.md`, Phase 3f handles this: it resolves a SQL
+> warehouse and, when `SEED_SAMPLE_DATA=yes` (the default) and the target schema is **empty**,
+> copies a slice of `samples.wanderbricks` into `$UC_CATALOG.$UC_SCHEMA`. It never overwrites an
+> existing table, so pointing it at a populated schema is safe and does nothing.
+>
+> Setting up by hand instead, or answering `no`: start a (serverless) SQL warehouse and create at
+> least one UC schema with a few tables, then apply the grants above to the app's SP. Without
+> data *and* a warehouse the Agent panel looks broken even though the agent, Genie, and memory
 > are all working.
 
-<!-- UNVERIFIED: the exact minimal privilege set — and whether Genie Agent requires an
-explicit SQL-warehouse grant for the service principal — has not yet been confirmed on a
-clean workspace. -->
+<!-- PARTLY VERIFIED: end-to-end runs confirm that USE CATALOG + USE SCHEMA + SELECT on the
+tables, plus CAN_USE on a SQL warehouse, are SUFFICIENT for the agent SP, and that a guest SP
+additionally needs CAN_RUN on the Genie space. What remains unverified is the MINIMAL set — no
+one has removed privileges one at a time to find the floor. Treat the list above as known-good,
+not as minimal. -->
 
 ### How it differs from the Go proxy
 
@@ -596,7 +599,7 @@ pnpm format
 ### 1. Install Vercel CLI (Optional)
 
 ```bash
-pnpm install -g vercel
+npm install -g vercel@56.3.1   # pinned; matches BOOTSTRAP.md Phase 1d
 ```
 
 ### 2. Connect to Vercel
@@ -717,7 +720,7 @@ vercel --prod
 vercel
 ```
 
-### 6. Verify Deployment
+### 7. Verify Deployment
 
 After deployment:
 - Check that all environment variables are set correctly
@@ -725,7 +728,7 @@ After deployment:
 - Verify database connectivity
 - Ensure the Go proxy is accessible
 
-### 7. Deploy Go Proxy Separately
+### 8. Deploy Go Proxy Separately
 
 The Go proxy should be deployed separately (not on Vercel):
 
