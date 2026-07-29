@@ -161,6 +161,10 @@ require_secret() {
 # created here rather than assumed — a previous regression was an installer that
 # wrote into a $HOME/bin that did not exist yet.
 
+# A floor, not a preference: used only when api.github.com cannot say what "latest" is. Bump it
+# when convenient; every phase that matters asserts the CLI works rather than its version.
+: "${FIREFLY_DATABRICKS_CLI_FALLBACK:=1.9.0}"
+
 firefly_install_databricks_cli() {
   command -v databricks >/dev/null 2>&1 && {
     ok "databricks already installed: $(databricks --version 2>/dev/null | head -1)"; return 0; }
@@ -170,9 +174,40 @@ firefly_install_databricks_cli() {
     x86_64)        arch=amd64 ;;
     *) fail "unsupported architecture: $(uname -m)"; return 1 ;;
   esac
-  tag=$(curl -fsSL https://api.github.com/repos/databricks/cli/releases/latest \
-        | python3 -c "import sys,json;print(json.load(sys.stdin)['tag_name'].lstrip('v'))") || {
-    fail "could not resolve the latest Databricks CLI release"; return 1; }
+  # Resolving "latest" costs one call against api.github.com, which allows 60 per hour PER IP
+  # unauthenticated. A machine running the runbook repeatedly exhausts that, and the failure is a
+  # 403 whose body says "API rate limit exceeded" while the old message said "could not resolve
+  # the latest Databricks CLI release" -- sending the reader to look at networking or at the
+  # Databricks release page, neither of which is the problem. It also killed the whole run:
+  # Phases 3a-6 and 8b-9 all die without the CLI, with no recovery path.
+  #
+  # So: authenticate when a token is available, and when the API cannot answer, fall back to a
+  # pinned version rather than failing. The download host is not API-rate-limited, so the
+  # fallback works exactly when the lookup does not.
+  local gh_auth=() api_err tag_body
+  local tok="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+  [ -z "$tok" ] && command -v gh >/dev/null 2>&1 && tok="$(gh auth token 2>/dev/null || true)"
+  [ -n "$tok" ] && gh_auth=(-H "Authorization: Bearer $tok")
+
+  api_err="$(mktemp)"
+  tag_body="$(curl -fsSL ${gh_auth[@]+"${gh_auth[@]}"} \
+      https://api.github.com/repos/databricks/cli/releases/latest 2>"$api_err")" || tag_body=""
+  tag="$(printf '%s' "$tag_body" | python3 -c "import sys,json
+try: print(json.load(sys.stdin)['tag_name'].lstrip('v'))
+except Exception: print('')" 2>/dev/null)"
+
+  if [ -z "$tag" ]; then
+    tag="$FIREFLY_DATABRICKS_CLI_FALLBACK"
+    warn "could not ask api.github.com which release is latest:"
+    warn "  $(head -1 "$api_err" 2>/dev/null | cut -c1-140)"
+    if [ -z "$tok" ]; then
+      warn "  Unauthenticated api.github.com allows 60 requests/hour per IP, and a 403 here is"
+      warn "  usually that limit rather than a network or Databricks problem. Set GH_TOKEN (or"
+      warn "  run 'gh auth login') to raise it."
+    fi
+    warn "  Installing the pinned v${tag} instead - the download host is not rate-limited."
+  fi
+  rm -f "$api_err"
   tmp=$(mktemp -d)
   curl -fsSL "https://github.com/databricks/cli/releases/download/v${tag}/databricks_cli_${tag}_darwin_${arch}.zip" \
        -o "$tmp/db.zip" || { rm -rf "$tmp"; fail "download failed"; return 1; }
