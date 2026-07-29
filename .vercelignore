@@ -1,0 +1,5 @@
+# Agent build inputs/outputs are not part of the Next.js frontend build.
+# Leading slash anchors to repo root so we DON'T exclude src/components/agent/.
+/agent/
+/agent-build/
+/vendor/

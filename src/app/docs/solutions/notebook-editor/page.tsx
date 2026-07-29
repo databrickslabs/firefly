@@ -28,7 +28,9 @@ export default async function NotebookEditorPage() {
       <SectionContainer>
         <header className="mb-12 border-b pb-8">
           <div className="text-sm text-muted-foreground mb-2">
-            Solutions
+            <Link href="/docs/solutions" className="hover:text-foreground">
+              Solutions
+            </Link>
           </div>
           <PageTitle>Notebook Editor</PageTitle>
           <p className="text-xl text-muted-foreground">
@@ -375,6 +377,16 @@ export default async function NotebookEditorIframe() {
               <h4 className="font-semibold mb-1">Code Editor</h4>
               <p className="text-sm text-muted-foreground">
                 VS Code-style file editing in the same architecture
+              </p>
+            </Link>
+
+            <Link
+              href="/docs/solutions/agent"
+              className="block border rounded-lg p-4 hover:bg-accent transition-colors"
+            >
+              <h4 className="font-semibold mb-1">Agent Panel</h4>
+              <p className="text-sm text-muted-foreground">
+                Chat assistant for natural-language data questions
               </p>
             </Link>
 

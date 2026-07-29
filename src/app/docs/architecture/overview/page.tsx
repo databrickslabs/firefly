@@ -1,6 +1,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 import Link from "next/link";
+import { SOLUTION_DOCS } from "@/lib/solution-docs";
 import { MermaidDiagram } from "@/components/mermaid-diagram";
 import {
   Section,
@@ -438,6 +439,42 @@ export default async function ArchitectureOverviewPage() {
                 ))}
               </div>
             </div>
+          </div>
+        </Section>
+
+        {/* Platform Solutions */}
+        <Section id="solutions" title="Platform Solutions">
+          <ContentBlock>
+            <p className="mb-6">
+              FireFly ships seven documented solutions — from Go-proxy iframe editors
+              to native React components and the Vercel-native Agent Panel. See the{" "}
+              <Link href="/docs/solutions" className="text-blue-600 hover:underline">
+                solutions index
+              </Link>{" "}
+              for embedding-pattern details.
+            </p>
+          </ContentBlock>
+
+          <div className="grid md:grid-cols-2 gap-4">
+            {SOLUTION_DOCS.map((solution) => (
+              <Link
+                key={solution.slug}
+                href={solution.href}
+                className="block border rounded-lg p-4 hover:border-orange-500 hover:bg-orange-50 transition-colors group"
+              >
+                <div className="flex items-start justify-between gap-3 mb-2">
+                  <h4 className="font-semibold group-hover:text-orange-600">
+                    {solution.title}
+                  </h4>
+                  <span className="shrink-0 text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                    {solution.embeddingLabel}
+                  </span>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  {solution.description}
+                </p>
+              </Link>
+            ))}
           </div>
         </Section>
 

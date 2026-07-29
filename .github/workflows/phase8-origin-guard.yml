@@ -1,0 +1,21 @@
+name: Phase 8 origin guard
+
+on:
+  pull_request:
+    branches:
+      - genie-agent
+  push:
+    branches:
+      - genie-agent
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run hermetic Phase 8 origin tests
+        run: bash tests/test_phase8_origin.sh

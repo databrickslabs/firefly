@@ -11,6 +11,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  blobUrl as buildBlobUrl,
+  rawUrl as buildRawUrl,
+  type RepoRef,
+} from "@/lib/repo-links";
 
 function CursorIcon({ className }: { className?: string }) {
   return (
@@ -55,8 +60,18 @@ function ChatGPTIcon({ className }: { className?: string }) {
   );
 }
 
-const GITHUB_REPO = "https://github.com/stikkireddy/firefly-analytics-monorepo";
-const GITHUB_BRANCH = "main";
+// VERIFIED 2026-07-28: this pointed at stikkireddy/firefly-analytics-monorepo, which
+// returns 404 from the GitHub API, from github.com, and from raw.githubusercontent.com.
+// databrickslabs/firefly is not a fork of it (fork=false, no parent), so it was not a
+// rename either -- the reference was simply dead. This component renders in top-nav,
+// sso-spn-top-nav and the sso-spn-admin sidebar, so every page with that nav was offering
+// users a "view source" link that 404s. Repointed at the repository this code actually
+// lives in, with both blob and raw URLs confirmed 200 on main and genie-agent.
+const SOURCE_REPO: RepoRef = {
+  owner: "databrickslabs",
+  repo: "firefly",
+  branch: "main",
+};
 
 function pathnameToSourcePath(pathname: string): string {
   const segments = pathname.split("/").filter(Boolean);
@@ -86,21 +101,13 @@ function pathnameToSourcePath(pathname: string): string {
   return `src/app/${appPath ? appPath + "/" : ""}page.tsx`;
 }
 
-function encodeSourcePath(sourcePath: string): string {
-  return sourcePath
-    .split("/")
-    .map((seg) => encodeURIComponent(seg))
-    .join("/");
-}
-
 export function GitHubSourceLink() {
   const pathname = usePathname();
   const sourcePath = pathnameToSourcePath(pathname);
-  const encodedPath = encodeSourcePath(sourcePath);
 
-  const githubUrl = `${GITHUB_REPO}/blob/${GITHUB_BRANCH}/${encodedPath}`;
-  const rawUrl = `https://raw.githubusercontent.com/stikkireddy/firefly-analytics-monorepo/refs/heads/${GITHUB_BRANCH}/${encodedPath}`;
-  const chatPrompt = `Read and analyze this file from the firefly-analytics-monorepo: ${githubUrl}`;
+  const githubUrl = buildBlobUrl(SOURCE_REPO, sourcePath);
+  const rawUrl = buildRawUrl(SOURCE_REPO, sourcePath);
+  const chatPrompt = `Read and analyze this file from databrickslabs/firefly: ${githubUrl}`;
   const cursorUrl = `https://cursor.com/link/prompt?text=${encodeURIComponent(chatPrompt)}`;
   const claudeUrl = `https://claude.ai/new?q=${encodeURIComponent(chatPrompt)}`;
   const chatgptUrl = `https://chatgpt.com/?prompt=${encodeURIComponent(chatPrompt)}`;

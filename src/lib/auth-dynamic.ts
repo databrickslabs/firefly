@@ -56,13 +56,22 @@ export async function createAuthInstance() {
     createWorkspaceProviderConfig(org.id)
   );
 
-  const oktaConfig = okta({
-    clientId: process.env.SPN_AUTH_OKTA_CLIENT_ID!,
-    clientSecret: process.env.SPN_AUTH_OKTA_CLIENT_SECRET!,
-    issuer: process.env.SPN_AUTH_OKTA_ISSUER!,
-  })
-
-  oktaConfig.providerId = "databricks-spn-mapping"
+  // Only include the Okta plugin when all three vars are present.
+  // Constructing it with undefined values crashes Next.js prerendering (GAP-19).
+  const oktaConfig =
+    process.env.SPN_AUTH_OKTA_CLIENT_ID &&
+    process.env.SPN_AUTH_OKTA_CLIENT_SECRET &&
+    process.env.SPN_AUTH_OKTA_ISSUER
+      ? (() => {
+          const cfg = okta({
+            clientId: process.env.SPN_AUTH_OKTA_CLIENT_ID!,
+            clientSecret: process.env.SPN_AUTH_OKTA_CLIENT_SECRET!,
+            issuer: process.env.SPN_AUTH_OKTA_ISSUER!,
+          });
+          cfg.providerId = "databricks-spn-mapping";
+          return cfg;
+        })()
+      : null;
 
   return betterAuth({
     database: drizzleAdapter(db, {
@@ -146,7 +155,7 @@ export async function createAuthInstance() {
               };
             },
           },
-          oktaConfig,
+          ...(oktaConfig ? [oktaConfig] : []),
           // Dynamically generated workspace providers
           ...workspaceProviders,
         ],

@@ -62,3 +62,14 @@ go/databricks-proxy
 go/proxy
 # Local skills and personal tooling
 .local/
+
+# Assembled agent (ephemeral, from vendor submodule + agent/ overlay)
+agent-build/
+
+# Python build artifacts
+__pycache__/
+*.pyc
+.env*
+
+# Bootstrap runner local state (secrets, resume markers)
+.firefly-bootstrap/

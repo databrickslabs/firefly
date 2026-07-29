@@ -10,6 +10,11 @@ import {
   PageTitle,
 } from "@/components/docs/section";
 import Link from "next/link";
+import {
+  GO_PROXY_SOLUTIONS,
+  NATIVE_SOLUTIONS,
+  VERCEL_PROXY_SOLUTIONS,
+} from "@/lib/solution-docs";
 
 async function loadMermaidFile(filename: string): Promise<string> {
   const filePath = path.join(
@@ -32,7 +37,9 @@ export default async function EmbeddingAppsPage() {
       <SectionContainer>
         <header className="mb-12 border-b pb-8">
           <div className="text-sm text-muted-foreground mb-2">
-            Solutions
+            <Link href="/docs/solutions" className="hover:text-foreground">
+              Solutions
+            </Link>
           </div>
           <PageTitle>Embedding Databricks Apps w/o SSO</PageTitle>
           <p className="text-xl text-muted-foreground">
@@ -78,30 +85,86 @@ export default async function EmbeddingAppsPage() {
           <Section id="embedded-apps" title="Embedded Applications">
             <ContentBlock>
               <p className="mb-4">
-                This proxy architecture powers several embedded applications:
+                FireFly uses three embedding patterns. This page documents the{" "}
+                <strong>Go proxy iframe</strong> path; see the{" "}
+                <Link href="/docs/solutions" className="text-blue-600 hover:underline">
+                  solutions index
+                </Link>{" "}
+                for the full catalog.
+              </p>
+            </ContentBlock>
+
+            <ContentBlock>
+              <h4 className="font-semibold mb-3">Go proxy iframe apps</h4>
+              <p className="text-sm text-muted-foreground mb-4">
+                Notebook and Code Editor embed Databricks Lakehouse Apps through the
+                Go reverse proxy and <code className="text-sm">ProxyIframe</code>{" "}
+                session-cookie flow described on this page.
+              </p>
+            </ContentBlock>
+
+            <div className="grid md:grid-cols-2 gap-4 mb-8">
+              {GO_PROXY_SOLUTIONS.map((solution) => (
+                <Link
+                  key={solution.slug}
+                  href={solution.href}
+                  className="block border rounded-lg p-4 hover:bg-accent transition-colors"
+                >
+                  <h4 className="font-semibold mb-1">{solution.title}</h4>
+                  <p className="text-sm text-muted-foreground">
+                    {solution.description}
+                  </p>
+                </Link>
+              ))}
+            </div>
+
+            <ContentBlock>
+              <h4 className="font-semibold mb-3">Vercel-native proxy iframe</h4>
+              <p className="text-sm text-muted-foreground mb-4">
+                The Agent Panel uses a same-origin Next.js route at{" "}
+                <code className="text-sm">/api/agent-proxy</code> instead of the Go
+                proxy. It mints the user&apos;s mapped SPN token and forwards HTTP + SSE
+                to the deployed agent App.
+              </p>
+            </ContentBlock>
+
+            <div className="grid md:grid-cols-2 gap-4 mb-8">
+              {VERCEL_PROXY_SOLUTIONS.map((solution) => (
+                <Link
+                  key={solution.slug}
+                  href={solution.href}
+                  className="block border rounded-lg p-4 hover:bg-accent transition-colors"
+                >
+                  <h4 className="font-semibold mb-1">{solution.title}</h4>
+                  <p className="text-sm text-muted-foreground">
+                    {solution.description}
+                  </p>
+                </Link>
+              ))}
+            </div>
+
+            <ContentBlock>
+              <h4 className="font-semibold mb-3">Native React components</h4>
+              <p className="text-sm text-muted-foreground mb-4">
+                SQL Editor, Data Catalog, and Pipeline Editor are native components
+                that call Databricks APIs through Next.js API routes — no iframe
+                embedding required.
               </p>
             </ContentBlock>
 
             <div className="grid md:grid-cols-2 gap-4">
-              <Link
-                href="/docs/solutions/notebook-editor"
-                className="block border rounded-lg p-4 hover:bg-accent transition-colors"
-              >
-                <h4 className="font-semibold mb-1">Notebook Editor</h4>
-                <p className="text-sm text-muted-foreground">
-                  Interactive Python notebooks powered by Marimo
-                </p>
-              </Link>
-
-              <Link
-                href="/docs/solutions/code-editor"
-                className="block border rounded-lg p-4 hover:bg-accent transition-colors"
-              >
-                <h4 className="font-semibold mb-1">Code Editor</h4>
-                <p className="text-sm text-muted-foreground">
-                  VS Code-style development environment
-                </p>
-              </Link>
+              {NATIVE_SOLUTIONS.map((solution) => (
+                <Link
+                  key={solution.slug}
+                  href={solution.href}
+                  className="block border rounded-lg p-4 hover:bg-accent transition-colors"
+                >
+                  <h4 className="font-semibold mb-1">{solution.title}</h4>
+                  <p className="text-sm text-muted-foreground">
+                    {solution.description}
+                  </p>
+                </Link>
+              ))}
             </div>
           </Section>
 
@@ -895,6 +958,46 @@ CMD ["/proxy"]`}
               <h4 className="font-semibold mb-1">Code Editor</h4>
               <p className="text-sm text-muted-foreground">
                 VS Code-style editor using this proxy
+              </p>
+            </Link>
+
+            <Link
+              href="/docs/solutions/agent"
+              className="block border rounded-lg p-4 hover:bg-accent transition-colors"
+            >
+              <h4 className="font-semibold mb-1">Agent Panel</h4>
+              <p className="text-sm text-muted-foreground">
+                Genie + managed-memory chat via the Vercel-native proxy
+              </p>
+            </Link>
+
+            <Link
+              href="/docs/solutions/sql-editor"
+              className="block border rounded-lg p-4 hover:bg-accent transition-colors"
+            >
+              <h4 className="font-semibold mb-1">SQL Editor</h4>
+              <p className="text-sm text-muted-foreground">
+                Native SQL query interface with warehouse integration
+              </p>
+            </Link>
+
+            <Link
+              href="/docs/solutions/data-catalog"
+              className="block border rounded-lg p-4 hover:bg-accent transition-colors"
+            >
+              <h4 className="font-semibold mb-1">Data Catalog</h4>
+              <p className="text-sm text-muted-foreground">
+                Unity Catalog browser with BYOD support
+              </p>
+            </Link>
+
+            <Link
+              href="/docs/solutions/pipeline-editor"
+              className="block border rounded-lg p-4 hover:bg-accent transition-colors"
+            >
+              <h4 className="font-semibold mb-1">Pipeline Editor</h4>
+              <p className="text-sm text-muted-foreground">
+                Visual pipeline design with DLT integration
               </p>
             </Link>
 

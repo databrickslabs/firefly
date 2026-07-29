@@ -1,7 +1,31 @@
 # FireFly Analytics - Databricks Custom Frontend
 
+[![Open in Cursor](https://img.shields.io/badge/Open%20in-Cursor-black?logo=cursor)](https://cursor.com/link/prompt?text=Clone%20https%3A%2F%2Fgithub.com%2Fdatabrickslabs%2Ffirefly%20into%20this%20workspace%20and%20work%20through%20BOOTSTRAP.md%20top%20to%20bottom%2C%20running%20the%20Phase%200a%20corporate-network%20setup%20commands%20before%20any%20Phase%201%20command.%0A%0A%5BASK%20-%20REQUIRED%2C%20BLOCKING%5D%20FIREFLY_BRANCH%20-%20which%20branch%20to%20clone.%20Default%3A%20main.%20Before%20going%20further%2C%20confirm%20the%20branch%20you%20cloned%20actually%20contains%20BOOTSTRAP.md%3B%20if%20it%20does%20not%2C%20say%20so%20and%20ask%20again%20rather%20than%20continuing%2C%20because%20the%20runbook%20is%20not%20on%20every%20branch%20and%20a%20missing%20BOOTSTRAP.md%20three%20phases%20later%20reads%20as%20a%20broken%20repo.) [![Start here: BOOTSTRAP.md](https://img.shields.io/badge/Start%20here-BOOTSTRAP.md-black?logo=markdown)](./BOOTSTRAP.md)
 
 A Next.js application that provides a customized frontend for Databricks with multiple authentication strategies and embedded Databricks apps.
+
+## Quick Start (AI-assisted)
+
+For a fully automated, interactive-auth bootstrap — no manual token wrangling — use:
+
+| File | Purpose |
+|---|---|
+| [`BOOTSTRAP.md`](./BOOTSTRAP.md) | Harness-agnostic runbook; an AI agent works through it top-to-bottom, prompting for each value |
+| [`scripts/bootstrap.sh`](./scripts/bootstrap.sh) | Executable version of the same runbook with `--dry-run` and `--stop-after <phase>` flags |
+
+```bash
+# Dry run — see every command without executing anything
+bash scripts/bootstrap.sh --dry-run
+
+# Full interactive run (opens browser for each auth step)
+bash scripts/bootstrap.sh
+```
+
+The runbook covers Phases 0–9 end-to-end (with sub-phases 3f, 6b and 6c): Databricks
+provisioning, sample-data seeding and Genie space creation, Neon DB, Vercel deploy, guest
+service principal, and end-to-end verification. Manual setup instructions follow below.
+
+---
 
 ## Table of Contents
 
@@ -10,6 +34,7 @@ A Next.js application that provides a customized frontend for Databricks with mu
 - [Database Setup](#database-setup)
 - [Databricks OAuth Configuration](#databricks-oauth-configuration)
 - [Go Proxy Setup (VSCode Editor)](#go-proxy-setup-vscode-editor)
+- [Agent Panel (Managed-Memory Agent)](#agent-panel-managed-memory-agent)
 - [Local Development](#local-development)
 - [Deployment to Vercel](#deployment-to-vercel)
 - [Architecture](#architecture)
@@ -21,6 +46,25 @@ A Next.js application that provides a customized frontend for Databricks with mu
 - Databricks account with admin access
 - Go 1.21+ (for the proxy server)
 - Vercel account (for deployment)
+
+> **Installing pnpm — use npm, not corepack (ENV-0).** Node ships pnpm via `corepack`, but
+> `corepack enable` / `corepack prepare` fetch the pnpm release from `registry.npmjs.org`
+> and ignore your configured npm registry, so they fail on corporate networks that block or
+> blackhole public npm (`ECONNREFUSED` / `ETIMEDOUT` / `503`, and the `pnpm` shim never
+> works). Install from your approved registry instead, pinning the version:
+>
+> ```bash
+> corepack disable >/dev/null 2>&1 || true   # an enabled shim shadows the install below
+> npm install -g pnpm@10.34.5                # uses your configured (approved) npm registry
+> pnpm --version                             # must print 10.34.5
+> ```
+>
+> The pin matters: pnpm's `latest` dist-tag has shipped a 12.x alpha that ignores
+> `onlyBuiltDependencies` and fails with `ERR_PNPM_IGNORED_BUILDS`. This is the same step as
+> [`BOOTSTRAP.md`](./BOOTSTRAP.md) Phase 1a, and it is enforced by
+> `scripts/check-runbook-invariants.sh`. On macOS, `brew install pnpm` is another
+> approved-CDN option. Do **not** work around a block with
+> `--registry https://registry.npmjs.org` or by disabling TLS.
 
 ## Environment Setup
 
@@ -204,6 +248,311 @@ For production, deploy the Go proxy to:
 
 Update `NEXT_PUBLIC_PROXY_URL` in your environment to point to the deployed proxy.
 
+## Agent Panel (Managed-Memory Agent)
+
+The optional **Agent panel** is a slide-out chat assistant (Genie + long-term
+memory) available in the SSO-SPN organization view. It embeds a Databricks App
+built from the [`databricks/app-templates`](https://github.com/databricks/app-templates)
+`agent-openai-agents-sdk` template, vendored here as a git submodule under
+`vendor/app-templates`.
+
+### How the agent uses Genie
+
+The agent answers data questions over **Genie MCP**, authenticating with the agent App's
+service principal. The `ask_genie` tool (`agent/agent_server/genie_tools.py`) calls
+`genie_ask` and polls `genie_poll_response` until completion.
+
+**The endpoint is resolved in exactly one place** — `genie_mcp_path()` in
+`agent/agent_server/genie_mcp.py` — and both `agent.py` and `genie_tools.py` call it. They used
+to disagree: `genie_tools.py` held its own `GENIE_MCP_PATH` constant and POSTed to workspace-wide
+Genie while `agent.py` correctly connected the space-scoped server, so a deployment configured
+for a curated space answered from the wrong backend while every probe reported `mode=space`. Do
+not reintroduce a second path.
+
+The agent is scoped to a **Genie space** named by `GENIE_SPACE_ID`, reached at
+`/api/2.0/mcp/genie/<space_id>`. Answers come from that space's curated tables, joins, and
+instructions. `BOOTSTRAP.md` **Phase 3f** creates the space (or adopts space ids you supplied at
+Phase 0) *before* Phase 4 deploys, so the app is born in its final mode; **Phase 6c** then grants
+the agent and guest service principals on it.
+
+A Genie space is also the only object a guest service principal can be granted `CAN_RUN` on, and
+guests have no workspace access — so the space is what makes the guest flow work at all.
+
+Genie is configured at the **agent App layer** in `agent/databricks.yml` (not the frontend
+`.env.local`):
+
+| Env var | Purpose |
+| --- | --- |
+| `GENIE_MCP_MODE` | `space` — the default, and the supported configuration. Bundle variable `genie_mcp_mode` |
+| `GENIE_SPACE_ID` | Required. Bundle variable `genie_space_id`, default **`none`** — a placeholder, not an id. It cannot default to empty: the bundle would render `{"name": "GENIE_SPACE_ID"}` with no `value` and the Apps API rejects the deploy ("Must specify environment variable source using either value or valueFrom"). `genie_mcp_path()` raises `ValueError` on an unset id rather than silently falling back to a different backend |
+| `DATABRICKS_HOST`, `DATABRICKS_WORKSPACE_ID` | **Auto-injected** by the Databricks Apps runtime — never set in the bundle. Used to identify the workspace; **no attribution link is built from them** (see below) |
+
+The panel shows plain-text "Powered by Genie" attribution with **no link**. There was one, and it
+was wrong in two ways at once: the audience for this panel is guest users who have no Databricks
+workspace access, so the link led somewhere they could not open; and it named a backend that
+never saw the question. `GENIE_ONE_URL` no longer exists.
+
+Pointing an existing deployment at a different space means passing the id:
+
+```bash
+databricks bundle deploy -t dev --profile "$DB_PROFILE" \
+  --var catalog="$UC_CATALOG" --var schema="$UC_SCHEMA" \
+  --var genie_space_id=<space-id>
+```
+
+The `GENIE_INSTRUCTIONS` prompt (composed onto the agent's memory instructions in
+`agent/agent_server/agent.py`) forces Genie-first behavior for any question about tables,
+catalogs, dashboards, or "my data".
+
+### Grant the agent's service principal access to your data
+
+The agent queries Genie Agent as the **agent App's service principal** (see above), not
+the signed-in user. Genie only returns Unity Catalog data that this service principal can
+access, so on a workspace where the SP has no grants, data questions come back empty even
+though the agent and Genie are otherwise working. Grant the app's service principal access
+to the catalogs/schemas you want it to answer over:
+
+- `USE CATALOG` on the catalog and `USE SCHEMA` on the schema,
+- `SELECT` on the tables (or on the schema), and
+- access to a SQL warehouse Genie can execute against.
+
+> **A fresh workspace has no data and no running warehouse — Genie answers "empty" until both
+> exist.** If you bootstrap with `BOOTSTRAP.md`, Phase 3f handles this: it resolves a SQL
+> warehouse and, when `SEED_SAMPLE_DATA=yes` (the default) and the target schema is **empty**,
+> copies a slice of `samples.wanderbricks` into `$UC_CATALOG.$UC_SCHEMA`. It never overwrites an
+> existing table, so pointing it at a populated schema is safe and does nothing.
+>
+> Setting up by hand instead, or answering `no`: start a (serverless) SQL warehouse and create at
+> least one UC schema with a few tables, then apply the grants above to the app's SP. Without
+> data *and* a warehouse the Agent panel looks broken even though the agent, Genie, and memory
+> are all working.
+
+<!-- PARTLY VERIFIED: end-to-end runs confirm that USE CATALOG + USE SCHEMA + SELECT on the
+tables, plus CAN_USE on a SQL warehouse, are SUFFICIENT for the agent SP, and that a guest SP
+additionally needs CAN_RUN on the Genie space. What remains unverified is the MINIMAL set — no
+one has removed privileges one at a time to find the floor. Treat the list above as known-good,
+not as minimal. -->
+
+### How it differs from the Go proxy
+
+Unlike the VSCode/notebook editors (which use the Go proxy), the agent is embedded
+through a **Vercel-native reverse proxy** — a Next.js route at
+`src/app/api/agent-proxy/[[...path]]/route.ts`. That route:
+
+- resolves the current user's (or guest's) mapped **service principal** and mints
+  a Databricks bearer token via M2M OAuth (`src/lib/databricks-spn-authtoken.ts`),
+  so guests never hit the Databricks OAuth wall;
+- forwards HTTP + SSE (streaming chat) to `DATABRICKS_AGENT_APP_URL`, injecting the
+  bearer and relaxing frame headers for same-origin embedding;
+- rewrites the app's HTML (`<base href>` + forced light theme) so relative assets
+  resolve under `/api/agent-proxy` and the chat UI matches Firefly's light UI.
+
+**No Go proxy or Cloud Run is required for the agent.** The Go proxy is only for the
+code/notebook editors.
+
+### Enable it
+
+1. Set the environment variables (see `.env.example`):
+   ```env
+   NEXT_PUBLIC_AGENT_ENABLED=true
+   DATABRICKS_AGENT_APP_URL=https://your-agent-app.databricksapps.com
+   ```
+2. Ensure SPN auth is configured (`SPN_AUTH_*` and `FIREFLY_SPN_*`), since the proxy
+   reuses the same SSO→SPN mapping used elsewhere.
+3. Make sure the runtime prerequisites are met for the signed-in (or guest) user,
+   or `/api/agent-proxy` returns `400`/`401`:
+   - the user's **active organization** has a `workspaceUrl` set, and
+   - there is an **SPN mapping** (`userSpns` row) for that user's email in that org
+     (the proxy mints the workspace bearer from this mapping).
+
+### Provision the agent's Databricks resources (prerequisite)
+
+`agent/databricks.yml` binds the app to three workspace-specific resources that
+**must exist before `databricks bundle deploy`**:
+
+- an **MLflow experiment** (agent tracing),
+- a **Lakebase (Databricks Postgres)** autoscaling instance — backs the frontend's
+  chat persistence (`ai_chatbot` schema) and the OpenAI Agents SDK session store.
+  This is **not** the durable-memory store (see below); the two are often confused.
+- a **UC volume** — default `workspace.default.firefly_wheels` (the bundle grants the
+  app `READ_VOLUME` on it). The catalog/schema/name are bundle variables
+  (`catalog`/`schema`/`wheels_volume_name`), so on a workspace whose catalog is
+  `main` you pass `--var catalog=main` instead of editing the YAML.
+
+A fourth resource — the **UC memory store** for durable cross-session memory — is
+created *after* the app exists (it needs the app SP for its grant), so it is not in
+this pre-deploy list; see "Deploy → run → enable memory" below. It is a distinct UC
+securable (`DATABRICKS_MEMORY_STORE`, default `workspace.default.firefly_managed_memory`),
+**not** the Lakebase instance above.
+
+For a fresh workspace, create them as follows.
+
+**1. Experiment + Lakebase (one command).** First fetch the submodule and assemble
+`agent-build/` (both are prerequisites of this step, even though the full build is
+documented later):
+
+```bash
+git submodule update --init          # empty on a fresh clone; assemble fails without it
+bash scripts/assemble_agent.sh
+cd agent-build
+
+# Creates the MLflow experiment AND a new autoscaling Lakebase project+branch in
+# one pass, and writes their IDs into agent-build/databricks.yml + .env.
+# --python 3.12 is REQUIRED: the dep tree (whenever/PyO3) caps at 3.13, so a bare
+# `uv run` that picks 3.14 fails to build. <lakebase-name> must be new/unique
+# (no reuse — an existing name errors). Use lowercase alphanumerics + hyphens.
+uv run --python 3.12 quickstart --profile <your-cli-profile> --lakebase-create-new <lakebase-name>
+```
+
+> **Do not re-run `assemble_agent.sh` after `quickstart` in a single deploy pass.**
+> Assemble does `rm -rf agent-build`, which wipes the `.env` (Lakebase creds) and
+> the resource IDs quickstart just wrote — and the SP-grant step below reads that
+> `.env`. Order that avoids the trap: assemble once → quickstart → (mirror IDs to the
+> overlay) → vendor → deploy. If you must re-assemble, first copy the quickstart IDs
+> into the tracked overlay `agent/databricks.yml` (next note).
+
+**2. Wheels volume.** Create the UC volume the bundle grants read on (matches the
+`catalog`/`schema`/`wheels_volume_name` bundle-variable defaults):
+
+```bash
+databricks volumes create workspace default firefly_wheels MANAGED -p <your-cli-profile>
+```
+
+> **The volume must _exist_ for the resource binding; the build reads wheels from
+> synced source, not the volume.** UC volumes are **not mounted during the Apps
+> build**, so dependencies install from the pre-vendored `vendor-wheels/` directory
+> (synced with the source) via `UV_FIND_LINKS` — see "Vendor the build wheels"
+> below. An empty volume satisfies the `READ_VOLUME` grant.
+
+> **Copy only the quickstart-managed IDs into the tracked overlay.** `quickstart`
+> writes the new `experiment_id` and `postgres` (`branch`/`database`) into
+> **`agent-build/databricks.yml`**, which is gitignored and rebuilt from scratch by
+> `scripts/assemble_agent.sh`. Copy those two resource blocks into the tracked overlay
+> **`agent/databricks.yml`**, or they are lost on the next assemble. You do **not**
+> edit `DATABRICKS_HOST` or `DATABRICKS_WORKSPACE_ID` any more — they are
+> auto-injected at runtime (see "Derive — don't store"), and `GENIE_ONE_URL` no
+> longer exists. And you do
+> **not** edit the memory-store / wheels-volume namespace unless overriding the
+> `workspace.default` default via `--var`.
+
+### Build & deploy the agent app
+
+The deployable app is assembled from the pristine submodule plus the local overlay
+in `agent/` (agent code, chat-UI patches, bundle config):
+
+```bash
+# Fetch the submodule (first time only) — pulls vendor/app-templates
+git submodule update --init
+
+# Merge vendor submodule + agent/ overlay into ./agent-build (gitignored).
+# The script also runs a local-only `git init` on agent-build so the bundle
+# picks it up (the parent repo gitignores agent-build/, and `databricks bundle`
+# respects the enclosing repo's ignore rules — without its own git boundary the
+# sync would find "no files to sync" and deploy an empty app).
+bash scripts/assemble_agent.sh
+
+cd agent-build
+
+# Vendor the build wheels (once, before deploy). Pre-fetches linux/cp311 wheels
+# into vendor-wheels/ so the Apps build installs offline via UV_FIND_LINKS and
+# never depends on the build container's PyPI egress (an unsanctioned .dev proxy, a lagging
+# .cloud mirror, and no offline fallback are what made online installs flaky and
+# blow past the 10-min startup limit). Requires local `uv` + `pip`.
+bash scripts/vendor_wheels.sh
+
+# Validate first. A healthy bundle reports 0 "no files to sync" warnings; if you
+# see that warning, agent-build is missing its git boundary (re-run the script).
+databricks bundle validate -p <your-cli-profile>
+
+# Deploy: one command does deploy -> run -> enable-memory (see below).
+# On a non-default catalog, pass it through: ... <profile> --var catalog=main
+bash scripts/deploy_agent.sh <your-cli-profile>
+```
+
+> **On a non-default namespace** (e.g. a workspace whose catalog is `main`), append
+> `--var catalog=main` (and/or `--var schema=...`) to `deploy_agent.sh` (it forwards
+> them to every `bundle` command) so the wheels-volume binding and
+> `DATABRICKS_MEMORY_STORE` line up. You can also set `BUNDLE_VAR_catalog=main`.
+
+Then point `DATABRICKS_AGENT_APP_URL` at the deployed app URL.
+
+#### Deploy → run → enable memory
+
+`scripts/deploy_agent.sh` runs three steps; here is what it does by hand, and why:
+
+```bash
+# From agent-build/:
+databricks bundle deploy -p <your-cli-profile>          # create app + SP, upload source
+databricks bundle run agent_openai_agents_sdk -p <your-cli-profile>   # build + start
+
+# Resolve the SP (exists after create) and enable durable memory:
+SP=$(databricks apps get <your-app-name> -p <your-cli-profile> \
+       --output json | jq -r '.service_principal_client_id')
+uv run --python 3.12 python scripts/setup_memory_store.py "$SP" --profile <your-cli-profile>
+```
+
+**No manual Lakebase grant is required for the app to come up.** The frontend *does*
+run Drizzle DB migrations during its first build, but the bundle binds the
+Postgres/Lakebase resource with `CAN_CONNECT_AND_CREATE` (`agent/databricks.yml`),
+applied at `bundle deploy`. That binding auto-provisions the app SP's Postgres login
+role, so the migrations connect as the SP, `CREATE` their own schema/tables (the SP
+becomes **owner** → full DML), and succeed. A no-grant deploy comes up `RUNNING` with
+`ai_chatbot.{Chat,Message,Vote}` present and owned by the SP — verified end-to-end.
+(`scripts/grant_lakebase_permissions.py` exists for a *different* topology — a
+Lakebase-backed session/checkpoint store — and is **not** needed here; this app's
+managed memory is a UC memory store, below.)
+
+**Durable memory is a Unity Catalog memory store — you MUST create it and grant the
+SP.** The `save_memory`/`get_memory` tools call the UC memory-store API
+(`/api/2.1/unity-catalog/memory-stores/<catalog.schema.name>/entries`), not Lakebase.
+That store is **not** created by quickstart or the bundle, and the app SP has no
+rights on it by default, so a fresh deploy answers but silently fails to persist
+("memory store not found", then "does not have READ/WRITE MEMORY STORE"). The last
+line above fixes both — it creates `DATABRICKS_MEMORY_STORE` (default
+`workspace.default.firefly_managed_memory`) and grants the SP
+`READ_MEMORY_STORE`+`WRITE_MEMORY_STORE`. It is idempotent. There is no `databricks`
+CLI for memory stores (CLI v0.298.0); the script uses the REST API via the SDK.
+
+**Operational notes**
+
+- **First request returns HTTP 503.** After `bundle run`, the container runs
+  `uv sync`, `npm install`, and the Vite build for the chat UI before it serves
+  traffic (can take a few minutes) — the 503 is normal, not a failure. Note the
+  app is behind Databricks app auth, so an unauthenticated request 302-redirects
+  to OIDC rather than returning `200`.
+- **Deploy state ≠ health; read the *live* app state.** The platform marks the
+  deployment `SUCCEEDED` the moment the container command *starts* — before the
+  build finishes or the port binds (observed: `SUCCEEDED` ~45s before the backend
+  bound `:8000`). So `active_deployment.status.state` is always green and is not a
+  health signal. Judge health from the **live `app_status.state`** (`RUNNING`) or
+  the **runtime logs** — wait for `Both frontend and backend are ready!`.
+  `start_app.py` builds the frontend *before* the backend binds the port, so a
+  frontend/migration failure takes the whole container down (honest `app_status`)
+  rather than leaving the backend serving behind a broken UI.
+- **Two different Python versions are in play.** `uv run quickstart` runs locally
+  and needs **3.12** (its dependency tree uses PyO3 capped at 3.13, so `uv` picking
+  3.14 fails — pass `--python 3.12`). The **Apps runtime is 3.11 (cp311)**, not 3.12
+  as older docs claimed, so `scripts/vendor_wheels.sh` pins `PY=3.11` and downloads
+  cp311 wheels. If you regenerate `uv.lock`, make sure the configured PyPI proxy is
+  `pypi-proxy.cloud.databricks.com` (the `.dev` host is unsanctioned and stamping it into
+  the lock is what caused the original install timeouts). `bootstrap.sh` Phase 4
+  fails if `agent-build/uv.lock` or `databricks-apps/guest-manager/uv.lock` still
+  contain `.dev`. From the workspace root you can also run
+  `bash scripts/check-no-dev-pypi-proxy.sh`. Bootstrap also refuses to bridge
+  pip → uv when the index is `pypi-proxy.dev.databricks.com`.
+- **Verify the overlay applied** before deploying (quick sanity check):
+  `agent-build/agent_server/agent.py` contains `GENIE_INSTRUCTIONS`,
+  `e2e-chatbot-app-next/client/vite.config.ts` has `base: "./"`, and
+  `client/src/main.tsx` contains `__FIREFLY_PROXY_BASENAME__`.
+- **Genie/memory config lives in the bundle**, not the frontend — see
+  `agent/databricks.yml` (`GENIE_MCP_MODE`, and `DATABRICKS_MEMORY_STORE` built
+  from the `catalog`/`schema` bundle variables). `DATABRICKS_HOST` and
+  `DATABRICKS_WORKSPACE_ID` are intentionally absent (auto-injected at runtime);
+  `GENIE_ONE_URL` was removed along with the attribution link.
+
+Re-run `bash scripts/assemble_agent.sh` after any change under `agent/` (overlay)
+or a submodule bump; it rebuilds `agent-build/` from scratch each time.
+
 ## Local Development
 
 ### 1. Start the Development Server
@@ -250,7 +599,7 @@ pnpm format
 ### 1. Install Vercel CLI (Optional)
 
 ```bash
-pnpm install -g vercel
+npm install -g vercel@56.3.1   # pinned; matches BOOTSTRAP.md Phase 1d
 ```
 
 ### 2. Connect to Vercel
@@ -276,22 +625,40 @@ Navigate to your project in the Vercel dashboard:
    DATABASE_URL
    BETTER_AUTH_SECRET
    BETTER_AUTH_URL (use your production URL)
-   NEXT_PUBLIC_BETTER_AUTH_URL (use your production URL)
+   # NEXT_PUBLIC_BETTER_AUTH_URL — omit for preview/dynamic URLs; see .env.example
    ENCRYPTION_KEY
    NEXT_PUBLIC_PROXY_URL
    DATABRICKS_APP_URL
+   # Agent panel (optional; see "Agent Panel" below)
+   NEXT_PUBLIC_AGENT_ENABLED
+   DATABRICKS_AGENT_APP_URL
+   # The Agent panel also needs the SSO->SPN mapping vars below (the proxy mints
+   # the signed-in/guest user's mapped SPN token — see "Enable it"). Omit these
+   # and /api/agent-proxy returns 400/401 at runtime:
+   SPN_AUTH_DATABRICKS_ACCOUNT_ID
+   SPN_AUTH_DATABRICKS_ACCOUNTS_URL
+   SPN_AUTH_DATABRICKS_WORKSPACE_URL
+   SPN_AUTH_OKTA_CLIENT_ID
+   SPN_AUTH_OKTA_CLIENT_SECRET
+   SPN_AUTH_OKTA_ISSUER
+   FIREFLY_SPN_GLOBAL_ADMIN_CLIENT_ID
+   FIREFLY_SPN_GLOBAL_ADMIN_CLIENT_SECRET
+   FIREFLY_WORKSPACE_SPN_SECRET_SCOPE_NAME
+   # ...and, to create/manage guest users for the panel:
+   GUEST_API_SECRET
    ```
 
 **Important**: For production deployment, you must use your actual domain name for certain URLs:
 
-- **BETTER_AUTH_URL**: Use your production domain (e.g., `https://www.firefly-analytics.com`)
-- **NEXT_PUBLIC_BETTER_AUTH_URL**: Use your production domain (e.g., `https://www.firefly-analytics.com`)
+- **BETTER_AUTH_URL**: Use your production domain (e.g., `https://www.firefly-analytics.com`). This is server-side only and must match the Databricks OAuth redirect URI.
+- **NEXT_PUBLIC_BETTER_AUTH_URL**: **Do not set this unless you have a stable custom domain attached to every deployment.** This variable is baked in at Next.js build time. If it points to a different origin than the URL serving the page (e.g. a Vercel preview URL), the browser will block auth API calls with a CORS error. Leave it unset — the auth client automatically uses `window.location.origin`, which is always correct.
 - **NEXT_PUBLIC_PROXY_URL**: Use your deployed Go proxy URL (e.g., `https://proxy.firefly-analytics.com`)
 
-For our production deployment at FireFly Analytics:
+For production with a custom domain:
 ```env
 BETTER_AUTH_URL=https://www.firefly-analytics.com
-NEXT_PUBLIC_BETTER_AUTH_URL=https://www.firefly-analytics.com
+# NEXT_PUBLIC_BETTER_AUTH_URL — only set if using a custom domain on all deployments
+# NEXT_PUBLIC_BETTER_AUTH_URL=https://www.firefly-analytics.com
 NEXT_PUBLIC_PROXY_URL=https://app-proxy.firefly-analytics.com
 ```
 
@@ -316,7 +683,26 @@ Replace with your actual production domain. For our deployment, we use:
 https://www.firefly-analytics.com/api/oauth/databricks/callback
 ```
 
-### 5. Deploy
+### 5. Disable Vercel Preview Deployment Protection (if using preview URLs)
+
+Vercel projects have **SSO protection enabled by default** for preview deployments. This blocks unauthenticated requests — including the guest provisioning API (`/api/guest/*`) and any programmatic calls — with a `401 Protected deployment` response.
+
+To disable it for a project:
+
+```bash
+# Via Vercel CLI (Vercel CLI 54+)
+vercel project protection disable <project-name> --sso
+
+# Or via Vercel API
+curl -X PATCH "https://api.vercel.com/v9/projects/<project-id>" \
+  -H "Authorization: Bearer $VERCEL_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"ssoProtection": null}'
+```
+
+This only affects preview deployments. Production deployments with a custom domain are not protected by default.
+
+### 6. Deploy
 
 #### Option A: Deploy via Git
 
@@ -334,7 +720,7 @@ vercel --prod
 vercel
 ```
 
-### 6. Verify Deployment
+### 7. Verify Deployment
 
 After deployment:
 - Check that all environment variables are set correctly
@@ -342,7 +728,7 @@ After deployment:
 - Verify database connectivity
 - Ensure the Go proxy is accessible
 
-### 7. Deploy Go Proxy Separately
+### 8. Deploy Go Proxy Separately
 
 The Go proxy should be deployed separately (not on Vercel):
 
@@ -353,6 +739,55 @@ The Go proxy should be deployed separately (not on Vercel):
 
 Update `NEXT_PUBLIC_PROXY_URL` in Vercel environment variables to point to your deployed proxy.
 
+## Guest User Provisioning
+
+The guest login path lets external users access a specific Databricks workspace via a pre-provisioned service principal, without going through the Databricks OAuth wall. Provisioning is a three-step API sequence secured by `GUEST_API_SECRET` (`X-API-Key` header).
+
+### Prerequisites
+
+- `GUEST_API_SECRET` set in Vercel env (64-char hex, `openssl rand -hex 64`)
+- A Databricks M2M service principal with client-id + client-secret that has access to the target workspace
+- Vercel preview protection disabled if testing against a preview URL (see step 5 above)
+
+### Step 1 — Register the guest workspace
+
+```bash
+curl -X POST https://<your-app>/api/guest/workspaces \
+  -H "X-API-Key: $GUEST_API_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Acme Corp Workspace", "workspaceUrl": "https://dbc-xxxx.cloud.databricks.com"}'
+# Response: { "workspace": { "id": "<workspaceId>", "name": "...", "workspaceUrl": "..." } }
+```
+
+### Step 2 — Register the guest service principal
+
+```bash
+curl -X POST https://<your-app>/api/guest/spns \
+  -H "X-API-Key: $GUEST_API_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Acme Guest SPN",
+    "clientId": "<m2m-client-id>",
+    "clientSecret": "<m2m-client-secret>",
+    "guestWorkspaceId": "<workspaceId from step 1>"
+  }'
+# Response: { "spn": { "id": "<spnId>", "name": "...", "clientId": "...", "guestWorkspaceId": "..." } }
+```
+
+### Step 3 — Create the guest user and get a login URL
+
+```bash
+curl -X POST https://<your-app>/api/guest/users \
+  -H "X-API-Key: $GUEST_API_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"orgName": "Acme Corp", "spnId": "<spnId from step 2>"}'
+# Response: { "guestUser": { "id": "...", "email": "...", "loginUrl": "https://<BETTER_AUTH_URL>/guest-login?token=<ott>", "expiresAt": "...", ... } }
+```
+
+Send the `loginUrl` to your end-user. It contains a one-time token valid for 10 minutes. The user clicks it, the token is verified, and they are redirected to their organization's dashboard — no Databricks SSO required.
+
+> **Note**: The `loginUrl` hostname comes from the server-side `BETTER_AUTH_URL` env var. The auth client verifies the token against `window.location.origin` (or `NEXT_PUBLIC_BETTER_AUTH_URL` if set). These two must match, so `BETTER_AUTH_URL` should be set to the URL where the app is served. Do not set `NEXT_PUBLIC_BETTER_AUTH_URL` to a different origin (see `.env.example`).
+
 ## Architecture
 
 ### Authentication Strategies
@@ -362,15 +797,17 @@ This application supports multiple authentication strategies:
 1. **Login With Databricks**: Per-workspace authentication using Databricks native OAuth
 2. **Custom Federation**: Multi-tenant authentication with custom identity providers
 3. **Login With Okta**: Tenant-based authentication with service principal identity mapping
-4. **Login With Guest User**: Coming Soon
+4. **Login With Guest User**: Provisioned via a private REST API secured with `GUEST_API_SECRET`. See [Guest User Provisioning](#guest-user-provisioning) below.
 
 ### Key Features
 
 - **Organization Support**: Multi-tenant architecture with organization management
 - **Embedded Databricks Apps**: VSCode editor embedded without SSO exposure
+- **Agent Panel**: Slide-out Genie + managed-memory chat assistant, embedded via a Vercel-native SPN proxy (see [Agent Panel](#agent-panel-managed-memory-agent))
 - **Notebooks**: Interactive notebooks with full Databricks functionality
 - **SQL Editor**: Advanced SQL editor with visual query builder
 - **Data Catalog**: Browse Unity Catalog with a modern interface
+- **Pipeline Editor**: Visual node-based pipeline design with Delta Live Tables integration
 
 ### Technology Stack
 
@@ -383,9 +820,22 @@ This application supports multiple authentication strategies:
 
 ## Documentation
 
-For detailed architectural documentation, visit:
-- [Embedding Databricks Apps w/o SSO](http://localhost:3000/docs/architecture/lakehouse-apps-proxy)
-- [Login With Databricks Authentication](http://localhost:3000/docs/architecture/authentication/databricks-identity)
+### Solutions
+
+- [All Solutions](/docs/solutions)
+- [Embedding Databricks Apps w/o SSO](/docs/solutions/embedding-apps)
+- [Notebook Editor](/docs/solutions/notebook-editor)
+- [Code Editor](/docs/solutions/code-editor)
+- [Agent Panel](/docs/solutions/agent)
+- [SQL Editor](/docs/solutions/sql-editor)
+- [Data Catalog](/docs/solutions/data-catalog)
+- [Pipeline Editor](/docs/solutions/pipeline-editor)
+
+### Architecture
+
+- [Embedding Databricks Apps via Proxy (hub)](/docs/architecture/lakehouse-apps-proxy)
+- [Architecture Overview](/docs/architecture/overview)
+- [Login With Databricks Authentication](/docs/architecture/authentication/databricks-identity)
 
 ## Project Support
 

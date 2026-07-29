@@ -1,0 +1,338 @@
+import { promises as fs } from "fs";
+import path from "path";
+import { MermaidDiagram } from "@/components/mermaid-diagram";
+import {
+  Section,
+  SectionContainer,
+  ContentBlock,
+  HighlightBox,
+  CodeBlock,
+  PageTitle,
+} from "@/components/docs/section";
+import Link from "next/link";
+
+async function loadMermaidFile(filename: string): Promise<string> {
+  const filePath = path.join(
+    process.cwd(),
+    "public/solutions/agent",
+    filename
+  );
+  return await fs.readFile(filePath, "utf-8");
+}
+
+export default async function AgentPage() {
+  const architecture = await loadMermaidFile("architecture.mermaid");
+
+  return (
+    <div className="container mx-auto px-4 py-8 max-w-7xl">
+      <SectionContainer>
+        <header className="mb-12 border-b pb-8">
+          <div className="text-sm text-muted-foreground mb-2">
+            <Link href="/docs/solutions" className="hover:text-foreground">
+              Solutions
+            </Link>
+          </div>
+          <PageTitle>Agent Panel</PageTitle>
+          <p className="text-xl text-muted-foreground">
+            A slide-out chat assistant that answers questions over your
+            workspace data with Genie Agent and remembers context across sessions
+            with managed memory &mdash; embedded without exposing Databricks SSO.
+          </p>
+        </header>
+
+        {/* Overview Section */}
+        <Section id="overview" title="Overview">
+          <ContentBlock>
+            <p className="mb-4">
+              The Agent panel embeds a Databricks App built from the{" "}
+              <code className="text-sm">agent-openai-agents-sdk</code> template
+              (vendored as a git submodule under{" "}
+              <code className="text-sm">vendor/app-templates</code>). It pairs the
+              OpenAI Agents SDK with two capabilities: <strong>Genie Agent</strong>{" "}
+              for natural-language questions over Unity Catalog data, and{" "}
+              <strong>managed memory</strong> for durable, per-user context.
+            </p>
+            <p className="mb-4">
+              Unlike the code and notebook editors, the agent is embedded through
+              a <strong>Vercel-native reverse proxy</strong> rather than the Go
+              proxy &mdash; so guests never see a Databricks login. See{" "}
+              <Link href="#backend-configuration" className="text-blue-600 hover:underline">
+                Backend Configuration
+              </Link>{" "}
+              for how the proxy mints tokens and forwards requests.
+            </p>
+          </ContentBlock>
+
+          <HighlightBox variant="info" title="Key Benefits">
+            <ul className="list-disc pl-5 space-y-1">
+              <li>Genie Agent answers over workspace data, with source attribution</li>
+              <li>Managed long-term memory (UC store) across conversations</li>
+              <li>Guest / BYOD users work &mdash; the proxy mints their mapped SPN token</li>
+              <li>Same-origin embedding; users never see a Databricks login</li>
+              <li>No Go proxy or Cloud Run dependency for the agent</li>
+            </ul>
+          </HighlightBox>
+        </Section>
+
+        {/* How It Works Section */}
+        <Section id="how-it-works" title="How It Works">
+          <ContentBlock>
+            <p className="mb-4">
+              When a user opens the panel, the iframe loads{" "}
+              <code className="text-sm">/api/agent-proxy</code> on the same origin.
+              The route resolves the session and active organization, mints a
+              workspace bearer token from the user&apos;s mapped SPN, and forwards
+              to <code className="text-sm">DATABRICKS_AGENT_APP_URL</code>. The
+              HTML document is rewritten (a <code className="text-sm">&lt;base&gt;</code>{" "}
+              tag plus a forced light theme) so the chat UI&apos;s relative assets
+              resolve under the mount and match the light Firefly UI. Chat
+              responses stream back as Server-Sent Events.
+            </p>
+          </ContentBlock>
+
+          <Section id="architecture-diagram" title="Architecture">
+            <MermaidDiagram chart={architecture} id="agent-architecture" />
+          </Section>
+        </Section>
+
+        {/* Genie Agent + Memory Section */}
+        <Section id="genie-and-memory" title="Genie Agent & Managed Memory">
+          <ContentBlock>
+            <p className="mb-4">
+                The agent answers data questions with <strong>Genie Agent</strong> — a
+                curated <strong>Genie space</strong> — served over the Genie MCP endpoint
+                (<code className="text-sm">/api/2.0/mcp/genie/&lt;space_id&gt;</code>). The{" "}
+                <code className="text-sm">ask_genie</code> tool calls{" "}
+                <code className="text-sm">genie_ask</code> and polls{" "}
+                <code className="text-sm">genie_poll_response</code> until complete,
+                authenticating with the agent App&apos;s service principal. Answers are
+                scoped to that space&apos;s curated tables, joins, and instructions, and a
+                space is the only object a guest service principal can be granted{" "}
+                <code className="text-sm">CAN_RUN</code> on — which is what makes the
+                guest flow work at all.
+            </p>
+            <p className="mb-4">
+              Managed memory persists per-user context in a Unity Catalog store, so
+              the agent can recall earlier facts and preferences across sessions.
+            </p>
+          </ContentBlock>
+
+          <HighlightBox variant="success" title="Agent behavior">
+            <ul className="list-disc pl-5 space-y-1 text-sm">
+              <li><strong>Genie-first</strong>: data questions call <code>ask_genie</code> before asking the user to clarify</li>
+              <li><strong>Concrete assets</strong>: broad prompts request catalogs, schemas, tables, key columns, and row counts</li>
+              <li><strong>Attribution</strong>: replies surface Genie asset links, and the panel shows plain-text &ldquo;Powered by Genie&rdquo; — deliberately not a link, since guests have no workspace access to follow it</li>
+              <li><strong>Memory</strong>: relevant context is read/written to the UC memory store per user</li>
+            </ul>
+          </HighlightBox>
+        </Section>
+
+        {/* Backend Configuration Section */}
+        <Section id="backend-configuration" title="Backend Configuration">
+          <ContentBlock>
+            <p className="mb-4">
+              The frontend panel is gated by an env flag and points the proxy at the
+              deployed agent App. Genie and memory are configured at the{" "}
+              <strong>agent App layer</strong> in{" "}
+              <code className="text-sm">agent/databricks.yml</code> (not the frontend
+              environment).
+            </p>
+          </ContentBlock>
+
+          <Section id="proxy-architecture" title="Vercel-Native Reverse Proxy">
+            <ContentBlock>
+              <p className="mb-4">
+                Unlike the code and notebook editors, the agent is{" "}
+                <strong>not</strong> embedded through the Go proxy. It uses a{" "}
+                <strong>Vercel-native reverse proxy</strong> &mdash; a Next.js route
+                at <code className="text-sm">/api/agent-proxy</code> &mdash; that
+                mints the current user&apos;s (or guest&apos;s){" "}
+                <Link href="/docs/architecture/authentication/sso-mapped-spn" className="text-blue-600 hover:underline">
+                  SSO-mapped Service Principal
+                </Link>{" "}
+                token and forwards requests (including the streaming chat) to the
+                agent App. No Go proxy or Cloud Run is required.
+              </p>
+            </ContentBlock>
+
+            <HighlightBox variant="info" title="What the proxy route does">
+              <ul className="list-disc pl-5 space-y-1 text-sm">
+                <li>Resolves the session + active organization, then mints a workspace bearer from the user&apos;s mapped SPN (guest / BYOD supported)</li>
+                <li>Injects the bearer and forwards HTTP + SSE (streaming chat) to <code>DATABRICKS_AGENT_APP_URL</code></li>
+                <li>Relaxes frame headers for same-origin embedding</li>
+                <li>Rewrites the HTML document (<code>&lt;base&gt;</code> tag + forced light theme) so relative assets resolve under the mount and match the Firefly UI</li>
+              </ul>
+            </HighlightBox>
+          </Section>
+
+          <Section id="environment-variables" title="Environment Variables">
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse border border-gray-200">
+                <thead>
+                  <tr className="bg-gray-50">
+                    <th className="border border-gray-200 px-4 py-2 text-left">Variable</th>
+                    <th className="border border-gray-200 px-4 py-2 text-left">Where</th>
+                    <th className="border border-gray-200 px-4 py-2 text-left">Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td className="border border-gray-200 px-4 py-2"><code className="text-sm">NEXT_PUBLIC_AGENT_ENABLED</code></td>
+                    <td className="border border-gray-200 px-4 py-2 text-sm">Frontend</td>
+                    <td className="border border-gray-200 px-4 py-2">Show the Agent panel when set to <code>true</code></td>
+                  </tr>
+                  <tr>
+                    <td className="border border-gray-200 px-4 py-2"><code className="text-sm">DATABRICKS_AGENT_APP_URL</code></td>
+                    <td className="border border-gray-200 px-4 py-2 text-sm">Frontend</td>
+                    <td className="border border-gray-200 px-4 py-2">Deployed agent App URL the proxy forwards to</td>
+                  </tr>
+                  <tr>
+                    <td className="border border-gray-200 px-4 py-2"><code className="text-sm">GENIE_MCP_MODE</code></td>
+                    <td className="border border-gray-200 px-4 py-2 text-sm">Agent App</td>
+                    <td className="border border-gray-200 px-4 py-2"><code>space</code> — the default, and the supported configuration</td>
+                  </tr>
+                  <tr>
+                    <td className="border border-gray-200 px-4 py-2"><code className="text-sm">GENIE_SPACE_ID</code></td>
+                    <td className="border border-gray-200 px-4 py-2 text-sm">Agent App</td>
+                    <td className="border border-gray-200 px-4 py-2">Genie space the agent answers from. Required — the app refuses to start without it rather than answering from a different backend</td>
+                  </tr>
+                  <tr>
+                    <td className="border border-gray-200 px-4 py-2"><code className="text-sm">DATABRICKS_MEMORY_STORE</code></td>
+                    <td className="border border-gray-200 px-4 py-2 text-sm">Agent App</td>
+                    <td className="border border-gray-200 px-4 py-2">Fully-qualified name (<code>catalog.schema.name</code>) of the <strong>UC memory store</strong> backing durable cross-session memory. You <strong>must create this UC securable and grant the app SP <code>READ/WRITE_MEMORY_STORE</code></strong> after deploy (<code>scripts/setup_memory_store.py</code>) — it is not created by quickstart or the bundle, and is <strong>not</strong> the Lakebase instance. Without it, memory silently no-ops.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </Section>
+
+          <Section id="build-and-deploy" title="Build & Deploy">
+            <ContentBlock>
+              <p className="mb-4">
+                The deployable app is assembled from the pristine submodule plus the
+                local overlay in <code className="text-sm">agent/</code>, then
+                deployed as a Databricks App bundle.
+              </p>
+            </ContentBlock>
+            <CodeBlock>
+{`# Fetch the submodule (first time only)
+git submodule update --init
+
+# Merge vendor submodule + agent/ overlay into ./agent-build (gitignored)
+bash scripts/assemble_agent.sh
+
+cd agent-build
+
+# Pre-vendor linux/cp311 wheels so the Apps build installs offline (UV_FIND_LINKS)
+# instead of depending on the build container's flaky PyPI egress.
+bash scripts/vendor_wheels.sh
+
+# Validate, then deploy. deploy_agent.sh runs deploy -> run -> enable-memory:
+# it deploys + builds + starts (the frontend's first-build Drizzle migrations
+# succeed on their own — the bundle's Postgres resource binding is
+# CAN_CONNECT_AND_CREATE, so no manual Lakebase grant is needed), then creates the
+# UC memory store and grants the app SP READ/WRITE on it (the one post-deploy step
+# that durable memory actually requires). On a non-default catalog, pass
+# --var catalog=main (it forwards to bundle).
+databricks bundle validate -p <your-cli-profile>
+bash scripts/deploy_agent.sh <your-cli-profile>
+
+# Then point DATABRICKS_AGENT_APP_URL at the deployed app URL`}
+            </CodeBlock>
+            <ContentBlock>
+              <p className="mt-4">
+                The project <code className="text-sm">README.md</code> (&ldquo;Build &amp;
+                deploy the agent app&rdquo;) is the canonical procedure and covers the
+                operational notes: the first request returns <code>503</code> while the
+                container builds (confirm readiness from the runtime logs —
+                <code className="text-sm">Both frontend and backend are ready!</code> — or
+                the live <code>app_status.state</code>, since the deployment status goes
+                green when the container command starts, before the port binds), the two Python
+                versions in play (local <code className="text-sm">quickstart</code> needs
+                3.12; the Apps runtime is cp311, which is why wheels are vendored for
+                3.11), and the local <code className="text-sm">agent-build</code> git
+                boundary that <code className="text-sm">assemble_agent.sh</code> creates so
+                the bundle syncs files.
+              </p>
+            </ContentBlock>
+          </Section>
+        </Section>
+
+        {/* Related Documentation Section */}
+        <Section id="related" title="Related Documentation">
+          <div className="grid md:grid-cols-2 gap-4">
+            <Link
+              href="/docs/architecture/authentication/sso-mapped-spn"
+              className="block border rounded-lg p-4 hover:bg-accent transition-colors"
+            >
+              <h4 className="font-semibold mb-1">SSO-Mapped SPN Authentication</h4>
+              <p className="text-sm text-muted-foreground">
+                How the mapped service principal token (reused by the agent proxy) is issued
+              </p>
+            </Link>
+
+            <Link
+              href="/docs/solutions/embedding-apps"
+              className="block border rounded-lg p-4 hover:bg-accent transition-colors"
+            >
+              <h4 className="font-semibold mb-1">Embedding Databricks Apps</h4>
+              <p className="text-sm text-muted-foreground">
+                The Go-proxy embedding path used by the code and notebook editors
+              </p>
+            </Link>
+
+            <Link
+              href="/docs/solutions/notebook-editor"
+              className="block border rounded-lg p-4 hover:bg-accent transition-colors"
+            >
+              <h4 className="font-semibold mb-1">Notebook Editor</h4>
+              <p className="text-sm text-muted-foreground">
+                Interactive Python notebooks powered by Marimo
+              </p>
+            </Link>
+
+            <Link
+              href="/docs/solutions/code-editor"
+              className="block border rounded-lg p-4 hover:bg-accent transition-colors"
+            >
+              <h4 className="font-semibold mb-1">Code Editor</h4>
+              <p className="text-sm text-muted-foreground">
+                VS Code-style development environment via Go proxy
+              </p>
+            </Link>
+
+            <Link
+              href="/docs/solutions/pipeline-editor"
+              className="block border rounded-lg p-4 hover:bg-accent transition-colors"
+            >
+              <h4 className="font-semibold mb-1">Pipeline Editor</h4>
+              <p className="text-sm text-muted-foreground">
+                Visual pipeline design with DLT integration
+              </p>
+            </Link>
+
+            <Link
+              href="/docs/solutions/data-catalog"
+              className="block border rounded-lg p-4 hover:bg-accent transition-colors"
+            >
+              <h4 className="font-semibold mb-1">Data Catalog</h4>
+              <p className="text-sm text-muted-foreground">
+                Browse the Unity Catalog data the agent queries via Genie
+              </p>
+            </Link>
+
+            <Link
+              href="/docs/solutions/sql-editor"
+              className="block border rounded-lg p-4 hover:bg-accent transition-colors"
+            >
+              <h4 className="font-semibold mb-1">SQL Editor</h4>
+              <p className="text-sm text-muted-foreground">
+                Native SQL query interface with warehouse integration
+              </p>
+            </Link>
+          </div>
+        </Section>
+      </SectionContainer>
+    </div>
+  );
+}

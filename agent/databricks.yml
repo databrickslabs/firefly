@@ -1,0 +1,161 @@
+bundle:
+  name: firefly_openai_managed_mem
+
+# --- Parameterize (bundle variables) --------------------------------------
+# Namespace for the wheels volume and the managed-memory store. Defaults target
+# `workspace.default` so a fresh Default-Storage workspace (which has no `main`
+# catalog) deploys with zero edits (GAP-3). Override per target below, or at the
+# command line via `--var catalog=main` / env `BUNDLE_VAR_catalog=main`, or with
+# a variable-overrides.json.
+variables:
+  catalog:
+    description: UC catalog holding the wheels volume and managed-memory store.
+    default: workspace
+  schema:
+    description: UC schema within ${var.catalog}.
+    default: default
+  wheels_volume_name:
+    description: UC volume that holds the pre-vendored build wheels.
+    default: firefly_wheels
+  memory_store_name:
+    description: Managed-memory store (Lakebase-backed) name.
+    default: firefly_managed_memory
+  # Genie backend. The Genie Agent IS a curated Genie space, so `space` is the default and
+  # the space id is supplied by the phase that creates the space BEFORE this bundle is
+  # first deployed. The app is therefore never even briefly workspace-wide.
+  #
+  # The VALUE stays `space` deliberately. The product is called Genie Agent and the value
+  # will likely follow, but renaming it now would ripple through the runbook, the harness
+  # probes and the regression matrix at the same time as the reordering below -- two
+  # changes at once, each able to mask the other. genie_mcp.py already accepts `agent` as
+  # an alias, so that rename is a later one-line change.
+  #
+  # `one` is workspace-wide unified Genie and is an explicit OPT-OUT, not a fallback: it
+  # discovers whatever the calling SP can read, scoped to nothing, and GUEST USERS CANNOT
+  # QUERY IT AT ALL, having no workspace access. Reaching it by accident is precisely what
+  # this default prevents -- genie_tools.py used to hardcode workspace-wide, so a
+  # space-scoped deployment answered from the wrong backend while every configuration
+  # probe still reported the space.
+  #
+  # These two never move independently. genie_mcp.py raises when the mode wants a space
+  # and the id is empty, so the app fails to boot instead of degrading silently.
+  genie_mcp_mode:
+    description: "`space` (default) for a curated Genie space, or `one` to opt into workspace-wide Genie. `agent` is accepted as an alias for `space`."
+    default: space
+  genie_space_id:
+    description: Genie space id — required when genie_mcp_mode=space (the default), `none` only when opting into `one`.
+    # NOT empty. An empty value makes the bundle render this env entry as
+    # `{"name": "GENIE_SPACE_ID"}` with no `value` key, and the Apps API refuses
+    # the deploy: "Must specify environment variable source using either value
+    # or valueFrom". That broke Phase 4 on the DEFAULT (Genie Agent) path, which is
+    # the path most deployments take. agent.py treats `none` as unset, so the
+    # mode=space guard still raises rather than querying a bogus space.
+    default: "none"
+
+sync:
+  exclude:
+    # uv.lock is intentionally NOT synced. The Apps build runs a plain `uv sync`
+    # (not `uv sync --locked`), so it can satisfy dependencies from the vendored
+    # wheels via UV_FIND_LINKS without the lock appearing stale (GAP-15).
+    # NOTE: pyproject.toml and vendor-wheels/ MUST sync — do not add them here
+    # (GAP-7: no deps file => app crashes; GAP-14: vendored wheels feed the build).
+    - uv.lock
+    - databricks.yml
+    - .python-version
+    - .vendor-req.txt
+    - .vendor-req-export.txt
+    - .vendor-req-filtered.txt
+    - requirements.txt.volume.bak
+
+resources:
+  apps:
+    agent_openai_agents_sdk:
+      name: "firefly-openai-managed-mem-v2"
+      description: "OpenAI Agents SDK agent with managed memory and Genie MCP"
+      source_code_path: ./
+      config:
+        command: ["python", "scripts/start_app.py"]
+        env:
+          - name: MLFLOW_TRACKING_URI
+            value: "databricks"
+          - name: MLFLOW_REGISTRY_URI
+            value: "databricks-uc"
+          - name: API_PROXY
+            value: "http://localhost:8000/invocations"
+          - name: CHAT_APP_PORT
+            value: "3000"
+          - name: CHAT_PROXY_TIMEOUT_SECONDS
+            value: "300"
+          # Install the pre-vendored linux/cp311 wheels first so the build never
+          # depends on the build container's PyPI egress (GAP-8/11/12). This path
+          # is the synced source_code root inside the Apps container. Run
+          # scripts/vendor_wheels.sh once before `databricks bundle deploy`.
+          - name: UV_FIND_LINKS
+            value: "/app/python/source_code/vendor-wheels"
+          # Pin every dependency to the vendored/tested versions (#64). The build runs a
+          # plain `uv sync` (uv.lock is excluded — GAP-15), which can otherwise re-resolve a
+          # transitive dep to a newer release that lacks a Linux wheel (the greenlet 3.5.4
+          # crash). constraints.txt is generated by vendor_wheels.sh (Phase 3d) and synced to
+          # the source root; UV_CONSTRAINT *bounds* versions without the exact-match rigidity
+          # that made `uv sync --locked` fail (GAP-15). Absent file → uv ignores it (safe).
+          - name: UV_CONSTRAINT
+            value: "/app/python/source_code/constraints.txt"
+          # --- Leave alone (resource bindings) ---------------------------------
+          # Populated by `uv run quickstart` (experiment id + Lakebase endpoint).
+          # Never fold these into a plaintext value:.
+          - name: MLFLOW_EXPERIMENT_ID
+            value_from: "experiment"
+          - name: LAKEBASE_AUTOSCALING_ENDPOINT
+            value_from: "postgres"
+          # --- Parameterize ----------------------------------------------------
+          - name: DATABRICKS_MEMORY_STORE
+            value: "${var.catalog}.${var.schema}.${var.memory_store_name}"
+          # --- Derive, don't store (GAP-4 fix) ---------------------------------
+          # Neither DATABRICKS_HOST nor DATABRICKS_WORKSPACE_ID is stored here: the
+          # Databricks Apps runtime auto-injects both into every app. Bundle
+          # substitutions cannot do this portably — ${workspace.host} is empty when
+          # the host comes from a CLI profile (the `deploy -p <profile>` flow), and
+          # ${workspace.workspace_id} does not resolve into app env. Runtime
+          # injection means nothing to hand-rewrite and nothing to go stale.
+          #
+          # There is no GENIE_ONE_URL. The frontend used to compose a workspace
+          # attribution link from those two vars, but this panel's audience is
+          # guest users with no workspace access, so the link was dead for them —
+          # and with GENIE_MCP_MODE defaulting to a space it also named the wrong
+          # backend. Attribution is plain text now.
+          - name: GENIE_MCP_URL
+            value: "/api/2.0/mcp/genie"
+          - name: GENIE_MCP_MODE
+            value: ${var.genie_mcp_mode}
+          # Empty unless Phase 6c resolved a space. GENIE_MCP_MODE=one ignores it.
+          - name: GENIE_SPACE_ID
+            value: ${var.genie_space_id}
+      resources:
+        - name: wheels_volume
+          uc_securable:
+            securable_full_name: "${var.catalog}.${var.schema}.${var.wheels_volume_name}"
+            securable_type: VOLUME
+            permission: READ_VOLUME
+        # Leave alone — quickstart writes experiment_id and the postgres branch
+        # for the target workspace; the committed values are placeholders.
+        - name: experiment
+          experiment:
+            experiment_id: "123237888438046"
+            permission: CAN_MANAGE
+        - name: 'postgres'
+          postgres:
+            branch: "projects/firefly-openai-managed-mem-v2-ui-lb-202607090900/branches/firefly-openai-managed-mem-v2-ui-lb-202607090900-branch"
+            database: "projects/firefly-openai-managed-mem-v2-ui-lb-202607090900/branches/firefly-openai-managed-mem-v2-ui-lb-202607090900-branch/databases/databricks-postgres"
+            permission: 'CAN_CONNECT_AND_CREATE'
+
+targets:
+  dev:
+    mode: development
+    default: true
+
+  prod:
+    mode: production
+    resources:
+      apps:
+        agent_openai_agents_sdk:
+          name: firefly-openai-managed-mem

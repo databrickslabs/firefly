@@ -27,51 +27,12 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
+import { SOLUTION_NAV_DOCS } from "@/lib/solution-docs";
 
-const solutions: { title: string; href: string; description: string; comingSoon?: boolean }[] = [
-  {
-    title: "Notebook Editor",
-    href: "/docs/solutions/notebook-editor",
-    description:
-      "Interactive Python notebooks powered by Marimo with full Databricks integration.",
-    comingSoon: false,
-  },
-  {
-    title: "Code Editor",
-    href: "/docs/solutions/code-editor",
-    description:
-      "VS Code-style development environment with terminal and Git support.",
-    comingSoon: false,
-  },
-  {
-    title: "SQL Editor",
-    href: "/docs/solutions/sql-editor",
-    description:
-      "Query your data with an advanced SQL editor and warehouse integration.",
-    comingSoon: false,
-  },
-  {
-    title: "Data Catalog",
-    href: "/docs/solutions/data-catalog",
-    description:
-      "Explore your Unity Catalog with a modern, hierarchical interface.",
-    comingSoon: false,
-  },
-  {
-    title: "Pipeline Editor",
-    href: "/docs/solutions/pipeline-editor",
-    description:
-      "Visual node-based pipeline design with Delta Live Tables integration.",
-    comingSoon: false,
-  },
-  {
-    title: "Embedding Databricks Apps w/o SSO",
-    href: "/docs/solutions/embedding-apps",
-    description:
-      "Embed Databricks apps without exposing Databricks SSO login flows to end users.",
-    comingSoon: false,
-  },
-];
+const solutions = SOLUTION_NAV_DOCS.map((item) => ({
+  ...item,
+  comingSoon: false as const,
+}));
 
 
 const iamOnboardingOptions: { title: string; href: string; description: string; comingSoon?: boolean }[] = [
@@ -357,6 +318,12 @@ export function MarketingNav() {
               <NavigationMenuTrigger>Solutions</NavigationMenuTrigger>
               <NavigationMenuContent>
                 <ul className="grid w-[400px] gap-3 p-4 md:w-[500px] md:grid-cols-1 lg:w-[600px]">
+                  <ListItem
+                    title="All Solutions"
+                    href="/docs/solutions"
+                  >
+                    Overview of all platform solutions and embedding patterns
+                  </ListItem>
                   {solutions.map((item) => (
                     <ListItem
                       key={item.title}
@@ -411,6 +378,13 @@ export function MarketingNav() {
                   <h3 className="font-semibold text-xs text-muted-foreground uppercase tracking-wider mb-3">
                     Solutions
                   </h3>
+                  <Link
+                    href="/docs/solutions"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex items-center justify-between py-3 px-3 rounded-lg text-sm transition-colors hover:bg-accent font-medium"
+                  >
+                    All Solutions
+                  </Link>
                   {solutions.map((item) => (
                     <Link
                       key={item.title}

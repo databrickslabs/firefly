@@ -28,7 +28,9 @@ export default async function PipelineEditorPage() {
       <SectionContainer>
         <header className="mb-12 border-b pb-8">
           <div className="text-sm text-muted-foreground mb-2">
-            Solutions
+            <Link href="/docs/solutions" className="hover:text-foreground">
+              Solutions
+            </Link>
           </div>
           <PageTitle>Pipeline Editor</PageTitle>
           <p className="text-xl text-muted-foreground">
@@ -469,6 +471,16 @@ def \${node.id.replace('-', '_')}():
               <h4 className="font-semibold mb-1">SQL Editor</h4>
               <p className="text-sm text-muted-foreground">
                 Write custom SQL for transformation nodes
+              </p>
+            </Link>
+
+            <Link
+              href="/docs/solutions/agent"
+              className="block border rounded-lg p-4 hover:bg-accent transition-colors"
+            >
+              <h4 className="font-semibold mb-1">Agent Panel</h4>
+              <p className="text-sm text-muted-foreground">
+                Genie Agent chat assistant for pipeline and catalog questions
               </p>
             </Link>
 

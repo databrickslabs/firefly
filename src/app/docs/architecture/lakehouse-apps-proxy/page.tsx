@@ -6,9 +6,23 @@ import {
   PageTitle,
 } from "@/components/docs/section";
 import Link from "next/link";
+import { SOLUTION_DOCS } from "@/lib/solution-docs";
 
+const LAKEHOUSE_HUB_SLUGS = [
+  "embedding-apps",
+  "notebook-editor",
+  "code-editor",
+  "agent",
+  "sql-editor",
+  "data-catalog",
+  "pipeline-editor",
+] as const;
 
 export default function LakehouseAppsProxyPage() {
+  const hubSolutions = LAKEHOUSE_HUB_SLUGS.map(
+    (slug) => SOLUTION_DOCS.find((s) => s.slug === slug)!
+  );
+
   return (
     <div className="container mx-auto px-4 py-8 max-w-7xl">
       <SectionContainer>
@@ -21,7 +35,11 @@ export default function LakehouseAppsProxyPage() {
             The proxy uses a session-cookie architecture — a short-lived JWT is exchanged
             for an opaque <code>HttpOnly</code> session cookie, so no Databricks tokens
             ever appear in URLs, browser storage, or logs. Documentation is organized into
-            dedicated pages below.
+            dedicated pages below — see also the{" "}
+            <Link href="/docs/solutions" className="text-blue-600 hover:underline">
+              full solutions index
+            </Link>
+            .
           </p>
         </header>
 
@@ -56,72 +74,55 @@ export default function LakehouseAppsProxyPage() {
           </HighlightBox>
 
           <div className="grid md:grid-cols-2 gap-4 mt-6">
-            <Link
-              href="/docs/solutions/embedding-apps"
-              className="block border rounded-lg p-6 hover:bg-accent transition-colors border-blue-200 bg-blue-50"
-            >
-              <h3 className="font-semibold text-lg mb-2 text-blue-900">Embedding Databricks Apps w/o SSO</h3>
-              <p className="text-sm text-blue-800">
-                Session-cookie proxy architecture: JWT exchange, SPN token management,
-                HttpOnly <code>proxy_sid</code> cookies, WebSocket support, and wildcard
-                domain routing for production.
-              </p>
-            </Link>
+            {hubSolutions.map((solution) => {
+              const featured = solution.slug === "embedding-apps";
+              const vercelProxy = solution.slug === "agent";
 
-            <Link
-              href="/docs/solutions/notebook-editor"
-              className="block border rounded-lg p-6 hover:bg-accent transition-colors"
-            >
-              <h3 className="font-semibold text-lg mb-2">Notebook Editor</h3>
-              <p className="text-sm text-muted-foreground">
-                Interactive Python notebooks powered by Marimo with reactive
-                execution and rich outputs.
-              </p>
-            </Link>
-
-            <Link
-              href="/docs/solutions/code-editor"
-              className="block border rounded-lg p-6 hover:bg-accent transition-colors"
-            >
-              <h3 className="font-semibold text-lg mb-2">Code Editor</h3>
-              <p className="text-sm text-muted-foreground">
-                VS Code-style development environment with terminal access,
-                Git integration, and LSP support.
-              </p>
-            </Link>
-
-            <Link
-              href="/docs/solutions/sql-editor"
-              className="block border rounded-lg p-6 hover:bg-accent transition-colors"
-            >
-              <h3 className="font-semibold text-lg mb-2">SQL Editor</h3>
-              <p className="text-sm text-muted-foreground">
-                Native SQL query interface with warehouse integration,
-                streaming results, and catalog autocomplete.
-              </p>
-            </Link>
-
-            <Link
-              href="/docs/solutions/data-catalog"
-              className="block border rounded-lg p-6 hover:bg-accent transition-colors"
-            >
-              <h3 className="font-semibold text-lg mb-2">Data Catalog</h3>
-              <p className="text-sm text-muted-foreground">
-                Hierarchical Unity Catalog browser with lazy loading,
-                metadata display, and BYOD support.
-              </p>
-            </Link>
-
-            <Link
-              href="/docs/solutions/pipeline-editor"
-              className="block border rounded-lg p-6 hover:bg-accent transition-colors"
-            >
-              <h3 className="font-semibold text-lg mb-2">Pipeline Editor</h3>
-              <p className="text-sm text-muted-foreground">
-                Visual node-based pipeline designer with drag-and-drop
-                nodes and Delta Live Tables execution.
-              </p>
-            </Link>
+              return (
+                <Link
+                  key={solution.slug}
+                  href={solution.href}
+                  className={`block border rounded-lg p-6 hover:bg-accent transition-colors ${
+                    featured ? "border-blue-200 bg-blue-50 md:col-span-2" : ""
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3 mb-2">
+                    <h3
+                      className={`font-semibold text-lg ${
+                        featured ? "text-blue-900" : ""
+                      }`}
+                    >
+                      {solution.title}
+                    </h3>
+                    <span className="shrink-0 text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                      {solution.embeddingLabel}
+                    </span>
+                  </div>
+                  <p
+                    className={`text-sm ${
+                      featured ? "text-blue-800" : "text-muted-foreground"
+                    }`}
+                  >
+                    {solution.description}
+                    {vercelProxy && (
+                      <>
+                        {" "}
+                        Uses <code className="text-xs">/api/agent-proxy</code> on the
+                        same origin — no Go proxy required.
+                      </>
+                    )}
+                    {featured && (
+                      <>
+                        {" "}
+                        Session-cookie proxy architecture with JWT exchange, SPN token
+                        management, WebSocket support, and wildcard domain routing for
+                        production.
+                      </>
+                    )}
+                  </p>
+                </Link>
+              );
+            })}
           </div>
         </Section>
 

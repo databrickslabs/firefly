@@ -1,0 +1,817 @@
+# shellcheck shell=bash
+# runbook.sh — the helpers BOOTSTRAP.md invokes, shared with scripts/bootstrap.sh.
+#
+#   source scripts/lib/runbook.sh
+#
+# WHY THIS FILE EXISTS
+# Same reason as corp-network.sh, one layer up. BOOTSTRAP.md used to *call*
+# store_secret / read_secret and *describe* the CLI installs, while the only real
+# implementations lived in bootstrap.sh. Three consequences, all observed on the
+# 2026-07-25 fresh-install run:
+#
+#   * store_secret / read_secret were undefined for anyone following the runbook,
+#     and the script's read_secret had a different signature anyway
+#     (read_secret VARNAME <ignored> KEY vs. the runbook's $(read_secret KEY)),
+#     so even copying it across did not work.
+#   * The Phase 1b/1e CLI installs were comments, so `databricks` and `gh` were
+#     never installed on a machine that did not already have them.
+#   * The Neon project-id parser was fixed in bootstrap.sh and left broken in the
+#     markdown, because the two were separate copies.
+#
+# One implementation, sourced by both, is what stops that recurring.
+#
+# Safe to source from an interactive shell: nothing here sets -e or exits, and
+# every function returns rather than terminating the caller. Must work under BOTH
+# bash and zsh — BOOTSTRAP.md tells the reader to source this from their own
+# shell, and zsh is the macOS default.
+
+# ─── minimal helpers (defined only if the caller hasn't already) ──────────────
+# `declare -F name` is NOT a function test in zsh: it declares a float and returns
+# 0. Same guard as corp-network.sh; duplicated so each lib is independently
+# sourceable.
+_ff_is_func() {
+  if [ -n "${ZSH_VERSION:-}" ]; then
+    eval '(( ${+functions[$1]} ))'
+  else
+    declare -F "$1" >/dev/null 2>&1
+  fi
+}
+
+_ff_is_func note || note() { echo "  $*"; }
+_ff_is_func ok   || ok()   { echo "  ✓ $*"; }
+_ff_is_func warn || warn() { echo "  ⚠ $*"; }
+_ff_is_func fail || fail() { echo "  ✗ $*"; }
+
+# ─── state.env: secret storage ───────────────────────────────────────────────
+# A gitignored, chmod-600 file under $REPO_DIR. Deliberately not the macOS
+# Keychain: the target machine may have no Python `keyring` wired up.
+#
+# On-disk format is `export KEY=<%q-quoted>` — consumers must SOURCE this file,
+# never grep it. (A verifier once grepped '^PREVIEW_URL=' and silently missed
+# every value because of the `export ` prefix.)
+: "${STATE_DIR:=}"
+: "${STATE_FILE:=}"
+
+init_state_dir() {
+  local base="${1:-${REPO_DIR:-}}"
+  # Falling back to $PWD made the state file depend on the caller's directory, so a
+  # phase run from anywhere but the repo silently read a DIFFERENT (usually absent)
+  # state.env: Phase 9 decided GUEST_API_SECRET was "0 chars" and spent three minutes
+  # reminting and redeploying a secret that was already stored correctly. Recover
+  # REPO_DIR from inputs.env first -- it is written there by firefly_store_inputs -- so
+  # the location is a property of the bootstrap rather than of the shell's cwd.
+  if [ -z "$base" ]; then
+    local inputs="${INPUTS_DIR:-$HOME/.firefly-bootstrap}/inputs.env"
+    [ -f "$inputs" ] && base="$(sed -nE 's/^REPO_DIR=(.*)$/\1/p' "$inputs" | tail -1)"
+  fi
+  [ -n "$base" ] || base="$PWD"
+  STATE_DIR="${base}/.firefly-bootstrap"
+  STATE_FILE="${STATE_DIR}/state.env"
+  mkdir -p "$STATE_DIR"; chmod 700 "$STATE_DIR"
+}
+
+store_secret() {                        # store_secret KEY VALUE
+  local key="$1" val="$2"
+  init_state_dir
+  # Storing an empty value over a good one is how PREVIEW_URL became "": Phase 8d does
+  # store_secret PREVIEW_URL "$APP_ORIGIN", and in a fresh shell APP_ORIGIN was unset,
+  # so the key was overwritten with nothing. Phase 9's curls then returned HTTP 000 with
+  # no message to explain it. An empty write is almost always a lost variable, so say so
+  # and keep what is already there.
+  if [ -z "$val" ]; then
+    local existing
+    existing="$(grep -E "^[[:space:]]*(export[[:space:]]+)?${key}=" "$STATE_FILE" 2>/dev/null | tail -1)"
+    if [ -n "$existing" ]; then
+      warn "refusing to overwrite $key with an empty value - keeping what is stored."
+      warn "  the variable you passed was unset in this shell; nothing was lost."
+      return 0
+    fi
+    warn "$key stored EMPTY (the value passed in was unset in this shell)."
+  fi
+  local tmp="${STATE_FILE}.tmp"
+  touch "$STATE_FILE"
+  # Drop EVERY prior form of this key, not just `^export KEY=`. A line written as
+  # `KEY=...` or with leading whitespace used to survive the filter, so state.env
+  # ended up holding two assignments; sourcing takes the last one, and Phase 9's
+  # summary printed a stale GENIE_SPACE_ID while the deployment used the right one.
+  grep -vE "^[[:space:]]*(export[[:space:]]+)?${key}=" "$STATE_FILE" > "$tmp" 2>/dev/null || true
+  printf 'export %s=%q\n' "$key" "$val" >> "$tmp"
+  mv "$tmp" "$STATE_FILE"
+  chmod 600 "$STATE_FILE"
+  ok "$key → state.env"
+}
+
+load_secrets() {
+  init_state_dir
+  # shellcheck disable=SC1090
+  [ -f "$STATE_FILE" ] && . "$STATE_FILE"
+  return 0
+}
+
+# read_secret KEY → prints the value on stdout; returns 1 if unset or empty.
+#
+# One argument, stdout. This is the form every BOOTSTRAP.md call site uses, and
+# it is the contract. Note the deliberate absence of ${!key}: bash-only indirect
+# expansion is what produced `(eval):1: bad substitution` under the guest zsh.
+# Intended as $(read_secret KEY), which subshells the `.` so the caller's
+# environment is not filled with every secret in the file.
+read_secret() {
+  local key="$1"
+  init_state_dir
+  [ -f "$STATE_FILE" ] || return 1
+  # Sourcing silently takes the LAST assignment, so a duplicate resolves to whichever
+  # writer happened to go second and the caller cannot tell. Phase 9 reported a stale
+  # GENIE_SPACE_ID this way while the deployment had used the correct one. Say it out
+  # loud rather than returning one of two answers as though it were the only one.
+  local dups
+  dups="$(grep -cE "^[[:space:]]*(export[[:space:]]+)?${key}=" "$STATE_FILE" 2>/dev/null || echo 0)"
+  if [ "${dups:-0}" -gt 1 ]; then
+    # Straight to stderr, NOT via warn(): warn() echoes to stdout, and every caller
+    # reads this function as VALUE="$(read_secret KEY)". Routing a diagnostic through
+    # it would fold the warning text into the value -- the same defect that made
+    # genie-data-setup.sh emit progress into its own key=value output.
+    printf '  ⚠ state.env has %s assignments of %s; using the last. Values seen:\n' \
+      "$dups" "$key" >&2
+    grep -E "^[[:space:]]*(export[[:space:]]+)?${key}=" "$STATE_FILE" 2>/dev/null \
+      | sed 's/^/      /' >&2 || true
+  fi
+  # shellcheck disable=SC1090
+  . "$STATE_FILE"
+  local val
+  val="$(eval "printf '%s' \"\${$key-}\"")"
+  [ -n "$val" ] || return 1
+  printf '%s\n' "$val"
+}
+
+# require_secret VARNAME KEY — assign to VARNAME, or explain and return 1.
+# Returns rather than exits so it is safe to source; callers that must stop
+# should write `require_secret X Y || exit 1`.
+require_secret() {
+  local __var="$1" __key="$2" __val
+  __val="$(read_secret "$__key")" || __val=""
+  if [ -z "$__val" ]; then
+    fail "state.env: $__key is empty (run the earlier phase that stores it first)"
+    return 1
+  fi
+  eval "$__var=\$__val"
+}
+
+# ─── CLI installers (no Homebrew) ────────────────────────────────────────────
+# Idempotent: each is a no-op when the tool is already on PATH. $HOME/bin is
+# created here rather than assumed — a previous regression was an installer that
+# wrote into a $HOME/bin that did not exist yet.
+
+# A floor, not a preference: used only when api.github.com cannot say what "latest" is. Bump it
+# when convenient; every phase that matters asserts the CLI works rather than its version.
+: "${FIREFLY_DATABRICKS_CLI_FALLBACK:=1.9.0}"
+
+firefly_install_databricks_cli() {
+  command -v databricks >/dev/null 2>&1 && {
+    ok "databricks already installed: $(databricks --version 2>/dev/null | head -1)"; return 0; }
+  local arch tag tmp
+  case "$(uname -m)" in
+    arm64|aarch64) arch=arm64 ;;
+    x86_64)        arch=amd64 ;;
+    *) fail "unsupported architecture: $(uname -m)"; return 1 ;;
+  esac
+  # Resolving "latest" costs one call against api.github.com, which allows 60 per hour PER IP
+  # unauthenticated. A machine running the runbook repeatedly exhausts that, and the failure is a
+  # 403 whose body says "API rate limit exceeded" while the old message said "could not resolve
+  # the latest Databricks CLI release" -- sending the reader to look at networking or at the
+  # Databricks release page, neither of which is the problem. It also killed the whole run:
+  # Phases 3a-6 and 8b-9 all die without the CLI, with no recovery path.
+  #
+  # So: authenticate when a token is available, and when the API cannot answer, fall back to a
+  # pinned version rather than failing. The download host is not API-rate-limited, so the
+  # fallback works exactly when the lookup does not.
+  local gh_auth=() api_err tag_body
+  local tok="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+  [ -z "$tok" ] && command -v gh >/dev/null 2>&1 && tok="$(gh auth token 2>/dev/null || true)"
+  [ -n "$tok" ] && gh_auth=(-H "Authorization: Bearer $tok")
+
+  api_err="$(mktemp)"
+  tag_body="$(curl -fsSL ${gh_auth[@]+"${gh_auth[@]}"} \
+      https://api.github.com/repos/databricks/cli/releases/latest 2>"$api_err")" || tag_body=""
+  tag="$(printf '%s' "$tag_body" | python3 -c "import sys,json
+try: print(json.load(sys.stdin)['tag_name'].lstrip('v'))
+except Exception: print('')" 2>/dev/null)"
+
+  if [ -z "$tag" ]; then
+    tag="$FIREFLY_DATABRICKS_CLI_FALLBACK"
+    warn "could not ask api.github.com which release is latest:"
+    warn "  $(head -1 "$api_err" 2>/dev/null | cut -c1-140)"
+    if [ -z "$tok" ]; then
+      warn "  Unauthenticated api.github.com allows 60 requests/hour per IP, and a 403 here is"
+      warn "  usually that limit rather than a network or Databricks problem. Set GH_TOKEN (or"
+      warn "  run 'gh auth login') to raise it."
+    fi
+    warn "  Installing the pinned v${tag} instead - the download host is not rate-limited."
+  fi
+  rm -f "$api_err"
+  tmp=$(mktemp -d)
+  curl -fsSL "https://github.com/databricks/cli/releases/download/v${tag}/databricks_cli_${tag}_darwin_${arch}.zip" \
+       -o "$tmp/db.zip" || { rm -rf "$tmp"; fail "download failed"; return 1; }
+  unzip -qo "$tmp/db.zip" -d "$tmp" || { rm -rf "$tmp"; fail "unzip failed"; return 1; }
+  mkdir -p "$HOME/bin" && cp "$tmp/databricks" "$HOME/bin/databricks" && chmod +x "$HOME/bin/databricks"
+  rm -rf "$tmp"
+  export PATH="$HOME/bin:$PATH"
+  ok "databricks installed to \$HOME/bin ($(databricks --version 2>/dev/null | head -1))"
+}
+
+firefly_install_gh() {
+  command -v gh >/dev/null 2>&1 && {
+    ok "gh already installed: $(gh --version 2>/dev/null | head -1)"; return 0; }
+  local arch tag tmp
+  case "$(uname -m)" in
+    arm64|aarch64) arch=macOS_arm64 ;;
+    x86_64)        arch=macOS_amd64 ;;
+    *) fail "unsupported architecture: $(uname -m)"; return 1 ;;
+  esac
+  tag=$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest \
+        | python3 -c "import sys,json;print(json.load(sys.stdin)['tag_name'].lstrip('v'))") || {
+    fail "could not resolve the latest GitHub CLI release"; return 1; }
+  tmp=$(mktemp -d)
+  curl -fsSL "https://github.com/cli/cli/releases/download/v${tag}/gh_${tag}_${arch}.zip" \
+       -o "$tmp/gh.zip" || { rm -rf "$tmp"; fail "download failed"; return 1; }
+  unzip -qo "$tmp/gh.zip" -d "$tmp" || { rm -rf "$tmp"; fail "unzip failed"; return 1; }
+  mkdir -p "$HOME/bin" && cp "$tmp"/gh_*/bin/gh "$HOME/bin/gh" && chmod +x "$HOME/bin/gh"
+  rm -rf "$tmp"
+  export PATH="$HOME/bin:$PATH"
+  ok "gh installed to \$HOME/bin ($(gh --version 2>/dev/null | head -1))"
+}
+
+# ─── CLI output parsers ──────────────────────────────────────────────────────
+# These have fixture tests (scripts/test-parsing.sh). Keeping one copy is the
+# point: the markdown's copy of the Neon parser read a top-level 'id' for months
+# after the script's copy was fixed to read project.id.
+
+extract_vercel_preview_url() {
+  grep -oE 'https://[^ ]*\.vercel\.app' | tail -1
+}
+
+# `neonctl projects create --output json` nests the project under a "project"
+# key. The flat fallback covers older CLI versions.
+extract_neon_project_id() {
+  python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('project',{}).get('id') or d.get('id',''))"
+}
+
+# firefly_neon_project_id [ORG_FLAG...] — id of the project named
+# $NEON_PROJECT_NAME, or empty. Neon project names are NOT unique (ids are), so
+# every lookup is by name against the list.
+firefly_neon_project_id() {
+  NEON_PROJECT_NAME="$NEON_PROJECT_NAME" neonctl projects list "$@" --output json 2>/dev/null \
+    | python3 -c "import os,sys,json;d=json.load(sys.stdin);ps=d.get('projects',d) if isinstance(d,dict) else d;print(next((p['id'] for p in ps if p.get('name')==os.environ['NEON_PROJECT_NAME']),''))"
+}
+
+# ─── bundle assertions ───────────────────────────────────────────────────────
+
+# The committed agent/databricks.yml carries placeholder resource bindings that
+# `uv run scripts/quickstart.py` (Phase 3a) rewrites for the target workspace.
+# Deploying without that rewrite fails with a 404 that names only the stale id
+# — "Node ID 123237888438046 does not exist" — which points nowhere useful.
+: "${FIREFLY_PLACEHOLDER_EXPERIMENT_ID:=123237888438046}"
+
+assert_bundle_quickstart_ran() {         # assert_bundle_quickstart_ran <databricks.yml>
+  local yml="${1:-agent-build/databricks.yml}"
+  [ -f "$yml" ] || { fail "$yml not found — run scripts/assemble_agent.sh (Phase 2) first."; return 1; }
+  # Re-apply the default HERE, not just at source time. The id is set with
+  # `: "${VAR:=...}"` at the top of this file, which runs once; if the caller's
+  # shell has it exported empty, the grep below becomes `grep -q ""` — and that
+  # matches EVERY line, so a bundle quickstart had already rewritten correctly
+  # fails the assert and the reader is told to re-run Phase 3a. Three E2E runs
+  # lost time to that.
+  [ -n "${FIREFLY_PLACEHOLDER_EXPERIMENT_ID:-}" ] \
+    || FIREFLY_PLACEHOLDER_EXPERIMENT_ID=123237888438046
+  if grep -q "$FIREFLY_PLACEHOLDER_EXPERIMENT_ID" "$yml"; then
+    fail "$yml still holds the placeholder experiment id ($FIREFLY_PLACEHOLDER_EXPERIMENT_ID)."
+    note "Phase 3a (quickstart) has not completed against this workspace, so the bundle"
+    note "still points at the authoring workspace. Deploying now returns a 404 naming that"
+    note "id. Re-run Phase 3a, then retry this phase."
+    return 1
+  fi
+  ok "bundle resource bindings were written by quickstart"
+}
+
+# Phase 3e. Three rules that must hold simultaneously in the bundle's sync.exclude:
+#   pyproject.toml   NOT excluded — the Apps build needs it to find the dep list
+#   uv.lock          excluded     — forces a plain `uv sync` that can use UV_FIND_LINKS
+#   vendor-wheels/   NOT excluded — the local wheels must reach the build
+# Parsed with a YAML-aware reader rather than a regex: the exclude list opens
+# with comment lines, and a naive `-\s` scan reads it as empty and "passes" a
+# broken config (or fails a correct one, which is what happened on 2026-07-25).
+check_sync_exclude_rules() {             # check_sync_exclude_rules <databricks.yml>
+  local yml="${1:-agent-build/databricks.yml}"
+  [ -f "$yml" ] || { fail "$yml not found"; return 1; }
+  python3 - "$yml" <<'PY'
+import re, sys
+text = open(sys.argv[1]).read()
+m = re.search(r'^sync:\s*$', text, re.M)
+if not m:
+    print("  \u2717 no sync: block found"); sys.exit(1)
+block, started = [], False
+for line in text[m.start():].splitlines()[1:]:
+    if line.strip() and not line[:1].isspace():
+        break                                  # dedented to a new top-level key
+    s = line.strip()
+    if s.startswith('exclude:'):
+        started = True; continue
+    if started and s.startswith('- '):
+        block.append(s[2:].strip())
+    elif started and s and not s.startswith('#') and not s.startswith('- '):
+        break
+rules = {
+    'pyproject.toml': (False, 'the Apps build needs it to find the dependency list'),
+    'uv.lock':        (True,  'forces a plain `uv sync`, so UV_FIND_LINKS can supply wheels'),
+    'vendor-wheels':  (False, 'the vendored wheels must reach the build host'),
+}
+bad = 0
+for name, (must_exclude, why) in rules.items():
+    present = any(name in e for e in block)
+    if present != must_exclude:
+        state = "excluded" if present else "not excluded"
+        want  = "excluded" if must_exclude else "NOT excluded"
+        print(f"  \u2717 {name} is {state}; it must be {want} \u2014 {why}")
+        bad = 1
+if bad:
+    print(f"  sync.exclude currently: {block}")
+    sys.exit(1)
+print(f"  \u2713 sync.exclude rules hold ({len(block)} entries)")
+PY
+}
+
+# ─── SQL over a warehouse (Phase 6c) ─────────────────────────────────────────
+# Every SQL step in this runbook used to be a `note` telling the reader to open a
+# warehouse session and paste it themselves, so nothing SQL-shaped was ever
+# actually executed or verified. Phase 6c needs real execution (seeding, grants,
+# table counts), so this is the one primitive that runs a statement and returns
+# rows.
+#
+# `wait_timeout` maxes out at 50s server-side, which a 16-table CTAS can exceed,
+# so a statement that is still PENDING/RUNNING when the wait expires is polled to
+# completion rather than reported as a failure. on_wait_timeout=CONTINUE is what
+# keeps it running instead of being cancelled at the 50s mark.
+#
+# Output: one line per result row, tab-separated. Non-zero exit means the
+# statement did not reach SUCCEEDED, with the server's message on stderr.
+: "${FIREFLY_SQL_DEADLINE:=900}"          # seconds to wait for one statement
+
+firefly_sql() {                          # firefly_sql <warehouse_id> <sql> [profile]
+  local wh="$1" sql="$2" prof="${3:-${DB_PROFILE:-}}"
+  [ -n "$wh" ] || { fail "firefly_sql: no warehouse id given"; return 2; }
+  [ -n "$prof" ] || { fail "firefly_sql: no Databricks profile given"; return 2; }
+
+  local req; req="$(mktemp -t ffsql)" || return 2
+  FF_WH="$wh" FF_SQL="$sql" python3 -c 'import json,os,sys
+sys.stdout.write(json.dumps({
+    "warehouse_id": os.environ["FF_WH"],
+    "statement": os.environ["FF_SQL"],
+    "wait_timeout": "50s",
+    "on_wait_timeout": "CONTINUE",
+}))' > "$req" || { rm -f "$req"; fail "firefly_sql: could not build request"; return 2; }
+
+  local out rc=0
+  # `|| rc=$?` rather than a bare assignment followed by `rc=$?`: under `set -e` the
+  # assignment aborts the shell the moment the CLI exits non-zero, so the rc check
+  # below -- and the diagnostic it prints -- were unreachable in exactly the case they
+  # exist for. The `||` makes it a compound command, which errexit tolerates.
+  out="$(databricks api post /api/2.0/sql/statements --json "@$req" --profile "$prof" 2>&1)" || rc=$?
+  rm -f "$req"
+  if [ "$rc" -ne 0 ]; then
+    fail "firefly_sql: statement submit failed"
+    printf '%s\n' "$out" | head -3 >&2
+    return 1
+  fi
+
+  # PENDING/RUNNING → poll. Anything else is terminal and parsed below.
+  local sid deadline state
+  sid="$(printf '%s' "$out" | python3 -c 'import sys,json
+try: print((json.load(sys.stdin) or {}).get("statement_id") or "")
+except Exception: print("")' 2>/dev/null)"
+  state="$(printf '%s' "$out" | python3 -c 'import sys,json
+try: print(((json.load(sys.stdin) or {}).get("status") or {}).get("state") or "")
+except Exception: print("")' 2>/dev/null)"
+
+  deadline=$(( $(date +%s) + FIREFLY_SQL_DEADLINE ))
+  while [ "$state" = "PENDING" ] || [ "$state" = "RUNNING" ]; do
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+      databricks api post "/api/2.0/sql/statements/$sid/cancel" --profile "$prof" >/dev/null 2>&1
+      fail "firefly_sql: statement $sid still $state after ${FIREFLY_SQL_DEADLINE}s (cancelled)"
+      return 1
+    fi
+    sleep 5
+    out="$(databricks api get "/api/2.0/sql/statements/$sid" --profile "$prof" 2>&1)" || {
+      fail "firefly_sql: polling $sid failed"; return 1; }
+    state="$(printf '%s' "$out" | python3 -c 'import sys,json
+try: print(((json.load(sys.stdin) or {}).get("status") or {}).get("state") or "")
+except Exception: print("")' 2>/dev/null)"
+  done
+
+  printf '%s' "$out" | python3 -c 'import sys,json
+try:
+    d = json.load(sys.stdin) or {}
+except Exception:
+    sys.stderr.write("firefly_sql: unparseable response\n"); sys.exit(1)
+st = d.get("status") or {}
+if st.get("state") != "SUCCEEDED":
+    msg = (st.get("error") or {}).get("message", "")
+    sys.stderr.write("firefly_sql: %s %s\n" % (st.get("state"), msg[:400])); sys.exit(1)
+for row in ((d.get("result") or {}).get("data_array") or []):
+    print("\t".join("" if c is None else str(c) for c in row))
+'
+}
+
+# ─── Phase 6: restore the context a fresh shell dropped ───────────────────────
+# Phases 6, 6b and 6c read WAREHOUSE_ID, GUEST_SP_CLIENT_ID, SP_CLIENT_ID,
+# GENIE_MCP_MODE and GENIE_SPACE_ID straight out of the shell. Anyone who opened a new
+# terminal -- or any agent running the phases as separate commands -- lost them, and
+# every resulting error named something other than the empty variable:
+#
+#   WAREHOUSE_ID=""        -> PATCH /permissions/warehouses/  ->
+#                             "No API found for 'PATCH /permissions/warehouses/'"
+#                             which reads as a wrong API route
+#   GUEST_SP_CLIENT_ID=""  -> "Principal: ServicePrincipalName() does not exist"
+#                             which reads as a SCIM problem
+#   GENIE_MCP_MODE=""      -> `if [ "$GENIE_MCP_MODE" = "space" ]` SILENTLY skips and
+#                             the app never receives genie_space_id at all
+#
+# Rederive from state.env first, then from the workspace. Whatever cannot be recovered
+# is named, because "WAREHOUSE_ID is empty" is the one message that points at the fix.
+firefly_restore_phase6_context() {     # firefly_restore_phase6_context [profile]
+  local prof="${1:-${DB_PROFILE:-}}" v
+  [ -n "$prof" ] || { fail "firefly_restore_phase6_context: no profile"; return 1; }
+
+  if [ -z "${WAREHOUSE_ID:-}" ]; then
+    v="$(read_secret WAREHOUSE_ID 2>/dev/null || true)"
+    [ -n "$v" ] || v="$(databricks warehouses list -o json --profile "$prof" 2>/dev/null \
+      | python3 -c 'import sys,json
+try: d = json.load(sys.stdin) or []
+except Exception: d = []
+ws = d if isinstance(d, list) else (d.get("warehouses") or [])
+print(ws[0].get("id","") if ws else "")' 2>/dev/null || true)"
+    [ -n "$v" ] && { WAREHOUSE_ID="$v"; export WAREHOUSE_ID; note "restored WAREHOUSE_ID=$v"; }
+  fi
+
+  if [ -z "${GUEST_SP_CLIENT_ID:-}" ]; then
+    v="$(read_secret GUEST_SP_CLIENT_ID 2>/dev/null || true)"
+    [ -n "$v" ] || v="$(databricks service-principals list \
+      --filter 'displayName eq "firefly-guest-sp"' -o json --profile "$prof" 2>/dev/null \
+      | python3 -c 'import sys,json
+try: l = json.load(sys.stdin) or []
+except Exception: l = []
+m = [s for s in l if s.get("displayName") == "firefly-guest-sp"]
+print(m[0].get("applicationId","") if m else "")' 2>/dev/null || true)"
+    [ -n "$v" ] && { GUEST_SP_CLIENT_ID="$v"; export GUEST_SP_CLIENT_ID
+                     note "restored GUEST_SP_CLIENT_ID=$v"; }
+  fi
+
+  if [ -z "${SP_CLIENT_ID:-}" ] && [ -n "${AGENT_APP_NAME:-}" ]; then
+    v="$(databricks apps get "$AGENT_APP_NAME" -o json --profile "$prof" 2>/dev/null \
+      | python3 -c 'import sys,json
+try: print((json.load(sys.stdin) or {}).get("service_principal_client_id") or "")
+except Exception: print("")' 2>/dev/null || true)"
+    [ -n "$v" ] && { SP_CLIENT_ID="$v"; export SP_CLIENT_ID; note "restored SP_CLIENT_ID=$v"; }
+  fi
+
+  # Both stores are consulted, because the two values are not written to the same one:
+  # store_secret puts GENIE_SPACE_ID in state.env, while Phase 3f records GENIE_MCP_MODE with
+  # firefly_store_input, which writes inputs.env. Reading only state.env meant the mode was
+  # never found, and the "assuming space" line below announced a guess about a value Phase 3f
+  # had already written down. A run reported it: the message is accurate about what this
+  # function could see and wrong about what was known.
+  for v in GENIE_SPACE_ID GENIE_MCP_MODE; do
+    eval "[ -n \"\${$v:-}\" ]" && continue
+    eval "$v=\"\$(read_secret $v 2>/dev/null || true)\"; export $v"
+    eval "[ -n \"\${$v:-}\" ]" || \
+      eval "$v=\"\$(firefly_read_input $v 2>/dev/null || true)\"; export $v"
+    eval "[ -n \"\${$v:-}\" ]" && note "restored $v=$(eval "printf '%s' \"\$$v\"")"
+  done
+  # A space id with no mode anywhere is the silent-skip case: say so rather than skipping.
+  if [ -n "${GENIE_SPACE_ID:-}" ] && [ -z "${GENIE_MCP_MODE:-}" ]; then
+    GENIE_MCP_MODE="space"; export GENIE_MCP_MODE
+    note "GENIE_SPACE_ID is set but GENIE_MCP_MODE is in neither state.env nor inputs.env"
+    note "  - defaulting to space, which matches a space id being present"
+  fi
+  return 0
+}
+
+# firefly_require <VAR>... — refuse to build a request out of an empty variable.
+# Without this the empty value reaches the API and the API complains about something
+# else entirely: an empty warehouse id becomes a missing route, an empty principal
+# becomes a non-existent service principal.
+firefly_require() {
+  local missing="" k
+  for k in "$@"; do
+    eval "[ -n \"\${$k:-}\" ]" || missing="$missing $k"
+  done
+  [ -z "$missing" ] && return 0
+  fail "these variables are empty:$missing"
+  note "Phase 6 needs them in the shell. Restore them with:"
+  note "  firefly_restore_phase6_context \"\$DB_PROFILE\""
+  return 1
+}
+
+# ─── Apps: let one deployment finish before starting the next ─────────────────
+# Phase 6c redeploys the app with genie_mcp_mode=space immediately after Phase 4
+# deployed it, and the Apps API refuses that with
+#   400 Cannot update app ... as there is a pending deployment in progress for less
+#       than 20 minutes
+# The run recovered because `bundle run` waits, but the deploy error arrived next to
+# an unrelated "WAL recovery failed" and read as a hard failure in the middle of a
+# phase that had otherwise worked.
+#
+# Polls until the active deployment reaches a terminal state. Returns 0 when settled
+# and 0 on timeout too: the caller should attempt its deploy either way, because a
+# stuck poll must not be the thing that stops the phase. Every capture is `|| true`
+# for the reason invariant 31 exists.
+firefly_wait_app_deploy_settled() {   # <app> <profile> [timeout_s]
+  local app="$1" prof="$2" timeout="${3:-600}" waited=0 state
+  [ -n "$app" ] && [ -n "$prof" ] || return 0
+  while [ "$waited" -lt "$timeout" ]; do
+    state="$(databricks apps get "$app" -o json --profile "$prof" 2>/dev/null \
+      | python3 -c 'import sys,json
+try: d = json.load(sys.stdin) or {}
+except Exception: print(""); raise SystemExit
+print(((d.get("active_deployment") or {}).get("status") or {}).get("state") or "")' 2>/dev/null || true)"
+    case "$state" in
+      # No app or no deployment yet: nothing to wait behind.
+      "")                              return 0 ;;
+      SUCCEEDED|FAILED|CANCELLED)      return 0 ;;
+    esac
+    [ "$waited" -eq 0 ] && note "waiting for the in-flight deployment of '$app' to finish (state=$state)"
+    sleep 15
+    waited=$((waited + 15))
+  done
+  warn "deployment of '$app' still $state after ${timeout}s - attempting the deploy anyway."
+  warn "if it returns 'pending deployment in progress', re-run this phase; nothing is lost."
+  return 0
+}
+
+# ─── IP allowlist: three outcomes, never two ─────────────────────────────────
+# There were two copies of this check and they reached OPPOSITE conclusions on the
+# same workspace. Phase 1b surfaced "IP access list is not available in the pricing
+# tier of this workspace"; Phase 9 discarded stderr, failed to parse, and printed
+# "ok: no enabled IP allowlist on this workspace - the app can reach it".
+#
+# That is worse than a confusing message. It is a false all-clear on a control that
+# decides whether the data plane works at all, and it appears in the phase people
+# read when something has already gone wrong.
+#
+# "Could not determine" is a distinct answer from "there is none" — and a workspace
+# whose TIER has no IP-allowlist feature is a third thing again. That one reads like
+# a failure ("Error: IP access list is not available in the pricing tier of this
+# workspace") but is actually a determinate, reassuring answer: the feature does not
+# exist here, so nothing can be enabled and the data-plane risk does not apply.
+# Reporting it as "could not check" is needlessly alarming; reporting it as a bare
+# "none" throws away why. Echoes exactly one of:
+#   none                    checked, nothing enabled
+#   enabled:<labels>        checked, these are enabled
+#   unavailable:<reason>    the tier has no such feature — implies none, safely
+#   unknown:<reason>        could not check — say why, never imply safety
+firefly_ip_allowlist_status() {           # firefly_ip_allowlist_status [profile]
+  local prof="${1:-${DB_PROFILE:-}}" raw
+  [ -n "$prof" ] || { echo "unknown:no profile given"; return 0; }
+  # `|| true` is load-bearing. On a tier without the feature the CLI exits 1, and an
+  # assignment from a failing command substitution aborts the shell under `set -e` in
+  # BOTH bash and zsh. The first version of this helper omitted it, so the branch
+  # written to handle the pricing tier gracefully instead killed Phase 1b and Phase 9
+  # on exactly the workspaces that hit it -- a worse failure than the wrong "ok" it
+  # replaced, and one that only appears when the caller enables errexit.
+  raw="$(databricks api get /api/2.0/ip-access-lists --profile "$prof" 2>&1 || true)"
+  FF_RAW="$raw" python3 -c '
+import json, os, re, sys
+raw = (os.environ.get("FF_RAW") or "").strip()
+if not raw:
+    print("unknown:no response from the API"); sys.exit()
+try:
+    d = json.loads(raw)
+except ValueError:
+    # Not JSON: the CLI or the API said something. Pass its own words through, but
+    # separate the tier answer from a genuine failure — it is determinate, and
+    # calling it "could not check" sends the reader hunting an auth problem.
+    flat = " ".join(raw.split())
+    if re.search(r"not available in the pricing tier|not supported.{0,30}tier"
+                 r"|requires.{0,20}(premium|enterprise)", flat, re.I):
+        print("unavailable:" + flat[:160])
+    else:
+        print("unknown:" + flat[:160])
+    sys.exit()
+if not isinstance(d, dict):
+    print("unknown:unexpected response shape"); sys.exit()
+on = [l.get("label") or "?" for l in (d.get("ip_access_lists") or [])
+      if l.get("enabled") and l.get("list_type") == "ALLOW"]
+print("enabled:" + " / ".join(on) if on else "none")
+'
+}
+
+# ─── Lakebase: report what got BOUND, not what was asked for ─────────────────
+# Passing --app-name for an app that already exists makes quickstart bind Lakebase
+# from that app's existing configuration and ignore --lakebase-create-new. The
+# requested project is never created, Phase 3a still reports PASS, and every later
+# summary prints LAKEBASE_NAME — a resource that does not exist. Observed across
+# two passes: pass 1 created firefly-lb-0727083127, pass 2 asked for
+# firefly-lb-0727090103, quickstart bound the first, and the summary named the
+# second.
+#
+# The bound project is discoverable: quickstart writes agent-build/.env and
+# patches databricks.yml, and both carry the endpoint path
+# `projects/<name>/branches/<name>-branch/...`. Read the name out of that rather
+# than trusting the request.
+firefly_bound_lakebase() {               # firefly_bound_lakebase [agent_build_dir]
+  local dir="${1:-${REPO_DIR:-$PWD}/agent-build}" f
+  for f in "$dir/.env" "$dir/databricks.yml"; do
+    [ -f "$f" ] || continue
+    sed -nE 's|.*projects/([A-Za-z0-9_-]+)/branches/.*|\1|p' "$f" | head -1 | grep . && return 0
+  done
+  return 1
+}
+
+# Reconcile the request against reality and let reality win, loudly.
+firefly_reconcile_lakebase() {            # firefly_reconcile_lakebase [agent_build_dir]
+  local bound
+  bound="$(firefly_bound_lakebase "$@" 2>/dev/null)" || {
+    warn "could not determine which Lakebase project quickstart bound"
+    return 0
+  }
+  if [ -n "$bound" ] && [ "$bound" != "${LAKEBASE_NAME:-}" ]; then
+    warn "quickstart bound Lakebase '$bound', NOT the requested '${LAKEBASE_NAME:-}'."
+    note "An existing --app-name wins over --lakebase-create-new: the app's own"
+    note "Lakebase binding is reused and the requested project is never created."
+    note "Reporting the bound name from here on, so the summary matches reality."
+    LAKEBASE_NAME="$bound"
+    export LAKEBASE_NAME
+    # An in-shell export is not enough. Non-secret answers are re-sourced from
+    # inputs.env on a later shell or a resumed run, which would resurrect the
+    # requested-but-never-created name in the summary. Persist the truth.
+    firefly_store_input LAKEBASE_NAME "$bound"
+  else
+    ok "Lakebase '$bound' matches the requested name"
+  fi
+}
+
+# Persist a non-secret answer to inputs.env, the file a resumed run re-sources.
+# bootstrap.sh has its own store_input; this is the library equivalent so the
+# runbook and anything sourcing this lib can persist too, instead of the value
+# living only in one shell.
+# firefly_store_inputs [KEY...] — persist the Phase 0 answers, defaulting to every
+# [ASK] row in BOOTSTRAP.md. Guarded by invariant 34 so the list cannot drift.
+#
+# This exists because the runbook only ever said that bootstrap.sh saves answers to
+# ~/.firefly-bootstrap/inputs.env, and showed nothing for anyone working through the
+# phases by hand. A reader therefore had to invent the loop, and what they reached for
+# was `for k in ...; do firefly_store_input "$k" "${!k}"; done` -- bash-only indirect
+# expansion, which raises `bad substitution` under zsh, the macOS default shell. That
+# same hazard had already been documented on read_secret, so leaving the safe form
+# unwritten is what let it recur somewhere new. Offer the loop rather than the trap.
+firefly_store_inputs() {
+  local k
+  # Positional parameters, not `for k in $keys`. zsh does NOT word-split an unquoted
+  # parameter, so that loop ran exactly once with the entire list as a single key name
+  # and stored nothing -- the first version of this helper had that bug, in the very
+  # function written to spare the reader a shell portability trap. `set --` with literal
+  # words and `for k in "$@"` behave identically in bash and zsh.
+  if [ "$#" -eq 0 ]; then
+    set -- DATABRICKS_HOST DB_PROFILE UC_CATALOG UC_SCHEMA \
+           SEED_SAMPLE_DATA GENIE_SPACE_IDS CREATE_GENIE_SPACE GRANT_GUEST_SPACE_ACCESS \
+           AGENT_APP_NAME DATABRICKS_ACCOUNT_ID LAKEBASE_NAME NEON_PROJECT_NAME \
+           VERCEL_TEAM VERCEL_PROJECT REPO_DIR
+  fi
+  for k in "$@"; do
+    # `eval` deliberately, NOT ${!k}: portable to bash and zsh alike. Unset keys store
+    # as empty rather than erroring, so a partially answered Phase 0 still persists.
+    eval "firefly_store_input \"\$k\" \"\${$k-}\""
+  done
+  ok "Phase 0 answers → ${INPUTS_DIR:-$HOME/.firefly-bootstrap}/inputs.env"
+}
+
+# firefly_read_input KEY → prints the stored answer, or nothing when absent.
+#
+# The writer existed without a reader, which is why init_state_dir had to inline its own
+# sed to recover REPO_DIR. A phase that persists an answer and a later phase that needs it
+# back should not each invent the parsing.
+firefly_read_input() {                   # firefly_read_input KEY
+  local key="$1" file
+  [ -n "$key" ] || return 1
+  file="${INPUTS_DIR:-$HOME/.firefly-bootstrap}/inputs.env"
+  [ -f "$file" ] || return 1
+  # Last write wins, matching how store_input appends after filtering.
+  sed -nE "s/^${key}=(.*)\$/\\1/p" "$file" | tail -1
+}
+
+firefly_store_input() {                  # firefly_store_input KEY VALUE
+  local key="$1" val="$2" dir file
+  [ -n "$key" ] || return 1
+  dir="${INPUTS_DIR:-$HOME/.firefly-bootstrap}"
+  file="$dir/inputs.env"
+  mkdir -p "$dir" 2>/dev/null || return 1
+  # The dedupe must not hang off grep's exit status. `grep -v` exits 1 when it filters out
+  # EVERY line, which is exactly the case where the file holds only this key -- so the
+  # chained `&& mv` never ran, the original survived, and the append produced a second
+  # copy. Storing the same answer twice therefore duplicated it, and the file grew on every
+  # re-run. Readers that take the last match hid this; a reader taking the first would have
+  # returned a stale value.
+  if [ -f "$file" ]; then
+    grep -v "^${key}=" "$file" > "$file.tmp" 2>/dev/null || :
+    mv "$file.tmp" "$file" 2>/dev/null || :
+  fi
+  printf '%s=%s\n' "$key" "$val" >> "$file"
+}
+
+# Set expectations BEFORE quickstart runs, not after it has surprised you.
+# The create path reads as though it will provision the named instance right up
+# until the post-hoc warning appears; if the app already exists, its binding is
+# going to win and that is knowable in advance.
+firefly_warn_existing_app_wins() {        # firefly_warn_existing_app_wins <app> <profile>
+  local app="$1" prof="$2"
+  [ -n "$app" ] && [ -n "$prof" ] || return 0
+  if databricks apps get "$app" --profile "$prof" >/dev/null 2>&1; then
+    warn "app '$app' already exists, so ITS Lakebase binding will win here."
+    note "--lakebase-create-new will not provision '${LAKEBASE_NAME:-}'; the name is"
+    note "reconciled after quickstart and the summary will show what was bound."
+    # quickstart prints its `bundle deployment bind` suggestion on BOTH paths, and the
+    # first version of this pre-empt only defused the app-absent one -- so on the
+    # app-exists path it still read as an actionable next step. Phase 4's plain deploy
+    # and run work without binding either way.
+    note "quickstart will also suggest \`databricks bundle deployment bind\`. Ignore it:"
+    note "Phase 4's plain \`bundle deploy\` / \`bundle run\` is the documented path."
+  else
+    # The opposite case needs pre-empting too. quickstart.py answers --app-name for
+    # an app that does not exist with
+    #     Could not fetch app details: App with name '<app>' does not exist or is deleted
+    # and then suggests `databricks bundle deployment bind` / `bundle deploy`. On a
+    # first run that reads like a recovery path for an app someone deleted, when the
+    # truth is that nothing is wrong and Phase 4 has not created it yet. Say so
+    # before the message appears rather than leaving the reader to interpret it.
+    note "app '$app' does not exist yet - expected on a first run."
+    note "quickstart will print \"does not exist or is deleted\" and suggest"
+    note "\`bundle deployment bind\`. Ignore both: Phase 4 creates the app. No bind"
+    note "step is needed, and a fresh Lakebase WILL be provisioned as requested."
+  fi
+}
+
+# ─── sha256sum shim (Phase 1: before the uv installer) ───────────────────────
+# The astral.sh uv installer verifies its own download with `sha256sum`, which
+# does not exist on stock macOS — the tool there is `shasum`. So it prints
+#
+#   skipping sha256 checksum verification (it requires the 'sha256sum' command)
+#
+# and installs an UNVERIFIED binary. On a clean VM that is the default path, and
+# the message scrolls past in the middle of a long install. We are fetching an
+# executable over the network; declining to check its integrity is not something
+# to accept silently just because the installer offers to.
+#
+# `shasum -a 256` is byte-identical to `sha256sum` for both hashing and -c check
+# mode (verified), so a two-line shim on PATH restores the installer's own
+# verification rather than working around it.
+firefly_ensure_sha256sum() {
+  command -v sha256sum >/dev/null 2>&1 && return 0
+  if ! command -v shasum >/dev/null 2>&1; then
+    warn "neither sha256sum nor shasum found — installers cannot verify checksums"
+    return 1
+  fi
+  mkdir -p "$HOME/bin" || return 1
+  cat > "$HOME/bin/sha256sum" <<'SHIM'
+#!/bin/sh
+# Shim: stock macOS ships `shasum`, not `sha256sum`. Output and -c behaviour are
+# identical for SHA-256, so installers that require sha256sum can verify their
+# downloads instead of skipping the check.
+exec shasum -a 256 "$@"
+SHIM
+  chmod +x "$HOME/bin/sha256sum"
+  case ":$PATH:" in *":$HOME/bin:"*) ;; *) PATH="$HOME/bin:$PATH"; export PATH ;; esac
+  ok "provided a sha256sum shim so installers can verify their downloads"
+}
+
+# ─── Vercel API context (Phases 8a and 8e) ───────────────────────────────────
+# Sets V_TOKEN / V_ORG / V_PROJ. Both phases need them and 8a used to be the only
+# place they were derived, so running 8e in a fresh shell produced an empty
+# Authorization header — the verify curl failed and reported "production does not
+# serve $APP_ORIGIN" for a deployment that was perfectly fine. Deriving in one
+# reusable place means a new shell cannot change the answer.
+#
+# Token precedence: explicit env first (CI / token-based setups), then the CLI's
+# macOS store, then its XDG location. A hardcoded path is a silent failure for
+# anyone whose Vercel auth lives elsewhere.
+firefly_vercel_context() {               # firefly_vercel_context [repo_dir]
+  local repo="${1:-${REPO_DIR:-$PWD}}" auth
+  V_TOKEN="${VERCEL_TOKEN:-${V_TOKEN:-}}"
+  for auth in "$HOME/Library/Application Support/com.vercel.cli/auth.json" \
+              "$HOME/.local/share/com.vercel.cli/auth.json"; do
+    [ -n "$V_TOKEN" ] && break
+    [ -f "$auth" ] || continue
+    V_TOKEN=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("token",""))' "$auth" 2>/dev/null || echo "")
+  done
+  [ -n "$V_TOKEN" ] || warn "no Vercel token found — project API calls will fail"
+
+  if [ -f "$repo/.vercel/project.json" ]; then
+    V_ORG=$(python3 -c "import json;print(json.load(open('$repo/.vercel/project.json'))['orgId'])" 2>/dev/null || echo "")
+    V_PROJ=$(python3 -c "import json;print(json.load(open('$repo/.vercel/project.json'))['projectId'])" 2>/dev/null || echo "")
+  else
+    warn "$repo/.vercel/project.json not found — run Phase 8a (vercel link) first"
+  fi
+  export V_TOKEN V_ORG V_PROJ
+}
+
+# Convenience: the single scalar a lot of Phase 6c checks want (COUNT(*), etc).
+firefly_sql_scalar() {                   # firefly_sql_scalar <warehouse_id> <sql> [profile]
+  firefly_sql "$1" "$2" "${3:-${DB_PROFILE:-}}" | head -1 | cut -f1
+}

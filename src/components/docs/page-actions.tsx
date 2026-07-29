@@ -16,10 +16,17 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { toast } from "sonner";
+import { editUrl, type RepoRef } from "@/lib/repo-links";
 
-// GitHub repository configuration
-const GITHUB_REPO = "databrickslabs/firefly";
-const GITHUB_BRANCH = "main";
+// GitHub repository configuration. The ref stays local to this component on purpose: the
+// docs "edit this page" links target the branch the docs are published from, which is not
+// necessarily the branch other components link to. Only the URL SHAPE is shared, via
+// src/lib/repo-links.ts.
+const DOCS_REPO: RepoRef = {
+  owner: "databrickslabs",
+  repo: "firefly",
+  branch: "main",
+};
 const GITHUB_DOCS_PATH = "src/app"; // Base path for docs in the repo
 
 // Chat services configuration for "Open in chat" popover
@@ -101,7 +108,7 @@ export function PageActions() {
   const getGitHubEditUrl = () => {
     // Convert URL path to file path (e.g., /docs/architecture/overview -> docs/architecture/overview/page.tsx)
     const filePath = `${GITHUB_DOCS_PATH}${pathname}/page.tsx`;
-    return `https://github.com/${GITHUB_REPO}/edit/${GITHUB_BRANCH}/${filePath}`;
+    return editUrl(DOCS_REPO, filePath);
   };
 
   const handleEditOnGitHub = () => {
