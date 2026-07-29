@@ -1435,8 +1435,48 @@ if [[ -n "$DEFER_LINE" && -n "$WARN_LINE" && "$DEFER_LINE" -gt "$WARN_LINE" ]]; 
   GRANT_DEFER_BAD+=("$SETUP: the refusal warning (line $WARN_LINE) is reached before the deferral check (line $DEFER_LINE)")
 fi
 
+# Same defect, two more places a run found it: the grants-only call passed --seed no and was
+# told "seeding declined at Phase 0" when Phase 0 said yes and Phase 3f had already seeded;
+# and every message hardcoded "Phase 6c", so a reader in Phase 3f was pointed at a phase they
+# had not reached. Both are a flag meaning "not here" being read back as a decision.
+# Both of these were first written as a grep over the whole file, and both were vacuous: the
+# dry-run banner mentions --seed skip, so the grep passed no matter what the real call did,
+# and PHASE_LABEL appears in its own comment. Sabotaging each one changed nothing and the
+# guard still said OK. Scope them to the invocation and the message.
+SEED_SKIP_SCAN="$(python3 - <<'PYCHK'
+import re
+bad = []
+for f in ('BOOTSTRAP.md', 'scripts/bootstrap.sh'):
+    text = open(f, errors='replace').read()
+    for m in re.finditer(r'genie-data-setup\.sh((?:[^\n]*\\\n)*[^\n]*)', text):
+        args = m.group(1)
+        line_start = text.rfind('\n', 0, m.start()) + 1
+        prefix = text[line_start:m.start()]
+        if re.search(r'\b(note|warn|echo|printf|step|ok)\b\s', prefix) or '[DRY-RUN]' in prefix:
+            continue                      # a banner naming the command is not the command
+        if not re.search(r'--create-space\s+"?no"?', args):
+            continue                      # only the grants-only call is in scope
+        if re.search(r'--seed\s+"?no"?', args):
+            line = text[:m.start()].count('\n') + 1
+            bad.append(f'{f}:{line} grants-only call passes --seed no, so "not this phase" '
+                       f'is reported to the operator as "you declined seeding"')
+print('\n'.join(bad))
+PYCHK
+)"
+[[ -n "$SEED_SKIP_SCAN" ]] && while IFS= read -r l; do
+  [[ -n "$l" ]] && GRANT_DEFER_BAD+=("$l")
+done <<<"$SEED_SKIP_SCAN"
+
+# the warehouse line is the one a run actually complained about: it must carry the label
+grep -qE 'note "Phase \$\{?PHASE_LABEL' "$SETUP" \
+  || GRANT_DEFER_BAD+=("$SETUP: the warehouse message does not use PHASE_LABEL, so one caller sends its readers to the other caller phase")
+for f in BOOTSTRAP.md scripts/bootstrap.sh; do
+  grep -q -- '--phase 3f' "$f" \
+    || GRANT_DEFER_BAD+=("$f: Phase 3f does not tell the script which phase is running")
+done
+
 if [[ "${#GRANT_DEFER_BAD[@]}" -eq 0 ]]; then
-  pass "a phase that cannot grant yet says so, instead of reporting the answer as refused."
+  pass "a phase that cannot act yet says so, instead of reporting the answer as refused."
 else
   for b in "${GRANT_DEFER_BAD[@]}"; do bad "$b"; done
 fi

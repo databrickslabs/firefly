@@ -45,6 +45,10 @@ space_title_for() { printf 'Firefly Genie Agent — %s.%s' "$1" "$2"; }
 
 CATALOG="" SCHEMA="" PROFILE="" WAREHOUSE_ID=""
 SEED="yes" SPACE_IDS="" CREATE_SPACE="yes" GRANT_GUEST="no"
+# This script is called by two phases. Hardcoding one of their names meant a reader in
+# Phase 3f was told about "Phase 6c using warehouse ..." and sent looking for a phase they
+# had not reached. The caller says who it is.
+PHASE_LABEL="6c"
 GUEST_SP="" AGENT_SP=""
 
 usage() {
@@ -55,7 +59,11 @@ usage: genie-data-setup.sh --catalog C --schema S --profile P [options]
   --schema S           UC schema within that catalog
   --profile P          Databricks CLI profile
   --warehouse-id W     SQL warehouse (default: first available)
-  --seed yes|no        Seed sample data when the schema is empty (default yes)
+  --phase LABEL        Phase name to use in messages (default 6c), so a reader is not
+                       pointed at a phase they are not in.
+  --seed yes|no|skip   Seed sample data when the schema is empty (default yes). "skip"
+                       means seeding is not this call's concern, as distinct from "no",
+                       which is a decision not to seed and is reported as one.
   --space-ids a,b      Use these existing Genie space ids instead of creating one
   --create-space y|n   Create a space when --space-ids is empty (default yes)
   --defer-grants       The SPs do not exist yet, so make no grants and say where
@@ -77,6 +85,7 @@ while [ $# -gt 0 ]; do
     --schema) SCHEMA="${2:-}"; shift 2 ;;
     --profile) PROFILE="${2:-}"; shift 2 ;;
     --warehouse-id) WAREHOUSE_ID="${2:-}"; shift 2 ;;
+    --phase) PHASE_LABEL="${2:-6c}"; shift 2 ;;
     --seed) SEED="${2:-yes}"; shift 2 ;;
     --space-ids) SPACE_IDS="${2:-}"; shift 2 ;;
     --create-space) CREATE_SPACE="${2:-yes}"; shift 2 ;;
@@ -93,7 +102,7 @@ done
 
 # Normalize the yes/no flags once; "None"/"none" is how Phase 0 spells "unset".
 yn() { case "$(printf '%s' "${1:-}" | tr 'A-Z' 'a-z')" in y|yes|true|1) echo yes ;; *) echo no ;; esac; }
-SEED="$(yn "$SEED")"; CREATE_SPACE="$(yn "$CREATE_SPACE")"; GRANT_GUEST="$(yn "$GRANT_GUEST")"
+[ "$SEED" = "skip" ] || SEED="$(yn "$SEED")"; CREATE_SPACE="$(yn "$CREATE_SPACE")"; GRANT_GUEST="$(yn "$GRANT_GUEST")"
 case "$(printf '%s' "$SPACE_IDS" | tr 'A-Z' 'a-z')" in none|null|"") SPACE_IDS="" ;; esac
 
 dbx() { databricks "$@" --profile "$PROFILE"; }
@@ -112,7 +121,7 @@ for want in ("RUNNING", None):
 print("")' 2>/dev/null)"
 fi
 [ -n "$WAREHOUSE_ID" ] || { fail "no SQL warehouse available — Genie cannot run queries without one"; exit 1; }
-note "Phase 6c using warehouse $WAREHOUSE_ID"
+note "Phase $PHASE_LABEL using warehouse $WAREHOUSE_ID"
 
 sql()        { firefly_sql "$WAREHOUSE_ID" "$1" "$PROFILE"; }
 sql_scalar() { firefly_sql_scalar "$WAREHOUSE_ID" "$1" "$PROFILE"; }
@@ -132,8 +141,16 @@ EXISTING="$(existing_tables)"
 EXISTING_COUNT="$(printf '%s\n' "$EXISTING" | sed '/^$/d' | wc -l | tr -d ' ')"
 
 if [ "$SEED" != "yes" ]; then
-  SEED_STATUS="declined"
-  note "seeding declined at Phase 0 — leaving ${CATALOG}.${SCHEMA} as-is"
+  if [ "$SEED" = "skip" ]; then
+    # The grants-only call passes --seed skip. It previously passed --seed no, and the run
+    # then told the operator that seeding was "declined at Phase 0" when Phase 0 had in fact
+    # answered yes and Phase 3f had already seeded 16 tables. Same defect as the grant
+    # deferral above: a flag meaning "not here" was read back as a decision.
+    SEED_STATUS="not-this-phase"
+  else
+    SEED_STATUS="declined"
+    note "seeding declined at Phase 0 — leaving ${CATALOG}.${SCHEMA} as-is"
+  fi
 else
   # Probe the source, keeping stderr. The previous version discarded it with
   # 2>/dev/null and reported one message — "not readable from this workspace" —

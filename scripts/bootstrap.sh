@@ -711,6 +711,7 @@ if [[ "$DRY_RUN" == "true" ]]; then
   GENIE_MCP_MODE="one"; GENIE_SPACE_ID=""
 else
   GENIE_SETUP_OUT="$(bash "$BOOTSTRAP_SCRIPT_DIR/genie-data-setup.sh" \
+    --phase 3f \
     --catalog "$UC_CATALOG" --schema "$UC_SCHEMA" --profile "$DB_PROFILE" \
     --warehouse-id "${WAREHOUSE_ID:-}" \
     --seed "${SEED_SAMPLE_DATA:-yes}" \
@@ -971,12 +972,13 @@ if [[ "${GENIE_MCP_MODE:-one}" != "space" || -z "${GENIE_SPACE_ID:-}" ]]; then
   note "Guest users will reach the app and be unable to ask data questions."
   note "Re-run Phase 3f if you expected a space to exist."
 elif [[ "$DRY_RUN" == "true" ]]; then
-  note "[DRY-RUN] genie-data-setup.sh --seed no --create-space no --space-ids $GENIE_SPACE_ID"
+  note "[DRY-RUN] genie-data-setup.sh --seed skip --create-space no --space-ids $GENIE_SPACE_ID"
 else
   GENIE_GRANT_OUT="$(bash "$BOOTSTRAP_SCRIPT_DIR/genie-data-setup.sh" \
     --catalog "$UC_CATALOG" --schema "$UC_SCHEMA" --profile "$DB_PROFILE" \
     --warehouse-id "${WAREHOUSE_ID:-}" \
-    --seed no --create-space no \
+    --phase 6c \
+    --seed skip --create-space no \
     --space-ids "$GENIE_SPACE_ID" \
     --grant-guest "${GRANT_GUEST_SPACE_ACCESS:-yes}" \
     --guest-sp "${GUEST_SP_CLIENT_ID:-}" \

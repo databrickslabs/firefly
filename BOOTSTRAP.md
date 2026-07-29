@@ -478,6 +478,7 @@ firefly_require WAREHOUSE_ID || return 2>/dev/null || exit 1
 # principals do not exist yet. Phase 6 and 6b grant on the space once they do, which is
 # why this call and that one are separate rather than one step that half-works.
 eval "$(bash scripts/genie-data-setup.sh \
+  --phase 3f \
   --catalog "$UC_CATALOG" --schema "$UC_SCHEMA" --profile "$DB_PROFILE" \
   --warehouse-id "$WAREHOUSE_ID" \
   --seed "${SEED_SAMPLE_DATA:-yes}" \
@@ -780,7 +781,8 @@ else
   eval "$(bash scripts/genie-data-setup.sh \
     --catalog "$UC_CATALOG" --schema "$UC_SCHEMA" --profile "$DB_PROFILE" \
     --warehouse-id "$WAREHOUSE_ID" \
-    --seed no --create-space no \
+    --phase 6c \
+    --seed skip --create-space no \
     --space-ids "$GENIE_SPACE_ID" \
     --grant-guest "${GRANT_GUEST_SPACE_ACCESS:-yes}" \
     --guest-sp "${GUEST_SP_CLIENT_ID:-}" \
@@ -1242,6 +1244,10 @@ already has the app loaded can consume the link before you read it.
 Apply this section **only if `$UC_CATALOG.$UC_SCHEMA` is still empty after Phase 6c** —
 i.e. `SEED_STATUS` was `declined` (you answered `no` to `SEED_SAMPLE_DATA`),
 `source-denied` (no `SELECT` on the sample source), or `source-error`.
+
+> `SEED_STATUS=not-this-phase` is **not** one of them. Seeding belongs to Phase 3f;
+> Phase 6c only grants, so it reports that seeding was not its job rather than
+> claiming you declined it. Read Phase 3f's own `seed=` line for the real outcome.
 Bootstrap can complete successfully — app, guest login, and memory may all work —
 but Genie will not answer data questions until queryable tables exist in a schema
 the agent SP can read.
