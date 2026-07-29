@@ -1047,6 +1047,14 @@ vercel project protection disable "$VERCEL_PROJECT" --sso --scope "$VERCEL_TEAM"
 # another Vercel account, and the alias call hard-fails with "already in use".
 vercel deploy --prod --scope "$VERCEL_TEAM"
 
+# The CLI's own success text points the wrong way here, and it is not wrong so much as
+# misread-by-design: after --prod it prints a PER-DEPLOYMENT host labelled "Production"
+# (firefly-genie-h5ef9wq49-<team>.vercel.app) and offers "Promote to production" as the next
+# step. Both suggest the deploy is not live yet at the origin you want. It is: the serving
+# origin is the one Phase 8a-2 read from the domains API, and 8e re-checks it. Do NOT follow
+# the promote hint or copy that host anywhere -- a run reported being sent toward a second,
+# unnecessary deploy by it.
+
 # APP_ORIGIN comes from Phase 8b, so a fresh shell arrives without it and this used to
 # store PREVIEW_URL="" — after which Phase 9's guest-login curls returned HTTP 000 with
 # nothing to explain why. Recover it from state.env before trusting the shell.
