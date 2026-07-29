@@ -1512,6 +1512,36 @@ else
   for b in "${RESTORE_BAD[@]}"; do bad "$b"; done
 fi
 
+# ---------------------------------------------------------------------------
+# invariant 46: a grant loop must not report only its successes.
+#
+# grant_table_select sent every GRANT to /dev/null and counted the ones that returned 0, so it
+# printed "granted SELECT on 15 table(s)" after Phase 3f had seeded 16 -- and a table the guest
+# cannot read was indistinguishable from one it can. A run reported the discrepancy, which is
+# the only reason anyone noticed. Failures must be named, and a coverage gap between the schema
+# and the Genie space must be stated rather than left as a number the reader has to reconcile.
+GRANT_SILENT_BAD=()
+GTS="$(awk '/^grant_table_select\(\)/{f=1} f{print} f&&/^}/{exit}' scripts/genie-data-setup.sh)"
+if [[ -z "$GTS" ]]; then
+  GRANT_SILENT_BAD+=("scripts/genie-data-setup.sh: grant_table_select not found - this guard measures nothing")
+else
+  GTS_CODE="$(sed -E 's/[[:space:]]*#.*$//' <<<"$GTS")"
+  grep -qE 'failed=\$\(\(failed \+ 1\)\)' <<<"$GTS_CODE" \
+    || GRANT_SILENT_BAD+=("grant_table_select does not count failures, so it can only report successes")
+  grep -qE 'FAILED' <<<"$GTS_CODE" \
+    || GRANT_SILENT_BAD+=("grant_table_select never reports a failed grant, so an unreadable table looks readable")
+  grep -q 'first_err' <<<"$GTS_CODE" \
+    || GRANT_SILENT_BAD+=("grant_table_select discards the grant error, leaving no way to know why one failed")
+  grep -q 'existing_tables' <<<"$GTS_CODE" \
+    || GRANT_SILENT_BAD+=("grant_table_select never compares the space coverage with the schema, so a seeded-but-uncovered table is silent")
+fi
+
+if [[ "${#GRANT_SILENT_BAD[@]}" -eq 0 ]]; then
+  pass "a grant loop names its failures and states any gap between the schema and the space."
+else
+  for b in "${GRANT_SILENT_BAD[@]}"; do bad "$b"; done
+fi
+
 echo
 if [[ "$FAILED" -eq 0 ]]; then
   echo "All runbook invariants hold."

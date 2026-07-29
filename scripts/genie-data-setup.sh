@@ -393,7 +393,8 @@ for t in (ss.get("data_sources") or {}).get("tables") or []:
 grant_table_select() {                   # grant_table_select <sp_client_id> <space_id...>
   local sp="$1"; shift
   [ -n "$sp" ] || return 0
-  local sid ident cat sch seen="" n=0
+  local sid ident cat sch seen="" n=0 failed=0 first_err="" _gt_err
+  local _covered _present _missing
   for sid in "$@"; do
     [ -n "$sid" ] || continue
     for ident in $(space_table_identifiers "$sid"); do
@@ -407,10 +408,33 @@ grant_table_select() {                   # grant_table_select <sp_client_id> <sp
           seen="$seen $cat.$sch"
           ;;
       esac
-      sql "GRANT SELECT ON TABLE $ident TO \`$sp\`" >/dev/null 2>&1 && n=$((n + 1))
+      _gt_err="$(sql "GRANT SELECT ON TABLE $ident TO \`$sp\`" 2>&1 >/dev/null)" \
+        && n=$((n + 1)) \
+        || { failed=$((failed + 1))
+             [ -z "$first_err" ] && first_err="$ident: $(printf '%s' "$_gt_err" | head -1)"; }
     done
   done
   [ "$n" -gt 0 ] && ok "granted SELECT on $n table(s) to $sp"
+  # Failures used to go to /dev/null and only the success count was printed, so a table the
+  # guest cannot read was indistinguishable from one it can. Say so.
+  if [ "$failed" -gt 0 ]; then
+    warn "$failed SELECT grant(s) FAILED for $sp - those tables will refuse guest queries"
+    warn "  first failure: $first_err"
+  fi
+
+  # A count that disagrees with what was seeded is the reader's problem to explain unless we
+  # explain it. A run seeded 16 tables and this reported 15 with no reason given; whether the
+  # 16th belongs in the space is a real question, and it cannot be asked if nobody says which
+  # table is absent. Compare the space's coverage against the schema and name the difference.
+  _covered="$(for sid in "$@"; do [ -n "$sid" ] && space_table_identifiers "$sid"; done \
+    | sed -E 's/.*\.//' | sort -u)"
+  _present="$(existing_tables | sort -u)"
+  _missing="$(comm -23 <(printf '%s\n' "$_present") <(printf '%s\n' "$_covered") 2>/dev/null)"
+  if [ -n "$_missing" ]; then
+    warn "these tables exist in ${CATALOG}.${SCHEMA} but are NOT in the Genie space, so"
+    warn "  Genie cannot query them and they get no grant:"
+    printf '%s\n' "$_missing" | sed 's/^/    - /' >&2
+  fi
 }
 
 for sid in $RESOLVED_IDS; do
