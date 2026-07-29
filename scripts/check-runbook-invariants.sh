@@ -1368,6 +1368,79 @@ else
   bad "these hand-build a GitHub URL and can drift from their own constant:$URLGEN_BAD"
 fi
 
+# ---------------------------------------------------------------------------
+# invariant 44: a phase that CANNOT grant must not report that grants were REFUSED.
+#
+# Phase 3f creates the Genie space before any service principal exists, so it cannot grant
+# and deliberately passes no --grant-guest. A missing flag defaulted to no, and the run told
+# an operator who had answered yes that the guest SP would get NO access to the space --
+# while Phase 6c went on to grant it. Technically the flag was absent; what the reader took
+# from it was that their Phase 0 answer had been discarded. A run reported it as a gap.
+#
+# So: 3f must pass --defer-grants, and the script must treat deferral as its own state rather
+# than folding it into refusal.
+GRANT_DEFER_BAD=()
+
+# Anchored on the invocation, not on a phase range. "Phase 4" is mentioned in prose and in
+# comments well before Phase 3f's heading, so /Phase 3f/,/Phase 4/ collapsed to a three-line
+# window and reported a file that did carry the flag -- the guard failing for its own reason
+# rather than the runbook's, which is worse than not having it.
+#
+# The rule that actually matters: the invocation that CREATES the space (it passes
+# --create-space with the Phase 0 answer) runs before the SPs exist, so it must defer. The
+# grants invocation in 6c passes --create-space no and must NOT defer.
+DEFER_SCAN="$(python3 - <<'PYCHK'
+import re
+bad = []
+for f in ('BOOTSTRAP.md', 'scripts/bootstrap.sh'):
+    text = open(f, errors='replace').read()
+    # each genie-data-setup.sh call, including its backslash-continued argument lines
+    for m in re.finditer(r'genie-data-setup\.sh((?:[^\n]*\\\n)*[^\n]*)', text):
+        args = m.group(1)
+        # A dry-run banner that NAMES the command is not the command. Counting
+        # note "[DRY-RUN] genie-data-setup.sh --create-space ..." as a call site made the
+        # guard demand a flag inside a string literal.
+        line_start = text.rfind('\n', 0, m.start()) + 1
+        prefix = text[line_start:m.start()]
+        if re.search(r'\b(note|warn|echo|printf|step|ok)\b\s', prefix) or '[DRY-RUN]' in prefix:
+            continue
+        if '--create-space' not in args:
+            continue                      # not the creating call
+        if re.search(r'--create-space\s+(no|"no")', args):
+            continue                      # explicitly not creating
+        # Either answer is fine; SILENCE is not. A call made before the SPs exist defers;
+        # a recovery call made after they exist grants. What must never happen is creating a
+        # space with neither flag, where an absent --grant-guest is indistinguishable from
+        # a deliberate no from the operator -- which is how a documented recovery command
+        # came to drop guest access without saying so. (No apostrophes here: a lone one
+        # inside a heredoc nested in $( ) unbalances the bash 3.2 substitution scanner.)
+        if '--defer-grants' not in args and '--grant-guest' not in args:
+            line = text[:m.start()].count('\n') + 1
+            bad.append(f'{f}:{line} creates the space with neither --defer-grants nor '
+                       f'--grant-guest, so an absent flag reads as a refusal')
+print('\n'.join(bad))
+PYCHK
+)"
+[[ -n "$DEFER_SCAN" ]] && while IFS= read -r l; do
+  [[ -n "$l" ]] && GRANT_DEFER_BAD+=("$l")
+done <<<"$DEFER_SCAN"
+
+# the script must branch on deferral BEFORE the refusal warning, and must not grant when deferring
+SETUP=scripts/genie-data-setup.sh
+grep -q 'DEFER_GRANTS' "$SETUP" \
+  || GRANT_DEFER_BAD+=("$SETUP: no DEFER_GRANTS state, so 'cannot grant yet' and 'told not to grant' are the same thing")
+DEFER_LINE="$(grep -n 'DEFER_GRANTS:-no' "$SETUP" | head -1 | cut -d: -f1)"
+WARN_LINE="$(grep -n 'GRANT_GUEST_SPACE_ACCESS=no, so the guest SP gets NO access' "$SETUP" | head -1 | cut -d: -f1)"
+if [[ -n "$DEFER_LINE" && -n "$WARN_LINE" && "$DEFER_LINE" -gt "$WARN_LINE" ]]; then
+  GRANT_DEFER_BAD+=("$SETUP: the refusal warning (line $WARN_LINE) is reached before the deferral check (line $DEFER_LINE)")
+fi
+
+if [[ "${#GRANT_DEFER_BAD[@]}" -eq 0 ]]; then
+  pass "a phase that cannot grant yet says so, instead of reporting the answer as refused."
+else
+  for b in "${GRANT_DEFER_BAD[@]}"; do bad "$b"; done
+fi
+
 echo
 if [[ "$FAILED" -eq 0 ]]; then
   echo "All runbook invariants hold."

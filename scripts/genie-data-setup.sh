@@ -58,6 +58,9 @@ usage: genie-data-setup.sh --catalog C --schema S --profile P [options]
   --seed yes|no        Seed sample data when the schema is empty (default yes)
   --space-ids a,b      Use these existing Genie space ids instead of creating one
   --create-space y|n   Create a space when --space-ids is empty (default yes)
+  --defer-grants       The SPs do not exist yet, so make no grants and say where
+                       they happen. Distinct from --grant-guest no, which is a
+                       decision to withhold access.
   --grant-guest y|n    Grant the guest SP CAN_RUN on the space(s) + SELECT on
                        the tables they reference (default no)
   --guest-sp ID        Guest service principal application (client) id
@@ -77,6 +80,7 @@ while [ $# -gt 0 ]; do
     --seed) SEED="${2:-yes}"; shift 2 ;;
     --space-ids) SPACE_IDS="${2:-}"; shift 2 ;;
     --create-space) CREATE_SPACE="${2:-yes}"; shift 2 ;;
+    --defer-grants) DEFER_GRANTS=yes; shift ;;
     --grant-guest) GRANT_GUEST="${2:-no}"; shift 2 ;;
     --guest-sp) GUEST_SP="${2:-}"; shift 2 ;;
     --agent-sp) AGENT_SP="${2:-}"; shift 2 ;;
@@ -407,7 +411,20 @@ done
 # path, so the guest flow works by default without anyone's answer being discarded.
 #
 # Saying no is legitimate, and its cost is stated rather than left to be discovered.
-if [ "$GRANT_GUEST" != "yes" ]; then
+# "Not granting now" and "decided not to grant" are different facts, and collapsing them
+# produced exactly the misleading message this comment block warns about. Phase 3f creates
+# the space before any SP exists, so it cannot grant and deliberately passes no --grant-guest;
+# a missing flag defaulted to no, and the run told the operator their yes meant the guest SP
+# would get NO access -- while Phase 6c went on to grant it. The reader is left believing
+# their Phase 0 answer was discarded. Deferral gets its own state and names where it lands.
+if [ "${DEFER_GRANTS:-no}" = "yes" ]; then
+  case "$GENIE_SPACE_SOURCE" in
+    created|reused-ours)
+      note "no grants here: the agent and guest service principals do not exist yet."
+      note "  Phase 6c grants CAN_RUN on space $GENIE_SPACE_ID and SELECT on its tables,"
+      note "  honouring GRANT_GUEST_SPACE_ACCESS." ;;
+  esac
+elif [ "$GRANT_GUEST" != "yes" ]; then
   case "$GENIE_SPACE_SOURCE" in
     created|reused-ours)
       warn "GRANT_GUEST_SPACE_ACCESS=no, so the guest SP gets NO access to space"
@@ -417,7 +434,9 @@ if [ "$GRANT_GUEST" != "yes" ]; then
   esac
 fi
 
-if [ "$GRANT_GUEST" = "yes" ] && [ -n "$GUEST_SP" ]; then
+if [ "${DEFER_GRANTS:-no}" = "yes" ]; then
+  :
+elif [ "$GRANT_GUEST" = "yes" ] && [ -n "$GUEST_SP" ]; then
   for sid in $RESOLVED_IDS; do grant_space_run "$sid" "$GUEST_SP"; done
   # shellcheck disable=SC2086
   grant_table_select "$GUEST_SP" $RESOLVED_IDS

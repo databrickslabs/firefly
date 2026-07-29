@@ -482,6 +482,7 @@ eval "$(bash scripts/genie-data-setup.sh \
   --warehouse-id "$WAREHOUSE_ID" \
   --seed "${SEED_SAMPLE_DATA:-yes}" \
   --space-ids "${GENIE_SPACE_IDS:-None}" \
+  --defer-grants \
   --create-space "${CREATE_GENIE_SPACE:-yes}")"
 
 echo "seed=$SEED_STATUS tables=$SEED_TABLE_COUNT mode=$GENIE_MCP_MODE space=$GENIE_SPACE_ID"
@@ -1254,7 +1255,10 @@ To seed after the fact, re-run just Phase 6c's script; it is idempotent:
 ```bash
 cd "$REPO_DIR" && bash scripts/genie-data-setup.sh \
   --catalog "$UC_CATALOG" --schema "$UC_SCHEMA" --profile "$DB_PROFILE" \
-  --seed yes --create-space yes --agent-sp "$SP_CLIENT_ID"
+  --seed yes --create-space yes \
+  --agent-sp "$SP_CLIENT_ID" \
+  --guest-sp "${GUEST_SP_CLIENT_ID:-}" \
+  --grant-guest "${GRANT_GUEST_SPACE_ACCESS:-yes}"
 ```
 
 **Recommended next steps for the user:**

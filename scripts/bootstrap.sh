@@ -715,6 +715,7 @@ else
     --warehouse-id "${WAREHOUSE_ID:-}" \
     --seed "${SEED_SAMPLE_DATA:-yes}" \
     --space-ids "${GENIE_SPACE_IDS:-}" \
+    --defer-grants \
     --create-space "${CREATE_GENIE_SPACE:-yes}")" \
     || warn "Phase 3f setup reported a problem (continuing)"
   eval "$GENIE_SETUP_OUT"
