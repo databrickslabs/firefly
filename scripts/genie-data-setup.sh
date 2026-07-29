@@ -322,7 +322,17 @@ elif [ "$CREATE_SPACE" = "yes" ]; then
   while : ; do
     _url="/api/2.0/genie/spaces?page_size=100"
     [ -n "$_page_token" ] && _url="$_url&page_token=$_page_token"
-    if ! dbx api get "$_url" >>"$SPACES_ALL" 2>"$SPACES_ERR"; then
+    # COMPACTED to one line per page before appending. `databricks api get` pretty-prints, and
+    # the reader below parses line by line, so appending raw output gave it a stream of
+    # fragments -- every json.loads failed, every page counted zero, and the lookup reported
+    # "Genie spaces visible: 0" on a workspace holding several. I introduced that when adding
+    # pagination: the version before it piped the whole response into json.load, which does not
+    # care about newlines. The symptom looked like an API returning nothing, which is why I
+    # spent two commits explaining an empty list that was never empty.
+    if ! dbx api get "$_url" 2>"$SPACES_ERR" \
+         | python3 -c 'import sys,json
+try: sys.stdout.write(json.dumps(json.load(sys.stdin)) + "\n")
+except Exception: sys.exit(3)' >>"$SPACES_ALL"; then
       SPACES_OK=0
       break
     fi
