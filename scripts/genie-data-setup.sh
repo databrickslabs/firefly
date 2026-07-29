@@ -300,15 +300,80 @@ if [ -n "$SPACE_IDS" ]; then
 elif [ "$CREATE_SPACE" = "yes" ]; then
   WANT_TITLE="$(space_title_for "$CATALOG" "$SCHEMA")"
   # Ours = exact title match AND covers this schema. Anything else is off-limits.
-  MINE="$(dbx api get "/api/2.0/genie/spaces?page_size=100" 2>/dev/null | FF_TITLE="$WANT_TITLE" python3 -c 'import sys,json,os
-want = os.environ["FF_TITLE"]
-try: d = json.load(sys.stdin) or {}
+  #
+  # Three defects lived in the previous version of this lookup and they compounded:
+  #
+  #  1. The list call sent stderr to /dev/null and its parser returned {} on any failure, so
+  #     "the lookup failed" and "no such space exists" became the same value -- and the else
+  #     branch on that value CREATES. One hiccup in one API call silently produced an extra
+  #     space, with the evidence discarded by the same line that caused it.
+  #  2. It took the first title match and broke, so once two spaces shared a title, which one
+  #     got reused was whatever order the API returned, and duplicates could not be detected.
+  #  3. It read one page and never followed next_page_token, so correctness depended on a
+  #     space count nobody was watching.
+  #
+  # Now the call is checked, an inconclusive lookup REFUSES to create, every page is read, and
+  # all matches are counted so duplicates are stated rather than silently arbitrated.
+  SPACES_ERR="$(mktemp -t ffspaces)"
+  SPACES_ALL="$(mktemp -t ffspacesj)"
+  SPACES_OK=1
+  : > "$SPACES_ALL"
+  _page_token=""
+  while : ; do
+    _url="/api/2.0/genie/spaces?page_size=100"
+    [ -n "$_page_token" ] && _url="$_url&page_token=$_page_token"
+    if ! dbx api get "$_url" >>"$SPACES_ALL" 2>"$SPACES_ERR"; then
+      SPACES_OK=0
+      break
+    fi
+    _page_token="$(python3 -c 'import sys,json
+try: d = json.loads(open(sys.argv[1]).read().strip().split("\n")[-1]) or {}
 except Exception: d = {}
-for s in d.get("spaces") or []:
-    if (s.get("title") or "") == want:
-        print(s.get("space_id","")); break' 2>/dev/null)"
+print(d.get("next_page_token") or "")' "$SPACES_ALL" 2>/dev/null)"
+    [ -n "$_page_token" ] || break
+  done
 
-  if [ -n "$MINE" ]; then
+  MINE=""
+  DUPES=0
+  if [ "$SPACES_OK" = "1" ]; then
+    _found="$(FF_TITLE="$WANT_TITLE" python3 -c 'import sys,json,os
+want = os.environ["FF_TITLE"]
+ids, seen = [], 0
+for line in open(sys.argv[1]):
+    line = line.strip()
+    if not line:
+        continue
+    try: d = json.loads(line) or {}
+    except Exception: continue
+    for s in d.get("spaces") or []:
+        seen += 1
+        if (s.get("title") or "") == want:
+            ids.append(s.get("space_id") or "")
+ids = sorted(i for i in ids if i)
+print(len(ids))
+print(ids[0] if ids else "")
+print(seen)' "$SPACES_ALL" 2>/dev/null)"
+    DUPES="$(printf '%s' "$_found" | sed -n 1p)"
+    MINE="$(printf '%s' "$_found" | sed -n 2p)"
+    _seen="$(printf '%s' "$_found" | sed -n 3p)"
+    note "Genie spaces visible: ${_seen:-0}; titled for this schema: ${DUPES:-0}"
+  else
+    warn "could not list Genie spaces, so whether one already exists is UNKNOWN:"
+    warn "  $(head -1 "$SPACES_ERR" 2>/dev/null)"
+    warn "  Refusing to create one - creating on an unknown state is how duplicates appear."
+    warn "  Re-run Phase 3f once the API answers, or pass GENIE_SPACE_IDS explicitly."
+  fi
+  rm -f "$SPACES_ERR" "$SPACES_ALL"
+
+  if [ "${DUPES:-0}" -gt 1 ] 2>/dev/null; then
+    warn "$DUPES Genie spaces share the title: $WANT_TITLE"
+    warn "  Reusing $MINE (lowest id, so every run agrees). Delete the extras when convenient;"
+    warn "  a duplicate means an earlier run created one while this lookup could not see it."
+  fi
+
+  if [ "$SPACES_OK" != "1" ]; then
+    GENIE_SPACE_SOURCE="lookup-failed"
+  elif [ -n "$MINE" ]; then
     GENIE_SPACE_ID="$MINE"; GENIE_SPACE_SOURCE="reused-ours"
     ok "reusing the Genie space this bootstrap created earlier ($MINE)"
   else

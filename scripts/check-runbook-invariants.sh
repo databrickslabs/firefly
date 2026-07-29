@@ -1591,6 +1591,42 @@ else
   for b in "${GENIE_TOOLNAME_BAD[@]}"; do bad "$b"; done
 fi
 
+# ---------------------------------------------------------------------------
+# invariant 48: a lookup that CANNOT answer must not fall through to creating the resource.
+#
+# The Genie space lookup listed spaces with stderr sent to /dev/null and a parser that returned
+# {} on any failure, so "the API did not answer" and "no such space exists" were one value --
+# and the branch on that value creates a space. One hiccup produced a second Genie space, and
+# the evidence was destroyed by the same line that caused it. Three runs on one workspace took
+# the count from 2 to 3.
+#
+# Creating on an unknown state is the specific mistake: reuse-or-create must have three
+# outcomes, not two.
+LOOKUP_BAD=()
+GDS=scripts/genie-data-setup.sh
+LOOKUP_BODY="$(awk '/WANT_TITLE="\$\(space_title_for/{f=1} f{print} f&&/GENIE_SPACE_SOURCE="created"/{exit}' "$GDS")"
+if [[ -z "$LOOKUP_BODY" ]]; then
+  LOOKUP_BAD+=("$GDS: could not find the space lookup - this guard is measuring nothing")
+else
+  grep -q 'SPACES_OK' <<<"$LOOKUP_BODY" \
+    || LOOKUP_BAD+=("$GDS: the spaces list result is not checked, so a failed lookup reads as 'none exists' and creates one")
+  grep -qE 'Refusing to create' <<<"$LOOKUP_BODY" \
+    || LOOKUP_BAD+=("$GDS: nothing refuses to create when the lookup could not answer")
+  grep -q 'next_page_token' <<<"$LOOKUP_BODY" \
+    || LOOKUP_BAD+=("$GDS: the spaces list is not paged, so an existing space beyond page 1 is invisible and a duplicate gets created")
+  grep -q 'DUPES' <<<"$LOOKUP_BODY" \
+    || LOOKUP_BAD+=("$GDS: duplicates are not counted, so which space gets reused is whatever the API returned first")
+  # the old shape, verbatim: a discarded-stderr list feeding a parser
+  grep -qE 'genie/spaces[^|]*2>/dev/null[[:space:]]*\|' <<<"$LOOKUP_BODY" \
+    && LOOKUP_BAD+=("$GDS: the spaces list still discards stderr into a parser - the failure becomes an empty result")
+fi
+
+if [[ "${#LOOKUP_BAD[@]}" -eq 0 ]]; then
+  pass "a reuse-or-create lookup refuses to create when it cannot tell, pages, and counts duplicates."
+else
+  for b in "${LOOKUP_BAD[@]}"; do bad "$b"; done
+fi
+
 echo
 if [[ "$FAILED" -eq 0 ]]; then
   echo "All runbook invariants hold."
